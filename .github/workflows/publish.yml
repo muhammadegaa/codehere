@@ -1,0 +1,152 @@
+name: Publish to npm
+
+# T1-D · Publishes the codehere CLI to npm.
+# Triggered by pushing a v* tag (e.g. v0.3.0-rc.1, v0.3.0).
+#
+# Provenance attestation is OFF in this version because the source repo is
+# currently private — npm provenance requires a public source repo (npm needs
+# to be able to link the published tarball back to viewable source). Re-enable
+# `--provenance` + `id-token: write` permission once the repo is public.
+#
+# Required one-time setup before this works:
+#   1. NPM_TOKEN secret: an Automation token from https://www.npmjs.com/settings/<user>/tokens
+#      (Settings → Secrets and variables → Actions → New repository secret).
+#      Token type must be "Automation" (works with the publish flow regardless
+#      of whether provenance is enabled).
+#
+# Tag format: v<semver>. Pre-release tags (rc, beta, alpha) auto-publish under
+# the matching dist-tag (rc.1 → @rc, beta.1 → @beta, etc.) so they don't clobber
+# `@latest` for users on `npm install codehere`.
+#
+# Manual override:
+#   gh workflow run publish.yml -f tag=v0.3.0-rc.1
+# (Use this if you tagged locally + pushed but want to retry the publish step.)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (must already exist on the remote)'
+        required: true
+        type: string
+
+permissions:
+  # `contents: write` is required so softprops/action-gh-release@v2 can create
+  # the GitHub release (auto-attaching the SBOM and generating release notes).
+  # Without it the npm publish succeeds but the GitHub release step 403s.
+  contents: write
+  # id-token: write — re-add when re-enabling --provenance (requires public repo).
+
+jobs:
+  publish:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # When invoked via workflow_dispatch, check out the requested tag instead of HEAD.
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Node 20 + npm registry
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify version matches tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG_VERSION="$INPUT_TAG"
+            TAG_VERSION="${TAG_VERSION#v}"
+          fi
+          echo "package.json version: $PKG_VERSION"
+          echo "tag version:          $TAG_VERSION"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)."
+            echo "::error::Bump agent/package.json before tagging, or retag at the right commit."
+            exit 1
+          fi
+
+      - name: Pre-publish · npm-versions tombstone check
+        # Fail fast with a clearer message than npm publish's E400/E409. Per
+        # `feedback_pretag_npm_check.md` (memory) — v0.2/0.3/0.4/0.5.0-alpha
+        # all tombstoned in the Dec 2025 era. Without this gate, a re-pushed
+        # tag of a tombstoned slot would burn a CI minute, fail at the publish
+        # step, and require a tag-rewrite cycle to recover. With this gate, it
+        # fails in <5 seconds and the dev sees the right next action.
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/pretag-npm-check.sh --quiet
+
+      - name: Determine dist-tag and SBOM filename
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sbom_file=codehere-$VERSION.spdx.json" >> "$GITHUB_OUTPUT"
+          # Pre-release identifiers map to a same-named dist-tag so they don't
+          # clobber @latest. SemVer pre-release is everything after `-`.
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE_ID=$(echo "$VERSION" | sed -E 's/^[^-]+-([a-zA-Z]+).*/\1/')
+            echo "tag=$PRERELEASE_ID" >> "$GITHUB_OUTPUT"
+            echo "Publishing pre-release under dist-tag: $PRERELEASE_ID"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+            echo "Publishing stable under dist-tag: latest"
+          fi
+
+      - name: Generate SBOM
+        run: npm run sbom > ${{ steps.meta.outputs.sbom_file }}
+
+      - name: Publish (no provenance · private repo)
+        run: npm publish --access public --tag ${{ steps.meta.outputs.tag }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Attach SBOM to GitHub release
+        if: github.event_name == 'push'
+        # SHA-pinned on purpose.
+        # Unpinned `@v2` would let a maintainer compromise of the action repo
+        # publish a hostile build to v2; the next codehere tag push would run
+        # that code with NPM_TOKEN access and could publish a malicious package.
+        # SHA below = `softprops/action-gh-release` v2 tag commit as resolved
+        # 2026-05-01 via `gh api repos/softprops/action-gh-release/git/refs/tags/v2`.
+        # Bump deliberately when a new v2.x ships, after reviewing the diff.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: agent/${{ steps.meta.outputs.sbom_file }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+
+      - name: Verify package is live on the registry
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          # Wait a few seconds for the registry to propagate, then verify.
+          for i in 1 2 3 4 5; do
+            sleep 5
+            REGISTRY_VERSION=$(npm view "codehere@$VERSION" version 2>/dev/null || true)
+            if [ "$REGISTRY_VERSION" = "$VERSION" ]; then
+              echo "::notice::codehere@$VERSION is live on the registry"
+              exit 0
+            fi
+            echo "Not yet visible (attempt $i/5)"
+          done
+          echo "::warning::Could not confirm codehere@$VERSION on the registry within 25s — check https://www.npmjs.com/package/codehere/v/$VERSION manually"

@@ -1,0 +1,72 @@
+name: CI
+
+# Runs on every push to every branch, and every PR:
+#   - TypeScript build clean
+#   - Format clean (prettier --check)
+#   - Lint (errors fail)
+#   - Architecture gate: tsc, eslint, and the knip dead-code ratchet
+#   - Full vitest suite
+#   - The false-done eval: 22 recorded agent claims, graded by code
+#
+# Why '**' and not a branch allowlist: a branch you forgot to list is exactly the branch that needs the gate.
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build + Tests (${{ matrix.os }} · node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ['20', '24']
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install (frozen lockfile)
+        run: npm ci
+
+      - name: TypeScript build
+        run: npm run build
+
+      - name: Format check (prettier)
+        run: npm run format:check
+
+      - name: Lint (warnings allowed; errors fail)
+        run: npm run lint -- --max-warnings 100
+
+      - name: Architecture gate (knip ratchet)
+        run: node scripts/knip-gate.mjs
+
+      - name: Vitest, full suite
+        run: npx vitest run --reporter=default
+
+      # The eval re-runs `codehere check` on recorded claims. Without pytest a Python task
+      # grades grey (unmeasured), so install it first.
+      - name: Install pytest for the eval
+        run: python3 -m pip install pytest
+
+      - name: False-done eval
+        run: node eval/false-done.mjs

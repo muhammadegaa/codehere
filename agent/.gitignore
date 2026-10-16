@@ -1,0 +1,74 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Data files
+data/embeddings.sqlite
+data/logs.jsonl
+
+# Task storage
+.codehere/tasks.jsonl
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test files (keep test/ directory structure)
+test/*.js
+test/*.ts
+!test/testfile.js
+
+# Test utilities (not needed in production)
+src/test_*.ts
+src/verify_*.ts
+dist/test_*.js
+dist/verify_*.js
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Test artifacts
+test-fixtures/test-*
+test-fixtures/qa-test-*
+
+# graphify-ts output
+graphify-out/
+
+# Internal documentation (NOT for public)
+agent/docs/PRIORITIZED_BACKLOG.md
+agent/docs/STATUS.md
+agent/docs/RESEARCH.md
+docs/ROADMAP.md
+docs/ARCHITECTURE.md
+agent/agent/docs/**/*
+
+# v0.7 · S2a · test compile artifacts (vitest/tsc emit alongside .ts sources)
+# Source-only in test/ · build emits to dist/ only.
+test/**/*.js
+test/**/*.d.ts
+test/**/*.d.ts.map
+test/**/*.js.map
+!test/testfile.js
+undefined/

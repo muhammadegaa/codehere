@@ -1,0 +1,61 @@
+# codehere
+
+> **Re-runs the tests an AI says passed, and tells you whether they did.**
+> `codehere check` on your machine, or the GitHub Action on every pull request. No account.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](https://github.com/muhammadegaa/codehere/blob/main/LICENSE)
+
+`codehere check` re-runs your project's tests itself and reports the real result, so you do not have to take an agent's "all tests pass" on trust. It detects `npm test`, `node --test`, `pytest`, `go test`, `cargo test` and vitest or jest configs.
+
+## Install
+
+```
+npx codehere check
+```
+
+The npm release is 1.0.1, which has `check` with `--json` and `--proof`. The options `--base` and `--claim` below are in this repository (version 1.0.2) and are not published yet. To use them now, build from source: `cd agent && npm ci && npm run build && node dist/index.js check`.
+
+## The four commands
+
+```
+codehere check                                    # re-run the tests here
+codehere check --base origin/main                 # also read everything this branch changed
+codehere check --claim "<the agent's summary>"    # flag test files it named that do not exist
+codehere check --proof                            # a receipt you can paste into a pull request
+```
+
+`codehere help check` lists the options. `--json` adds a `verdict` (`pass`, `fail`, `unverified` or `skipped`) and the receipt text.
+
+It exits 1 when the tests fail, and also when the tests pass but the change made them check nothing: an assertion swapped for `assert True` or `assert.ok(true)`, a skipped test, an assertion commented out, or a `return` above it.
+
+## GitHub Action
+
+A GitHub Action that posts the receipt on each pull request is in [`action/`](https://github.com/muhammadegaa/codehere/tree/main/action). It runs `npx codehere@<version> check --json --base origin/<base> --claim=<PR body>`, so it needs a published release that includes those options. It is not published to the marketplace.
+
+## What it does not catch, and when it exits 0 without a pass
+
+- **It cannot run the tests.** When the run times out, or no test command is recognized, `check` prints why and exits 0, and `--json` gives the verdict `unverified`. In CI, read the verdict, or set the Action's `fail-on-unverified` input. Do not rely on the exit code alone.
+- **A suite where every test is skipped** reads as a pass.
+- **Weakened tests.** The detector reads Python (`test_*.py`, `*_test.py`), JavaScript and TypeScript (`*.test.*`, `*.spec.*`), Go (`*_test.go`) and PHP (`*Test.php`) test files, and files under `test`, `tests` or `__tests__`. It flags an assertion replaced by an always-true one, a skip marker, a commented-out assertion and an early `return`. It does not flag a deleted assertion, a deleted test or test file, a loosened expectation, or an edited test script. It sees uncommitted changes, and with `--base <ref>` everything since the branch left that ref. A very large diff (a 20 MB addition in testing) turns the scan off without a message.
+- **`--claim`** finds test files named in the summary when they are separated by spaces, quotes, parentheses, commas or semicolons. A name in markdown bold or in `path::test` form is not recognized, and is not reported.
+- **A passing suite with a broken build, and code the tests do not cover.** A receipt says what the test suite showed, not that the software is correct.
+- **Who controls the tests.** `check` runs the project's own test command, so whoever controls that command controls the result. For a pull request from someone you do not trust, a receipt is not evidence. In the Action, use the `pull_request` trigger, not `pull_request_target`.
+
+## What has been measured
+
+- **False-done eval, 22 cases.** 14 false "tests pass" or "all green" claims (6 reconstructed from public posts, 8 planted) and 8 true ones. `codehere check` caught 12 of the 14 false claims, missed 2 (a green suite with a broken build, and green tests with a broken production job), and raised 0 false alarms on the 8 true ones. Result: [`agent/eval/false-done-result.json`](https://github.com/muhammadegaa/codehere/blob/main/agent/eval/false-done-result.json), produced by `node eval/false-done.mjs`. The cases were written to fit the detectors, so this is a small set and not a general rate.
+- **How often agent pull requests carry a failing claim: not measured.** A pre-registered study (S11) had two models label 299 public agent pull requests. They disagreed (Cohen's kappa 0.092), so the study reports no rate. The report, with the method and its limits: [`agent/eval/promise-verification/studies/S11-demand/REPORT.md`](https://github.com/muhammadegaa/codehere/blob/main/agent/eval/promise-verification/studies/S11-demand/REPORT.md).
+
+## Development
+
+```
+cd agent
+npm ci
+npm test            # build, then vitest
+npm run lint
+node eval/false-done.mjs
+```
+
+## License
+
+MIT. See [`LICENSE`](https://github.com/muhammadegaa/codehere/blob/main/LICENSE).

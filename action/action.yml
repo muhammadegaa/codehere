@@ -1,0 +1,87 @@
+name: codehere check
+description: Re-run this pull request's tests in your own CI, flag tests the AI weakened, and post one receipt.
+branding:
+  icon: check-circle
+  color: orange
+
+# Runs entirely on the job's own runner with the job's own token. codehere receives nothing.
+# Needs: actions/checkout with fetch-depth: 0 (the base branch must be in the clone),
+#        Node 20+, and the project's dependencies installed so its tests can run.
+
+inputs:
+  working-directory:
+    description: Directory to run the check in (a monorepo package root).
+    default: '.'
+  test-command:
+    description: Override the detected test command (sets CODEHERE_TEST_CMD; whitespace-split, no shell).
+    required: false
+  version:
+    description: codehere npm version to run. 1.0.2 is the first release with --base and --claim, which this action passes.
+    default: '1.0.2'
+  comment:
+    description: Post or update the receipt as the one comment on the pull request.
+    default: 'true'
+  fail-on-unverified:
+    description: Fail the job when nothing could be verified (runner missing, timeout, no suite).
+    default: 'false'
+  github-token:
+    description: Token used to write the comment.
+    default: ${{ github.token }}
+
+outputs:
+  verdict:
+    description: pass | fail | unverified | skipped
+    value: ${{ steps.run.outputs.verdict }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CODEHERE_TEST_CMD: ${{ inputs.test-command }}
+        CODEHERE_VERSION: ${{ inputs.version }}
+        BASE_REF: ${{ github.base_ref }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Untrusted text: passed through the environment, never interpolated into the script.
+        CLAIM: ${{ github.event.pull_request.body }}
+      run: |
+        args=(check --json)
+        if [ -n "$BASE_REF" ]; then
+          git fetch --no-tags --quiet origin "$BASE_REF" || true
+          args+=(--base "origin/$BASE_REF")
+        fi
+        if [ -n "$CLAIM" ]; then
+          args+=("--claim=$CLAIM")
+        fi
+        # exit code 1 is a finding, not a crash; the verdict comes from the JSON
+        npx --yes "codehere@${CODEHERE_VERSION}" "${args[@]}" \
+          > "$RUNNER_TEMP/codehere-result.json" 2> "$RUNNER_TEMP/codehere-stderr.txt" || true
+        node "$GITHUB_ACTION_PATH/summarize.mjs" \
+          "$RUNNER_TEMP/codehere-result.json" "$RUNNER_TEMP/codehere-stderr.txt" "$RUNNER_TEMP/codehere-receipt.md"
+        cat "$RUNNER_TEMP/codehere-receipt.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - if: ${{ inputs.comment == 'true' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: RECEIPT_FILE="$RUNNER_TEMP/codehere-receipt.md" node "$GITHUB_ACTION_PATH/post-receipt.mjs"
+
+    - shell: bash
+      env:
+        VERDICT: ${{ steps.run.outputs.verdict }}
+        FAIL_ON_UNVERIFIED: ${{ inputs.fail-on-unverified }}
+      run: |
+        if [ "$VERDICT" = "fail" ]; then
+          echo "::error::codehere: the tests failed or a test was weakened. See the receipt."
+          exit 1
+        fi
+        if [ "$VERDICT" = "unverified" ] && [ "$FAIL_ON_UNVERIFIED" = "true" ]; then
+          echo "::error::codehere: nothing could be verified."
+          exit 1
+        fi
+        if [ "$VERDICT" = "unverified" ]; then
+          echo "::warning::codehere: nothing could be verified, so this green job is not a pass. See the receipt."
+        fi

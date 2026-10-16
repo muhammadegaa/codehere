@@ -1,0 +1,2717 @@
+{
+  "seed": 20261014,
+  "window": [
+    "2026-09-01T00:00:00Z",
+    "2026-10-13T23:59:00Z"
+  ],
+  "perAgent": 100,
+  "repoCap": 3,
+  "log": {
+    "attempts": 355,
+    "empty": 42,
+    "capped": 1,
+    "backoffs": 12
+  },
+  "sample": [
+    {
+      "agent": "copilot",
+      "repo": "Harshith-ms-addy/Agent_test-",
+      "number": 3,
+      "created_at": "2026-09-09T10:01:52Z",
+      "minute_total": 4,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "cletusthegoldenone/the-golden1",
+      "number": 50,
+      "created_at": "2026-09-04T05:57:25Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "cjmalloy/jasper-ui",
+      "number": 1544,
+      "created_at": "2026-10-07T21:14:18Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "DSTech-876/PRMSv3",
+      "number": 212,
+      "created_at": "2026-09-08T16:18:14Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "kiche-allan/spiritual-programme",
+      "number": 1,
+      "created_at": "2026-09-14T09:56:48Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "Saleh1967/Alghanem",
+      "number": 50,
+      "created_at": "2026-09-10T03:24:23Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "michaeljwilliams0123/mahoraga",
+      "number": 819,
+      "created_at": "2026-09-27T04:06:41Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "brianray/ai-observability-engineering",
+      "number": 1,
+      "created_at": "2026-09-18T18:16:05Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "comreflex/tcria-09215b00",
+      "number": 85,
+      "created_at": "2026-09-14T07:58:14Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "ksastry1988/AIQATool",
+      "number": 29,
+      "created_at": "2026-09-21T00:39:09Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "astr0n8t/jack",
+      "number": 13,
+      "created_at": "2026-10-13T13:35:42Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "amitesh007/remote_agent",
+      "number": 38,
+      "created_at": "2026-09-04T06:49:12Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "Dojo-1/doubt-the-machine",
+      "number": 77,
+      "created_at": "2026-09-23T05:58:53Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "eyupio/jiggered",
+      "number": 58,
+      "created_at": "2026-10-03T14:58:03Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "Aasim41/StudyQuest",
+      "number": 6,
+      "created_at": "2026-10-04T18:03:50Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "tgptom/cordova-plugin-push",
+      "number": 7,
+      "created_at": "2026-09-22T07:11:18Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "tharu8813/Playlist-Canvas",
+      "number": 9,
+      "created_at": "2026-10-06T04:12:14Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "JuanG-live/matching-engine-automation",
+      "number": 1,
+      "created_at": "2026-09-20T21:38:30Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "githubnext/gh-aw-cao",
+      "number": 14002,
+      "created_at": "2026-09-25T21:27:08Z",
+      "minute_total": 4,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "evagarciapro/outlook-email-skill",
+      "number": 1,
+      "created_at": "2026-10-09T13:56:54Z",
+      "minute_total": 4,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "sebfrie/homeconnect_local_hass",
+      "number": 1,
+      "created_at": "2026-10-07T07:07:33Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "barryhession/chess-puzzle-bot",
+      "number": 8,
+      "created_at": "2026-09-26T13:14:18Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "Dymerz/n8n-nodes-discord-dm",
+      "number": 2,
+      "created_at": "2026-10-06T15:38:55Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "harleycameron-rgb/CLOUDBEAST_burnharness",
+      "number": 36,
+      "created_at": "2026-10-08T07:45:43Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "MassLegalHelp/docassemble-SNAP",
+      "number": 18,
+      "created_at": "2026-09-10T20:53:11Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "microsoft/TypeScript",
+      "number": 64343,
+      "created_at": "2026-09-19T03:03:16Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "stefan-misik/ws2812b-light",
+      "number": 2,
+      "created_at": "2026-09-29T07:40:25Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "2806shreya/youtube-replica-page",
+      "number": 4,
+      "created_at": "2026-10-05T10:42:39Z",
+      "minute_total": 3,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "Hakzai/super-arcade",
+      "number": 1,
+      "created_at": "2026-09-26T12:58:57Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "wuzbak/Unitary-Manifold-",
+      "number": 809,
+      "created_at": "2026-09-03T04:00:11Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "allen-kerber-auto-supply/AllenKerberAutoSupply",
+      "number": 4,
+      "created_at": "2026-09-12T21:35:12Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "StepenkoAnatoli/Research-Kit",
+      "number": 251,
+      "created_at": "2026-10-05T12:21:03Z",
+      "minute_total": 4,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "DominicReneSchu/RFT",
+      "number": 127,
+      "created_at": "2026-09-19T14:54:51Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "JAVA-BT10/wa-gold-rush",
+      "number": 39,
+      "created_at": "2026-09-15T22:39:05Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "ben443/edk2-msm-r8q",
+      "number": 1,
+      "created_at": "2026-10-02T23:59:30Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "maotangqian/RSSHub12",
+      "number": 7,
+      "created_at": "2026-09-06T03:14:56Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "Tonaxel1/WDT",
+      "number": 4,
+      "created_at": "2026-09-07T16:30:41Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "yuzekesu/Library_MemoryTracker",
+      "number": 1,
+      "created_at": "2026-10-04T09:22:53Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "IBEETHAT/deepjudge-legal-search",
+      "number": 4,
+      "created_at": "2026-09-21T08:54:14Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "Ryusei-0429/mlb-run-expectancy-simulator",
+      "number": 1,
+      "created_at": "2026-09-28T14:01:12Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "abla86/workforce-competence-management",
+      "number": 47,
+      "created_at": "2026-09-23T16:33:03Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "c11472/Bharat_Basket_CP_Version1",
+      "number": 1,
+      "created_at": "2026-10-10T14:13:19Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "EeroEternal/xtrace",
+      "number": 9,
+      "created_at": "2026-09-01T08:49:18Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "nextcon-nai-git/nai-gcp",
+      "number": 107,
+      "created_at": "2026-10-13T05:03:32Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "Sanal-Sivakumar/Lclip",
+      "number": 8,
+      "created_at": "2026-09-30T09:15:37Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "ArthurC02/SkillHub",
+      "number": 41,
+      "created_at": "2026-09-27T07:23:06Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "yaraya24/booking-room",
+      "number": 579,
+      "created_at": "2026-09-30T11:33:56Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "biggiebarker8-cloud/tests",
+      "number": 13,
+      "created_at": "2026-09-27T13:49:02Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "yshapkin/experiments_ai_bot",
+      "number": 15,
+      "created_at": "2026-09-21T20:18:54Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "Ahmad633440/cryptoinsight",
+      "number": 69,
+      "created_at": "2026-10-06T17:10:59Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "dseph/PowerShell-EWS-CalendarView.ps1",
+      "number": 1,
+      "created_at": "2026-09-08T16:45:39Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "jxxghp/MoviePilot",
+      "number": 6603,
+      "created_at": "2026-09-07T23:32:11Z",
+      "minute_total": 4,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "ApexG207/Documents",
+      "number": 25,
+      "created_at": "2026-09-29T15:23:43Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "kimx/NexaForge",
+      "number": 75,
+      "created_at": "2026-09-04T06:26:23Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "ganlinlaomu/HaiNei",
+      "number": 149,
+      "created_at": "2026-09-19T23:46:34Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "natoverse/stronger",
+      "number": 415,
+      "created_at": "2026-09-04T00:51:18Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "Tofferioao/flores-amarillas-para-mi-esposa",
+      "number": 2,
+      "created_at": "2026-09-22T00:57:40Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "skystream006/ssMusic_Player",
+      "number": 75,
+      "created_at": "2026-10-01T03:58:19Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "githubnext/gh-aw-cao",
+      "number": 15160,
+      "created_at": "2026-09-30T05:52:37Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "josue198027/ministere-maison-de-lumiere",
+      "number": 1,
+      "created_at": "2026-10-04T21:01:17Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "FernandoFonseca-code/GirlScoutTroop41645Page",
+      "number": 25,
+      "created_at": "2026-09-17T01:44:10Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "pthornos-ux/seguranca-parque-dos-passaros",
+      "number": 8,
+      "created_at": "2026-09-06T00:14:32Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "Tyrrrz/PolyShim",
+      "number": 148,
+      "created_at": "2026-10-03T11:26:09Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "kdeyarmin/intel",
+      "number": 142,
+      "created_at": "2026-10-13T20:16:35Z",
+      "minute_total": 6,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "DominicReneSchu/RFT",
+      "number": 116,
+      "created_at": "2026-09-17T16:06:28Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "marketbul/titanic-ml-collab",
+      "number": 9,
+      "created_at": "2026-10-04T16:49:32Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "LEAGAIZEN/frauddetection",
+      "number": 2,
+      "created_at": "2026-10-06T06:44:22Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "NCronJob-Dev/NCronJob",
+      "number": 379,
+      "created_at": "2026-09-20T10:17:45Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "skystream006/g2_github_copilot",
+      "number": 1,
+      "created_at": "2026-09-04T02:54:44Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "monbasyama/monbas_passive_calculator",
+      "number": 17,
+      "created_at": "2026-10-10T08:56:03Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "dreamcheap2000/Clinical-Medicine",
+      "number": 90,
+      "created_at": "2026-09-26T10:32:09Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "jeffrey82221/pgembed",
+      "number": 4,
+      "created_at": "2026-10-03T10:06:17Z",
+      "minute_total": 4,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "dotnet/sdk",
+      "number": 56144,
+      "created_at": "2026-09-04T22:53:30Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "gorhinstroebel/cozypuz",
+      "number": 5,
+      "created_at": "2026-09-05T00:24:07Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "liushanyong/infinite-grid",
+      "number": 14,
+      "created_at": "2026-10-12T04:02:43Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "naveedausaf/skills-agentic-workflows-that-read-the-room",
+      "number": 13,
+      "created_at": "2026-09-17T11:56:33Z",
+      "minute_total": 4,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "mahinigam/codebase-cartographer-showcase",
+      "number": 1,
+      "created_at": "2026-10-02T11:26:25Z",
+      "minute_total": 4,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "githubnext/gh-aw-cao",
+      "number": 12751,
+      "created_at": "2026-09-18T12:23:43Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "chinmayacm/text-tool",
+      "number": 1,
+      "created_at": "2026-10-02T05:32:13Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "jmb2885m75-cmd/porcini-tracker",
+      "number": 46,
+      "created_at": "2026-10-05T07:15:07Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "johnathanherbert/dashpesagem",
+      "number": 1,
+      "created_at": "2026-09-11T20:33:34Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "Hochfrequenz/fristenkalender_generator",
+      "number": 418,
+      "created_at": "2026-09-21T07:31:57Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "builtDifferentCoder/n8n-automation-agent",
+      "number": 1,
+      "created_at": "2026-10-01T18:56:07Z",
+      "minute_total": 1,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "RFingAdam/lineforge",
+      "number": 35,
+      "created_at": "2026-09-04T05:41:25Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "hlin11207/java-oop-edu",
+      "number": 6,
+      "created_at": "2026-09-20T15:35:57Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "Otisigma/halo-world-global-platform",
+      "number": 223,
+      "created_at": "2026-09-28T12:43:03Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "JustJade2007/github-issue-enhancer",
+      "number": 21,
+      "created_at": "2026-10-03T09:00:53Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "mlivensp/JamTrackGenerator",
+      "number": 2,
+      "created_at": "2026-09-11T01:46:10Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "RES-Planer/SchwammSpiel",
+      "number": 61,
+      "created_at": "2026-09-23T10:24:23Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "dyefim/express-todo",
+      "number": 4,
+      "created_at": "2026-09-21T19:46:45Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "jlevy122112-star/Comply-Quick",
+      "number": 148,
+      "created_at": "2026-09-04T15:57:01Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "Randymanrammer/Global-money-entercper-I-",
+      "number": 2,
+      "created_at": "2026-09-16T06:19:01Z",
+      "minute_total": 2,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "sAI-2025/Swiggy_Customer_Support",
+      "number": 3,
+      "created_at": "2026-09-25T07:45:25Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "lukasz8504-design/wardrobe-manager",
+      "number": 7,
+      "created_at": "2026-09-16T08:08:24Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "microsoft/dstoolkit-text2sql-and-imageprocessing",
+      "number": 198,
+      "created_at": "2026-09-29T09:49:01Z",
+      "minute_total": 1,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "kimbrasil/simple-accordion-wordpress",
+      "number": 5,
+      "created_at": "2026-10-02T09:46:34Z",
+      "minute_total": 3,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "khurram539/Ship-Date-Engine",
+      "number": 18,
+      "created_at": "2026-09-06T20:59:23Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "AceDataCloud/Skills",
+      "number": 1118,
+      "created_at": "2026-09-08T01:59:00Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "copilot",
+      "repo": "AdminCapex/OPENmaat-JGP",
+      "number": 5,
+      "created_at": "2026-09-04T07:55:40Z",
+      "minute_total": 2,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "copilot",
+      "repo": "nvy878zd22-code/2KsGrantFamily",
+      "number": 1,
+      "created_at": "2026-09-09T17:38:20Z",
+      "minute_total": 4,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "codex",
+      "repo": "vllm-project/vllm-ascend",
+      "number": 16862,
+      "created_at": "2026-09-18T06:04:32Z",
+      "minute_total": 20,
+      "state": "open",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "gyarmathypeter96/nextvisionstudio",
+      "number": 7,
+      "created_at": "2026-09-24T13:17:30Z",
+      "minute_total": 28,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "marikol444707-ux/stroyka-app",
+      "number": 321,
+      "created_at": "2026-10-08T21:10:24Z",
+      "minute_total": 46,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Brightwav3/sizel",
+      "number": 2,
+      "created_at": "2026-09-01T22:34:22Z",
+      "minute_total": 19,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "edwardoffc/OCMI",
+      "number": 2,
+      "created_at": "2026-10-11T20:19:50Z",
+      "minute_total": 34,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "averylicious/muon",
+      "number": 242,
+      "created_at": "2026-09-30T14:42:27Z",
+      "minute_total": 31,
+      "state": "open",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "othaldo/denti",
+      "number": 3,
+      "created_at": "2026-10-13T16:43:32Z",
+      "minute_total": 34,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "woowacourse-teams/2026-toadzip",
+      "number": 324,
+      "created_at": "2026-10-07T11:45:01Z",
+      "minute_total": 34,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "sagehou/M365-MCP-Server",
+      "number": 4,
+      "created_at": "2026-09-17T03:18:13Z",
+      "minute_total": 16,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "aliasfoxkde/GitForge",
+      "number": 208,
+      "created_at": "2026-09-22T20:38:05Z",
+      "minute_total": 19,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "crizant/probe",
+      "number": 64,
+      "created_at": "2026-10-03T09:15:26Z",
+      "minute_total": 22,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "jasonmassie01/pg_sage",
+      "number": 48,
+      "created_at": "2026-09-08T01:13:06Z",
+      "minute_total": 31,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "FairladyZ625/harness-anything",
+      "number": 2380,
+      "created_at": "2026-09-09T01:38:56Z",
+      "minute_total": 20,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "korgeek-sd/tower-chronicles",
+      "number": 34,
+      "created_at": "2026-09-25T02:05:29Z",
+      "minute_total": 16,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "newtonlorenz/benchledger",
+      "number": 35,
+      "created_at": "2026-09-03T07:53:11Z",
+      "minute_total": 20,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "openboa-ai/ouroboros",
+      "number": 2,
+      "created_at": "2026-10-09T04:19:31Z",
+      "minute_total": 37,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "kniepertsebastian-spec/equalizer",
+      "number": 29,
+      "created_at": "2026-09-25T21:00:56Z",
+      "minute_total": 14,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Nathandavid01/social-dashboard",
+      "number": 234,
+      "created_at": "2026-10-01T05:16:43Z",
+      "minute_total": 31,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "lidge-jun/opencodex",
+      "number": 3645,
+      "created_at": "2026-09-05T10:01:20Z",
+      "minute_total": 20,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "JeongJaeSoon/agent-guard",
+      "number": 257,
+      "created_at": "2026-09-17T18:30:31Z",
+      "minute_total": 17,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "scatt67/jaxgam",
+      "number": 41,
+      "created_at": "2026-09-08T21:17:32Z",
+      "minute_total": 26,
+      "state": "open",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "dancxjo/conduit",
+      "number": 4148,
+      "created_at": "2026-09-27T13:46:58Z",
+      "minute_total": 20,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Musicutd/ruvanas-platform",
+      "number": 214,
+      "created_at": "2026-09-26T16:41:18Z",
+      "minute_total": 26,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "kensac/job-scripts",
+      "number": 600,
+      "created_at": "2026-09-12T01:10:01Z",
+      "minute_total": 22,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "openanolis/trustee",
+      "number": 239,
+      "created_at": "2026-10-12T11:27:01Z",
+      "minute_total": 35,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "milos-agathon/forge3d-web",
+      "number": 25,
+      "created_at": "2026-09-19T09:24:14Z",
+      "minute_total": 14,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Jayinsightfactory/nenova-erp-ui",
+      "number": 929,
+      "created_at": "2026-10-07T01:27:57Z",
+      "minute_total": 30,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "kdob1042/manga-mac",
+      "number": 103,
+      "created_at": "2026-09-17T08:11:26Z",
+      "minute_total": 18,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Will-ODC/odc",
+      "number": 224,
+      "created_at": "2026-10-10T04:19:46Z",
+      "minute_total": 29,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "mshamblin5150-code/clinical-skills",
+      "number": 1222,
+      "created_at": "2026-09-13T14:22:50Z",
+      "minute_total": 30,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Far-Beyond-Pulsar/Plugin_Blueprints",
+      "number": 18,
+      "created_at": "2026-09-23T16:21:44Z",
+      "minute_total": 44,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Pokevaleur/pokevaleur",
+      "number": 119,
+      "created_at": "2026-10-13T22:44:34Z",
+      "minute_total": 45,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "PennEwan/Baidu-map",
+      "number": 15,
+      "created_at": "2026-09-13T09:26:31Z",
+      "minute_total": 19,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "prisma/composer",
+      "number": 340,
+      "created_at": "2026-10-06T19:24:02Z",
+      "minute_total": 15,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "d7xhub-art/d7core-pedidos",
+      "number": 9,
+      "created_at": "2026-09-07T10:58:39Z",
+      "minute_total": 14,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "AIowa-LLC/hermes-fleet",
+      "number": 179,
+      "created_at": "2026-10-03T20:33:04Z",
+      "minute_total": 34,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "cornhskr1/active-offerings-review",
+      "number": 108,
+      "created_at": "2026-09-25T23:39:51Z",
+      "minute_total": 4,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "publishpress/publishpress-authors",
+      "number": 2475,
+      "created_at": "2026-09-19T19:27:50Z",
+      "minute_total": 27,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "FairladyZ625/harness-anything",
+      "number": 2149,
+      "created_at": "2026-09-02T04:24:37Z",
+      "minute_total": 14,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "jacobdeecurtis/facebook-marketplace-dashboard",
+      "number": 45,
+      "created_at": "2026-09-20T01:19:04Z",
+      "minute_total": 19,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "ClubAmigosTT/marcelito-finanzas",
+      "number": 78,
+      "created_at": "2026-09-12T18:05:12Z",
+      "minute_total": 28,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "aljjang95/vocal-studio",
+      "number": 11,
+      "created_at": "2026-09-29T06:23:23Z",
+      "minute_total": 29,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "cisgz3a-hub/KerfDesk",
+      "number": 716,
+      "created_at": "2026-09-01T23:35:37Z",
+      "minute_total": 14,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "agenciarhodes-source/flipform",
+      "number": 326,
+      "created_at": "2026-09-30T15:49:21Z",
+      "minute_total": 33,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "zda1-hub/kobes-betting-hub",
+      "number": 214,
+      "created_at": "2026-10-10T17:01:57Z",
+      "minute_total": 28,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "vivacityrto/unicorn-cms-f09c59e5",
+      "number": 693,
+      "created_at": "2026-09-05T15:13:13Z",
+      "minute_total": 17,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "radiansnail-1/codex-meat-proxy",
+      "number": 11,
+      "created_at": "2026-10-11T20:21:57Z",
+      "minute_total": 31,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "bruce690813/fifaworldcup2026",
+      "number": 35,
+      "created_at": "2026-09-03T07:27:17Z",
+      "minute_total": 24,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "keida/codex-quota-float",
+      "number": 12,
+      "created_at": "2026-09-11T00:10:22Z",
+      "minute_total": 15,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "jizw0704-source/lingomate",
+      "number": 7,
+      "created_at": "2026-10-13T05:39:36Z",
+      "minute_total": 35,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Xiangran-CHENG/Xiangran-CHENG.github.io",
+      "number": 24,
+      "created_at": "2026-09-11T17:25:22Z",
+      "minute_total": 26,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "frankieliu2024-ui/ETF-Trade-System",
+      "number": 264,
+      "created_at": "2026-09-03T10:44:00Z",
+      "minute_total": 16,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Lemonkyle/Kalani-course-compass",
+      "number": 27,
+      "created_at": "2026-09-06T03:12:23Z",
+      "minute_total": 18,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Sjaakmatt/danny-rossenaar",
+      "number": 20,
+      "created_at": "2026-10-11T12:32:15Z",
+      "minute_total": 35,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "shahshawl668-gif/project-Original",
+      "number": 43,
+      "created_at": "2026-09-30T02:53:42Z",
+      "minute_total": 22,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "wrongstory/room-management-system-backend",
+      "number": 298,
+      "created_at": "2026-09-25T14:41:09Z",
+      "minute_total": 26,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "maxlibin/free-directory-submissions",
+      "number": 3,
+      "created_at": "2026-10-07T08:06:43Z",
+      "minute_total": 30,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Jan-Kaspar1/dcs",
+      "number": 520,
+      "created_at": "2026-09-17T02:23:25Z",
+      "minute_total": 14,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "cfi7728/photo-matrix",
+      "number": 6,
+      "created_at": "2026-09-09T15:41:29Z",
+      "minute_total": 28,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "plutack/wiretap",
+      "number": 25,
+      "created_at": "2026-09-11T05:58:07Z",
+      "minute_total": 26,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "mihirhugar-lang/otomy-ai",
+      "number": 22,
+      "created_at": "2026-09-12T04:13:09Z",
+      "minute_total": 16,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "tobrien6/voynich-manuscript-research",
+      "number": 116,
+      "created_at": "2026-10-12T06:25:44Z",
+      "minute_total": 20,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "DwennK/Plezy-SubtitleFix",
+      "number": 20,
+      "created_at": "2026-09-17T08:40:26Z",
+      "minute_total": 8,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "codex",
+      "repo": "the-omega-institute/trureturing",
+      "number": 14656,
+      "created_at": "2026-10-09T02:19:36Z",
+      "minute_total": 37,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "drolu-cmyk/sozorock-health",
+      "number": 201,
+      "created_at": "2026-09-08T00:37:32Z",
+      "minute_total": 23,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "suleymankuncan-web/CODEX",
+      "number": 1274,
+      "created_at": "2026-10-12T02:43:43Z",
+      "minute_total": 29,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "agentstation/starmap",
+      "number": 253,
+      "created_at": "2026-10-08T19:02:12Z",
+      "minute_total": 32,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Bittrees-Technology/ai",
+      "number": 202,
+      "created_at": "2026-09-25T00:44:08Z",
+      "minute_total": 27,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "codex",
+      "repo": "anthonyyoo24/justgo",
+      "number": 12,
+      "created_at": "2026-10-04T19:38:51Z",
+      "minute_total": 29,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Poryadok/VoiceRoot",
+      "number": 746,
+      "created_at": "2026-10-13T04:55:36Z",
+      "minute_total": 35,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "huh0303-cmyk/-WP-QWEN-autobot",
+      "number": 61,
+      "created_at": "2026-09-09T08:02:30Z",
+      "minute_total": 21,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "iwasa-kosui/kamae-ts",
+      "number": 49,
+      "created_at": "2026-09-05T15:25:40Z",
+      "minute_total": 29,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "quantumq1981/Parker-songbook-tool",
+      "number": 170,
+      "created_at": "2026-09-23T04:31:56Z",
+      "minute_total": 21,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "metric-space-ai/workjet",
+      "number": 127,
+      "created_at": "2026-10-07T13:14:28Z",
+      "minute_total": 43,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "CompleteTech-LLC-AI-Research/pokemon-harness",
+      "number": 17,
+      "created_at": "2026-09-02T13:11:34Z",
+      "minute_total": 26,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "JRDN-R/vision",
+      "number": 39,
+      "created_at": "2026-10-10T15:00:18Z",
+      "minute_total": 30,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Lisayinyy/MAIB_7002",
+      "number": 1,
+      "created_at": "2026-10-09T18:02:58Z",
+      "minute_total": 37,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "codex",
+      "repo": "hostess-pl/template-hostess-cf-short-form-dev",
+      "number": 2,
+      "created_at": "2026-09-09T15:39:07Z",
+      "minute_total": 25,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "7venik-bit/around-g-poizon-desktop",
+      "number": 752,
+      "created_at": "2026-09-30T06:35:16Z",
+      "minute_total": 29,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Posnic/POS",
+      "number": 1001,
+      "created_at": "2026-09-27T15:34:25Z",
+      "minute_total": 23,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "YannJY02/AutoTranscribe",
+      "number": 111,
+      "created_at": "2026-09-06T09:10:43Z",
+      "minute_total": 14,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Brian910cpr/910cpr-class-landers",
+      "number": 137,
+      "created_at": "2026-09-05T01:41:22Z",
+      "minute_total": 27,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "andyconley/flow",
+      "number": 63,
+      "created_at": "2026-09-28T10:57:27Z",
+      "minute_total": 24,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "jealous-sound/azerothcore-wotlk-coa",
+      "number": 405,
+      "created_at": "2026-09-16T02:29:29Z",
+      "minute_total": 19,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "den-run-ai/pystachy",
+      "number": 363,
+      "created_at": "2026-10-13T17:30:05Z",
+      "minute_total": 34,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "viplatform/mui-drawer",
+      "number": 55,
+      "created_at": "2026-10-08T09:24:25Z",
+      "minute_total": 35,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "dbrckk/xbow-perso",
+      "number": 641,
+      "created_at": "2026-10-09T05:14:22Z",
+      "minute_total": 25,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Misael-art/retro-dev-studio",
+      "number": 72,
+      "created_at": "2026-09-20T12:41:31Z",
+      "minute_total": 21,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "codex",
+      "repo": "tdobleta/tiendaiq",
+      "number": 160,
+      "created_at": "2026-09-11T22:25:24Z",
+      "minute_total": 12,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "Donovoi/triage-with-rclone",
+      "number": 21,
+      "created_at": "2026-10-02T13:29:03Z",
+      "minute_total": 30,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "codifydeep/descartavel2",
+      "number": 12,
+      "created_at": "2026-09-29T17:35:57Z",
+      "minute_total": 26,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "objcio/swift-talk-backend",
+      "number": 132,
+      "created_at": "2026-09-04T09:41:51Z",
+      "minute_total": 13,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "TeamElara/SentinelsAI",
+      "number": 8,
+      "created_at": "2026-10-08T08:17:33Z",
+      "minute_total": 42,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "codex",
+      "repo": "NVIDIA/NemoClaw",
+      "number": 11778,
+      "created_at": "2026-09-14T23:23:10Z",
+      "minute_total": 23,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "techmuns/Glow-Central-Research",
+      "number": 720,
+      "created_at": "2026-09-14T02:06:43Z",
+      "minute_total": 15,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "weslleyfreitassantos-cell/edumoneyyyy-",
+      "number": 326,
+      "created_at": "2026-10-11T00:42:01Z",
+      "minute_total": 24,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "moore11j/congress-tracker",
+      "number": 574,
+      "created_at": "2026-10-11T05:33:01Z",
+      "minute_total": 26,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "OpenHCSDev/agent-comms",
+      "number": 173,
+      "created_at": "2026-09-28T02:40:16Z",
+      "minute_total": 23,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "henrique-devel/ganso-market",
+      "number": 356,
+      "created_at": "2026-10-08T21:34:22Z",
+      "minute_total": 25,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "codex",
+      "repo": "loopx-project/loopx",
+      "number": 5583,
+      "created_at": "2026-10-04T13:16:42Z",
+      "minute_total": 34,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "akina12231988-star/immigration-app",
+      "number": 370,
+      "created_at": "2026-09-09T00:52:34Z",
+      "minute_total": 68,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "T-Crypt/aphotic-hypr",
+      "number": 86,
+      "created_at": "2026-09-02T14:08:08Z",
+      "minute_total": 112,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Embassy-of-the-Free-Mind/sourcelibrary-v2",
+      "number": 4768,
+      "created_at": "2026-09-12T17:23:22Z",
+      "minute_total": 87,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "sealant-sh/mend",
+      "number": 328,
+      "created_at": "2026-09-22T23:39:45Z",
+      "minute_total": 100,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "weeast1521/MyAppleGame",
+      "number": 43,
+      "created_at": "2026-09-17T14:26:32Z",
+      "minute_total": 113,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "WhiteLotus1998/IronWake",
+      "number": 1079,
+      "created_at": "2026-10-05T07:54:02Z",
+      "minute_total": 197,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "golyakoff/ago-android",
+      "number": 169,
+      "created_at": "2026-09-27T01:32:29Z",
+      "minute_total": 100,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Sriram-Codes-SW/doorprints",
+      "number": 150,
+      "created_at": "2026-10-07T00:36:14Z",
+      "minute_total": 165,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Performant-Labs/holler",
+      "number": 262,
+      "created_at": "2026-09-09T19:58:08Z",
+      "minute_total": 83,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "gga2000/Driver",
+      "number": 237,
+      "created_at": "2026-10-10T22:23:22Z",
+      "minute_total": 194,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Shaggywize63/kinematic-dashboard",
+      "number": 433,
+      "created_at": "2026-09-08T18:12:44Z",
+      "minute_total": 80,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Duncan-Haywood/oss-monorepo",
+      "number": 4594,
+      "created_at": "2026-09-11T14:12:17Z",
+      "minute_total": 88,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "thalia-apps/deployz",
+      "number": 205,
+      "created_at": "2026-09-06T11:22:25Z",
+      "minute_total": 58,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "jaroslawherod/micold-ai-ide",
+      "number": 587,
+      "created_at": "2026-10-05T08:41:08Z",
+      "minute_total": 162,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "timveil/leaves-of-blocks",
+      "number": 165,
+      "created_at": "2026-09-07T22:48:20Z",
+      "minute_total": 95,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "ceraldicontabilita/GestionaleCloud",
+      "number": 1095,
+      "created_at": "2026-10-05T04:54:01Z",
+      "minute_total": 117,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Underkut/block7",
+      "number": 414,
+      "created_at": "2026-09-22T01:51:38Z",
+      "minute_total": 72,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "noxitro/agent-toolkit",
+      "number": 5,
+      "created_at": "2026-10-08T15:32:07Z",
+      "minute_total": 223,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "nargothrondir/ansible-playbooks",
+      "number": 123,
+      "created_at": "2026-09-23T13:20:23Z",
+      "minute_total": 129,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "TWinston-66/lattice",
+      "number": 14,
+      "created_at": "2026-10-10T22:00:23Z",
+      "minute_total": 215,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "RodnaPamet/inflect-compliance",
+      "number": 2900,
+      "created_at": "2026-09-25T10:42:22Z",
+      "minute_total": 153,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "stephendolan/dotfiles",
+      "number": 57,
+      "created_at": "2026-10-12T20:30:13Z",
+      "minute_total": 217,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "mrbam88/bamware-brewdesk",
+      "number": 195,
+      "created_at": "2026-09-19T22:13:02Z",
+      "minute_total": 80,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "freeflow-community/flow",
+      "number": 549,
+      "created_at": "2026-09-10T15:37:02Z",
+      "minute_total": 113,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "frizat82/fourplay_web",
+      "number": 355,
+      "created_at": "2026-09-10T14:09:51Z",
+      "minute_total": 105,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "cephyrixzyth/Oneirodex",
+      "number": 114,
+      "created_at": "2026-09-17T01:51:16Z",
+      "minute_total": 73,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Cancore-io/sdk",
+      "number": 15,
+      "created_at": "2026-09-14T18:29:19Z",
+      "minute_total": 101,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "gunb-ai/gunbc",
+      "number": 11749,
+      "created_at": "2026-09-19T23:40:51Z",
+      "minute_total": 62,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "sam-dumont/immich-memories",
+      "number": 2400,
+      "created_at": "2026-10-11T12:01:22Z",
+      "minute_total": 188,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "VibeDarling/darling-cfnetwork",
+      "number": 2,
+      "created_at": "2026-09-24T09:58:36Z",
+      "minute_total": 150,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "danibsheehan/gotta-catch-em-all",
+      "number": 169,
+      "created_at": "2026-09-06T22:44:17Z",
+      "minute_total": 75,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "felipea92p-ux/cayla-retail",
+      "number": 749,
+      "created_at": "2026-10-03T00:06:08Z",
+      "minute_total": 135,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "nminic/btl",
+      "number": 240,
+      "created_at": "2026-09-11T10:58:15Z",
+      "minute_total": 79,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "markmohr15/diamond",
+      "number": 52,
+      "created_at": "2026-09-03T19:43:00Z",
+      "minute_total": 94,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "hirofukami/hirofukami.github.io",
+      "number": 80,
+      "created_at": "2026-09-25T04:44:09Z",
+      "minute_total": 104,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "deeprath/commerce-platform",
+      "number": 17,
+      "created_at": "2026-09-10T04:58:14Z",
+      "minute_total": 76,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "nelsonboulangerie/django-shopman",
+      "number": 1027,
+      "created_at": "2026-09-24T00:27:05Z",
+      "minute_total": 98,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "bcourbage/unison-ui-mac",
+      "number": 130,
+      "created_at": "2026-09-07T04:35:21Z",
+      "minute_total": 56,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "AndreBaleeiro1/Primeiro",
+      "number": 5,
+      "created_at": "2026-10-08T20:57:03Z",
+      "minute_total": 211,
+      "state": "open",
+      "draft": true
+    },
+    {
+      "agent": "claude",
+      "repo": "Petrolord/petrolord-suite",
+      "number": 590,
+      "created_at": "2026-09-23T01:13:09Z",
+      "minute_total": 103,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "hofmiker/altcoin-dashboard",
+      "number": 463,
+      "created_at": "2026-09-30T08:28:24Z",
+      "minute_total": 168,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "jdmacleod/kitchen-erp",
+      "number": 173,
+      "created_at": "2026-10-05T19:03:09Z",
+      "minute_total": 229,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "leo-aa88/async-chatbot",
+      "number": 53,
+      "created_at": "2026-09-22T00:56:04Z",
+      "minute_total": 36,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "DiamondDagger590/McRPG",
+      "number": 353,
+      "created_at": "2026-09-07T09:17:37Z",
+      "minute_total": 78,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "diepjustin/ne-campaign-finance",
+      "number": 1,
+      "created_at": "2026-09-30T17:07:16Z",
+      "minute_total": 162,
+      "state": "open",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "kurushimee/gdls",
+      "number": 549,
+      "created_at": "2026-09-01T08:03:43Z",
+      "minute_total": 58,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "rmpsdroid/BattInsight",
+      "number": 11,
+      "created_at": "2026-09-07T11:18:44Z",
+      "minute_total": 89,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "dnobj/mail-letter-irl",
+      "number": 410,
+      "created_at": "2026-09-16T17:54:49Z",
+      "minute_total": 96,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "KatOre-Solutions/GuardianCheck",
+      "number": 134,
+      "created_at": "2026-09-14T10:21:41Z",
+      "minute_total": 93,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "ScottCooper92/binge-ci",
+      "number": 162,
+      "created_at": "2026-10-12T16:39:19Z",
+      "minute_total": 233,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "harisforges/Qada-lah",
+      "number": 2,
+      "created_at": "2026-10-12T03:34:20Z",
+      "minute_total": 174,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "ducktape-industries/programs",
+      "number": 91,
+      "created_at": "2026-09-23T15:52:13Z",
+      "minute_total": 152,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "atharvb7/friday",
+      "number": 16,
+      "created_at": "2026-10-11T09:03:10Z",
+      "minute_total": 147,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "PantaKoda/repo-watch",
+      "number": 25,
+      "created_at": "2026-10-04T08:56:24Z",
+      "minute_total": 154,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "enricoag1982/learningChess",
+      "number": 47,
+      "created_at": "2026-09-25T19:45:09Z",
+      "minute_total": 133,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "ericputnam/MHMFinds",
+      "number": 214,
+      "created_at": "2026-09-29T02:37:01Z",
+      "minute_total": 129,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "dlee1j1/nissan-leaf-app",
+      "number": 26,
+      "created_at": "2026-09-14T07:55:22Z",
+      "minute_total": 83,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "AI-X-16-1/BOOKIT",
+      "number": 118,
+      "created_at": "2026-09-17T06:26:50Z",
+      "minute_total": 78,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "aviorluxuryshop-ship-it/socialp-media69",
+      "number": 10,
+      "created_at": "2026-09-10T18:41:34Z",
+      "minute_total": 91,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "hollis-labs/tachyon",
+      "number": 2,
+      "created_at": "2026-09-18T02:57:37Z",
+      "minute_total": 78,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Nengeldir/ItWorksOnMyMachine",
+      "number": 31,
+      "created_at": "2026-10-10T16:34:05Z",
+      "minute_total": 178,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "DennisHengShuYi/Codenection",
+      "number": 28,
+      "created_at": "2026-09-09T06:44:09Z",
+      "minute_total": 67,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Echoes675/FamilyHQ",
+      "number": 212,
+      "created_at": "2026-09-19T10:33:48Z",
+      "minute_total": 62,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "uiuirot068-collab/tatesupan",
+      "number": 33,
+      "created_at": "2026-10-04T04:04:38Z",
+      "minute_total": 158,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "jhheider/edikt",
+      "number": 82,
+      "created_at": "2026-09-24T21:35:16Z",
+      "minute_total": 142,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "anilg12/anilg12",
+      "number": 1,
+      "created_at": "2026-10-06T17:42:16Z",
+      "minute_total": 224,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "mrchristian-genki/seasonal-portfolio",
+      "number": 124,
+      "created_at": "2026-10-06T03:32:32Z",
+      "minute_total": 137,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Haradasn/keizai-map",
+      "number": 10,
+      "created_at": "2026-10-11T05:53:21Z",
+      "minute_total": 136,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "codingnanyong/busan-competition-2026",
+      "number": 88,
+      "created_at": "2026-09-04T06:32:34Z",
+      "minute_total": 72,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "robscan/somosnosotros",
+      "number": 313,
+      "created_at": "2026-10-04T01:59:23Z",
+      "minute_total": 134,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "virgoone/pixi-gomoku",
+      "number": 6,
+      "created_at": "2026-09-27T15:01:42Z",
+      "minute_total": 129,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "decdn/decdn",
+      "number": 2037,
+      "created_at": "2026-09-15T13:11:41Z",
+      "minute_total": 105,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "domtriola/dotfiles",
+      "number": 93,
+      "created_at": "2026-10-11T06:14:19Z",
+      "minute_total": 166,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "dp-web4/SAGE",
+      "number": 409,
+      "created_at": "2026-10-09T06:07:14Z",
+      "minute_total": 155,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "robertsdotpm/runloom",
+      "number": 7,
+      "created_at": "2026-09-08T20:14:17Z",
+      "minute_total": 93,
+      "state": "closed",
+      "draft": true
+    },
+    {
+      "agent": "claude",
+      "repo": "Lartitiz/nowadaysagency",
+      "number": 1285,
+      "created_at": "2026-10-04T08:51:10Z",
+      "minute_total": 124,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "denn-gubsky/loomcycle",
+      "number": 1133,
+      "created_at": "2026-09-03T12:07:11Z",
+      "minute_total": 78,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "contactcapai/TournoiEDS",
+      "number": 107,
+      "created_at": "2026-09-01T08:33:43Z",
+      "minute_total": 52,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "BIMbeamFLX/bearlett",
+      "number": 16,
+      "created_at": "2026-09-10T16:21:16Z",
+      "minute_total": 118,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "qaml-ai/camelAI",
+      "number": 57,
+      "created_at": "2026-09-28T01:59:08Z",
+      "minute_total": 122,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "tuna-os/gtk-office-suite",
+      "number": 471,
+      "created_at": "2026-09-08T03:52:45Z",
+      "minute_total": 52,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "AgentWorkforce/flows",
+      "number": 329,
+      "created_at": "2026-09-11T11:08:04Z",
+      "minute_total": 87,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "artgas1/yandex-metrika-mcp",
+      "number": 26,
+      "created_at": "2026-09-09T13:57:17Z",
+      "minute_total": 85,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "open-science-pillars/nasa-daac-knowledge",
+      "number": 113,
+      "created_at": "2026-09-08T05:30:12Z",
+      "minute_total": 63,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "cantierihub/cantierihub-com",
+      "number": 53,
+      "created_at": "2026-10-09T11:42:32Z",
+      "minute_total": 176,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "TheJustinSunPrize/awards",
+      "number": 376,
+      "created_at": "2026-09-17T02:02:42Z",
+      "minute_total": 77,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "ainiadra/niadra-sdk-python",
+      "number": 13,
+      "created_at": "2026-09-26T13:00:34Z",
+      "minute_total": 125,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "AddisonSouza/lms-nexus-jaas",
+      "number": 360,
+      "created_at": "2026-09-17T00:34:48Z",
+      "minute_total": 72,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "gastoncarreecommerce/Auditoria-SFMC",
+      "number": 6,
+      "created_at": "2026-09-02T02:54:06Z",
+      "minute_total": 75,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "BladerunnerxRC/Linux_Shell_Scripts",
+      "number": 4,
+      "created_at": "2026-10-01T17:35:01Z",
+      "minute_total": 218,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "dudarenok-maker/Castwright",
+      "number": 3335,
+      "created_at": "2026-09-20T02:29:50Z",
+      "minute_total": 77,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "will383842/axion-apporteurs",
+      "number": 707,
+      "created_at": "2026-10-04T14:53:13Z",
+      "minute_total": 213,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "claudiojara/susurro",
+      "number": 34,
+      "created_at": "2026-10-13T17:31:19Z",
+      "minute_total": 227,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "IrosTheBeggar/mstream-mp3-player",
+      "number": 7,
+      "created_at": "2026-10-09T23:23:18Z",
+      "minute_total": 169,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Kuisin/ckk-tool-v3",
+      "number": 857,
+      "created_at": "2026-09-10T14:52:43Z",
+      "minute_total": 91,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "firmfooting/dbml-sharepoint",
+      "number": 501,
+      "created_at": "2026-09-10T03:45:39Z",
+      "minute_total": 61,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "sveltekit-i18n/base",
+      "number": 35,
+      "created_at": "2026-09-13T10:14:58Z",
+      "minute_total": 71,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "Dadaxon82/FIZIKA-VA-ASTRONOMIYA-O-QITISHDA-AXBOROT-TEXNOLOGIYALARINI-QO-LLASH",
+      "number": 25,
+      "created_at": "2026-09-21T06:54:56Z",
+      "minute_total": 78,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "qso-graph/eqsl-mcp",
+      "number": 8,
+      "created_at": "2026-10-04T01:03:34Z",
+      "minute_total": 127,
+      "state": "closed",
+      "draft": false
+    },
+    {
+      "agent": "claude",
+      "repo": "jordanhubbard/nanolang",
+      "number": 215,
+      "created_at": "2026-09-03T14:23:41Z",
+      "minute_total": 86,
+      "state": "closed",
+      "draft": false
+    }
+  ]
+}

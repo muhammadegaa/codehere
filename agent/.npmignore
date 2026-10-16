@@ -1,0 +1,65 @@
+# Source files
+src/
+*.ts
+!*.d.ts
+
+# Development files
+tsconfig.json
+**/*.map
+**/*.d.ts.map
+**/*.d.ts
+
+# Test files
+test/
+*.test.ts
+*.spec.ts
+TEST*.md
+TESTING.md
+TEST_INTERACTIVE.md
+CONTRIBUTING.md
+
+# Development scripts
+QUICK_START.sh
+verify_release.sh
+
+# Data files (user-specific)
+data/
+*.sqlite
+*.jsonl
+
+# Environment
+.env
+.env.example
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts (keep dist/)
+*.log
+npm-debug.log*
+
+# Internal documentation (NOT for npm package)
+**/.internal/
+**/PRIORITIZED_BACKLOG.md
+**/STATUS.md
+**/RESEARCH.md
+**/PRODUCT_STRATEGY.md
+**/RESEARCH_AGENT_IMPLEMENTATION.md
+**/DEVELOPMENT_RESEARCH_AGENT.md
+**/PROMISES_EVALUATION.md
+**/PRIVACY_AUDIT.md
+**/ROADMAP.md
+**/ARCHITECTURE.md
+agent/agent/docs/ARCHITECTURE/
+

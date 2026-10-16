@@ -1,0 +1,28 @@
+# gitleaks config for the codehere repo.
+#
+# Default rules are inherited from gitleaks' built-in ruleset. This file adds
+# allowlist entries for KNOWN-SAFE fixtures + paths.
+#
+# Anything else that looks like a credential is blocked at pre-commit time.
+
+[extend]
+# Inherit gitleaks' default rules
+useDefault = true
+
+[allowlist]
+description = "codehere safe fixtures + intentional test placeholders"
+
+paths = [
+  # Vulnerable-repo fixture · contains intentional fake secrets for the
+  # SAST scanner's own test suite to detect. These are not real credentials.
+  '''test/fixtures/vulnerable-repo/.*''',
+  # gitleaks report files (committed for audit history reference)
+  '''gitleaks-report\.json$''',
+]
+
+# Known-safe placeholder strings used in test assertions
+regexes = [
+  '''sk-live-abcdef123456789''',          # well-known test placeholder
+  '''sk-ant-api03-test-key-not-real''',   # documentation example
+  '''AKIAIOSFODNN7EXAMPLE''',             # AWS docs canonical example
+]

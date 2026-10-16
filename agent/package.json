@@ -1,0 +1,79 @@
+{
+  "name": "codehere",
+  "version": "1.0.2",
+  "description": "Re-runs the tests an AI says passed, and tells you whether they did. Flags weakened tests and test files that do not exist.",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "codehere": "dist/index.js",
+    "ch": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "prepare": "bash ../scripts/install-hooks.sh || true",
+    "prebuild": "rm -rf dist",
+    "build": "tsc",
+    "postbuild": "chmod +x dist/index.js",
+    "prepublishOnly": "npm run build && find dist -name '*.map' -delete && find dist -name '*.d.ts' -delete && find dist -name '*.d.ts.map' -delete",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "npm run build && vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/ --ext .ts",
+    "knip": "knip",
+    "knip:gate": "node scripts/knip-gate.mjs",
+    "arch:gate": "tsc --noEmit && eslint src/ --ext .ts && node scripts/knip-gate.mjs",
+    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
+    "sbom": "npm sbom --sbom-format=spdx --omit=dev",
+    "pretag:check": "../scripts/pretag-npm-check.sh"
+  },
+  "keywords": [
+    "ai-coding-agents",
+    "test-verification",
+    "ci",
+    "github-action",
+    "claude-code",
+    "codex",
+    "cli-tool",
+    "typescript"
+  ],
+  "author": "The codehere authors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/muhammadegaa/codehere.git"
+  },
+  "bugs": {
+    "url": "https://github.com/muhammadegaa/codehere/issues"
+  },
+  "homepage": "https://github.com/muhammadegaa/codehere",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^20.19.25",
+    "eslint": "^10.2.0",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-import-x": "^4.16.2",
+    "knip": "^6.16.1",
+    "prettier": "^3.8.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.58.2",
+    "vitest": "^4.1.4"
+  }
+}

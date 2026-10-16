@@ -1,0 +1,65 @@
+#!/bin/sh
+#
+# codehere pre-commit hook · runs gitleaks on staged content.
+#
+# Why · accidental credential commits compound forever via git history. Every
+# commit must pass a secret scan. Bypass is allowed only with explicit
+# `--no-verify` for emergency hotfixes (and even then we follow up with
+# rotation immediately).
+#
+# Setup once: `git config core.hooksPath .githooks`
+# Or run `bash scripts/install-hooks.sh` (creates the config + verifies gitleaks)
+#
+# To skip in genuine emergency: `git commit --no-verify` (don't make this a habit)
+
+if ! command -v gitleaks > /dev/null 2>&1; then
+  echo "⚠  gitleaks not installed — skipping secret scan."
+  echo "   Install: brew install gitleaks  (macOS)"
+  echo "            apt install gitleaks   (Debian/Ubuntu, may need backports)"
+  echo "            See https://github.com/gitleaks/gitleaks/releases for binaries"
+  echo ""
+  echo "   Continuing commit. CI will catch leaks if any slip through."
+  exit 0
+fi
+
+# Scan staged content (gitleaks 8.x · "git --staged" replaces deprecated "protect")
+# Capture exit code BEFORE any pipe so we don't mask it.
+gitleaks git --staged --redact --verbose
+GITLEAKS_EXIT=$?
+
+if [ "$GITLEAKS_EXIT" -ne 0 ]; then
+  echo ""
+  echo "✗  Commit blocked: gitleaks found one or more secrets in your staged changes."
+  echo ""
+  echo "Options:"
+  echo "  1. Remove the secret from your changes and re-stage."
+  echo "  2. If the match is a false positive, add it to .gitleaks.toml allowlist"
+  echo "     and explain the false-positive in the commit message."
+  echo "  3. (Emergency only) bypass with --no-verify, then rotate the leaked"
+  echo "     credential and remove from history."
+  echo ""
+  exit 1
+fi
+
+# ── 2026-06-09 · R0 anti-graveyard gate ─────────────────────────────────────
+# When TypeScript or the gate configs change, enforce the clean-architecture
+# floor: no unused locals/params (tsc), no import cycles (eslint import-x), and
+# no NEW dead code past the ratchet (knip-baseline.json). This is how
+# "refactor = move-and-delete, never add-alongside" becomes mechanical rather
+# than a promise.
+if git diff --cached --name-only | grep -qE '^agent/(src/.*\.ts|tsconfig\.json|eslint\.config\.js|package\.json|knip\.json|knip-baseline\.json)$'; then
+  echo "→ R0 arch gate (TypeScript staged) …"
+  ( cd agent && npm run --silent arch:gate )
+  ARCH_EXIT=$?
+  if [ "$ARCH_EXIT" -ne 0 ]; then
+    echo ""
+    echo "✗  Commit blocked by the R0 anti-graveyard gate."
+    echo "   A clean architecture is a DAG with no dead code. You either added an"
+    echo "   import cycle, an unused local/param, or dead code past the ratchet."
+    echo "   Fix: move-and-delete (don't add-alongside)."
+    echo "   (Emergency bypass: git commit --no-verify — then open a follow-up.)"
+    exit "$ARCH_EXIT"
+  fi
+fi
+
+exit 0

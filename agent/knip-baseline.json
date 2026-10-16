@@ -1,0 +1,7 @@
+{
+  "_comment": "R0 anti-graveyard ratchet (2026-06-09). These are the COUNTS of dead code knip tolerates, measured by scripts/knip-gate.mjs. The gate FAILS any commit that pushes a count ABOVE these. The ratchet only turns toward zero — and as of 2026-06-13 it IS zero. Any new dead code now fails the gate.",
+  "_knownDebt": "ZERO. 2026-06-13: drained ALL dead code to 0. Removed the last orphan file (embeddings-path.ts) + 31 unused exports across the codebase: 14 legacy REPL/CLI helpers from ui.ts, the dead error-handler subtree (retryWithBackoff/handleError/isRetryable/calculateBackoff), product-context (saveProductContext/riskLabel), graphify-context (loadRecentContextPack/queryGraphSync/GraphQueryResult), failover-config resolveChain, write-pass-store (discard/_resetForTests), registry-bootstrap resetDefaultRegistry, context-handoff formatHandoffSummary, codebase-detector getCodebaseForFile, permission-command _readRaw, error-display displayErrorAndExit, replay-adapter replayThroughAdapter, version resetVersionCache — plus their cascade-orphaned imports/helpers. 3 orphaned npm deps removed (ora/cli-progress/boxen). input-validator.ts DELETED 2026-06-10. Knip-blind external binaries (which/ollama/ps via execFile) are NOT dead code.",
+  "orphanFiles": 0,
+  "totalUnusedExports": 0,
+  "unusedDeps": 0
+}

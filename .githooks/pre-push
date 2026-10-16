@@ -1,0 +1,137 @@
+#!/bin/sh
+#
+# codehere pre-push hook · enforces multi-tier dogfood-loop review on substantive
+# commits before they reach the public remote.
+#
+# Why · the multi-agent dogfood rule (every non-trivial commit gets a non-Claude
+# reviewer pass before push) decayed to ~8% empirical compliance over the 30
+# days ending 2026-04-29. The Apr 29 audit found 6+ commits in the rc.7→rc.24
+# cycle where codex caught real bugs AFTER the commit landed broken, costing
+# rework. This hook moves the rule from "remember to invoke codex" to "the
+# push is blocked if you didn't."
+#
+# What it does · for each commit being pushed, if the change is SUBSTANTIVE
+# (>= 20 LOC OR touches non-doc paths), requires the commit message to contain
+# one of these tokens:
+#
+#   • Reviewed by codex                        (single round review approved)
+#   • codex Round N — APPROVE                  (multi-round, ended in approve)
+#   • Reviewed by Kimi K2                      (Tier-1 free reviewer per memory)
+#   • Reviewed by free-claude-code             (once wired, Tier-1 free option)
+#   • Reviewed by claude-max-cold              (lean-loop fallback seat while codex
+#                                               is unbilled — owner-locked 2026-06-07;
+#                                               ONE cold batch review per ship session)
+#   • [no-review: <substantive reason>]        (explicit auditable bypass)
+#
+# Cosmetic carve-out · commits with < 20 LOC change AND every changed file under
+# {*.md, CHANGELOG*, docs/, .gitignore, MEMORY.md, .githooks/, scripts/install-hooks.sh}
+# are exempt. Matches "match review depth to risk depth" sub-rule.
+#
+# Setup · `git config core.hooksPath .githooks` (or `bash scripts/install-hooks.sh`).
+# Bypass · `git push --no-verify` for genuine emergency. Bypasses are visible
+# because [no-review:] markers stay grep-able in commit history.
+
+COSMETIC_PATH_RE='^(\.gitignore|.*\.md|CHANGELOG.*|docs/.*|MEMORY.*|\.githooks/.*|scripts/install-hooks\.sh)$'
+REVIEW_TOKEN_RE='Reviewed by codex|Reviewed by Kimi K2|Reviewed by free-claude-code|Reviewed by claude-max-cold|codex Round [0-9]+ . APPROVE|\[no-review:'
+
+block=0
+blocked_commits=""
+
+# stdin format from git: <local_ref> <local_sha> <remote_ref> <remote_sha>
+while read local_ref local_sha remote_ref remote_sha; do
+  # Skip branch deletions
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  # Determine commit range to inspect
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    # New branch · inspect every commit that isn't already on any remote.
+    # If we only checked the tip, ancestor commits would slip through on first
+    # push and never get inspected on subsequent pushes (codex Round 1 catch).
+    # `--not --remotes=origin` excludes anything reachable from any origin ref;
+    # if no origin branches exist yet, the exclusion is empty and every commit
+    # in the branch gets inspected (safe default).
+    range_args="$local_sha --not --remotes=origin"
+  else
+    range_args="$remote_sha..$local_sha"
+  fi
+
+  for sha in $(git log --format=%H $range_args 2>/dev/null); do
+    # Skip merge commits (parents > 1) — they don't introduce review-worthy
+    # change themselves; the underlying branch commits do.
+    parents=$(git log -1 --format=%P "$sha")
+    parent_count=$(echo "$parents" | wc -w | tr -d ' ')
+    if [ "$parent_count" -gt 1 ]; then
+      continue
+    fi
+
+    msg=$(git log -1 --format=%B "$sha")
+    files=$(git show --name-only --pretty=format: "$sha" | grep -v '^$')
+    stat=$(git show --shortstat --pretty=format: "$sha")
+    loc_ins=$(echo "$stat" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' | head -1)
+    loc_del=$(echo "$stat" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' | head -1)
+    loc_ins=${loc_ins:-0}
+    loc_del=${loc_del:-0}
+    total_loc=$((loc_ins + loc_del))
+
+    # Cosmetic carve-out check
+    cosmetic=1
+    if [ "$total_loc" -ge 20 ]; then
+      cosmetic=0
+    fi
+    if [ "$cosmetic" = "1" ]; then
+      for f in $files; do
+        if ! echo "$f" | grep -qE "$COSMETIC_PATH_RE"; then
+          cosmetic=0
+          break
+        fi
+      done
+    fi
+
+    if [ "$cosmetic" = "1" ]; then
+      continue
+    fi
+
+    # Substantive commit · require review token
+    if ! echo "$msg" | grep -iqE "$REVIEW_TOKEN_RE"; then
+      block=1
+      short_sha=$(echo "$sha" | cut -c1-7)
+      first_line=$(echo "$msg" | head -1)
+      blocked_commits="$blocked_commits
+  $short_sha  $first_line"
+    fi
+  done
+done
+
+if [ "$block" = "1" ]; then
+  cat <<EOF >&2
+
+✗  Push blocked: substantive commit(s) missing dogfood-loop review evidence.
+$blocked_commits
+
+The multi-agent dogfood rule requires every substantive commit to be reviewed
+by a non-Claude reviewer before push. To proceed, do ONE of:
+
+  1. Run review, then amend the message:
+       codex review --base origin/HEAD
+       git commit --amend       (add "Reviewed by codex" to the message)
+
+  2. Multi-round review trail:
+       git commit --amend       (add "codex Round 1 — APPROVE")
+
+  3. Auditable bypass (preferred over --no-verify):
+       git commit --amend
+       # add: [no-review: <substantive reason, e.g. "lockfile regen, no logic">]
+
+  4. Emergency: git push --no-verify
+     Use sparingly. Bypasses without [no-review:] are invisible in audit grep.
+
+Cosmetic carve-out: < 20 LOC change AND every file under {*.md, CHANGELOG*,
+docs/, .gitignore, MEMORY*, .githooks/, scripts/install-hooks.sh}.
+
+EOF
+  exit 1
+fi
+
+exit 0
