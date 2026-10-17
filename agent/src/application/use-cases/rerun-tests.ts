@@ -71,6 +71,9 @@ export interface RerunTestsResult {
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.CODEHERE_RERUN_TIMEOUT_MS ?? 120_000);
 
+/** 500 → "0.5s", 120000 → "120s". */
+const seconds = (ms: number) => `${Number.isInteger(ms / 1000) ? ms / 1000 : (ms / 1000).toFixed(1)}s`;
+
 /** True when node's test runner printed a summary and every summary says 0 tests, or when go test found no test files. `node --test`
  *  exits 0 for a misnamed file (`calc.tests.js`), so the exit code alone reads as a pass.
  *  pytest already exits 5 in that case. */
@@ -294,7 +297,7 @@ export function rerunTests(cwd: string): Promise<RerunTestsResult> {
         ran: false,
         kind: 'timed-out',
         command: detected.display,
-        skippedReason: `test re-run timed out after ${Math.round(DEFAULT_TIMEOUT_MS / 1000)}s`,
+        skippedReason: `test re-run timed out after ${seconds(DEFAULT_TIMEOUT_MS)}`,
       });
     }, DEFAULT_TIMEOUT_MS);
 

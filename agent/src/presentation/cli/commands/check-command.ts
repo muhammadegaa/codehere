@@ -1,7 +1,8 @@
 /**
  * CLI: check — the simplest proof. codehere independently RE-RUNS your project's
  * tests and reports the real result, so you trust what the AI actually did, not
- * what it claimed. Zero setup, no daemon, no API. Exit 1 on failure (CI-usable).
+ * what it claimed. Zero setup, no daemon, no API. Exit codes for CI: 0 a verified pass, 1 a finding (tests
+ * failed, no test ran, a test weakened, a claimed test file missing), 2 nothing could be verified.
  */
 import { execFileSync } from 'node:child_process';
 import { statSync } from 'node:fs';
@@ -153,28 +154,33 @@ export async function executeCheckCommand(target: string | undefined, options: C
   const r = await rerunTests(cwd);
   const weakened = detectTestWeakening(cwd, options.base);
   const missingClaimed = options.claim ? findMissingClaimedTests(cwd, options.claim) : [];
-  const failedOrWeakened =
-    (r.ran && ((r.exitCode ?? 1) !== 0 || r.noTests)) || weakened.length > 0 || missingClaimed.length > 0 ? 1 : 0;
+  const verdict = checkVerdict(r, weakened, missingClaimed);
+  const exitCode = verdict === 'pass' ? 0 : verdict === 'fail' ? 1 : 2;
+  const weakenedText = () =>
+    weakened.length
+      ? weakenedLines(weakened)
+          .map((l) => colors.dim(`  ${l}\n`))
+          .join('') + colors.dim(`  › ${options.base ? `git diff ${options.base}...HEAD` : 'git diff HEAD'}\n`)
+      : '';
   const missingLines = () =>
     missingClaimed.length
       ? missingClaimed.map((f) => colors.dim(`  ${f} · named by the AI, not in the repo\n`)).join('')
       : '';
 
   if (options.json) {
-    const verdict = checkVerdict(r, weakened, missingClaimed);
     const receipt =
       RECEIPT_MARKER +
       '\n' +
       buildProofBlock(cwd, r, weakened, missingClaimed, { base: options.base, claim: options.claim });
     process.stdout.write(JSON.stringify({ cwd, ...r, weakened, missingClaimed, verdict, receipt }, null, 2) + '\n');
-    return failedOrWeakened;
+    return exitCode;
   }
 
   if (options.proof) {
     process.stdout.write(
       buildProofBlock(cwd, r, weakened, missingClaimed, { base: options.base, claim: options.claim }),
     );
-    return failedOrWeakened;
+    return exitCode;
   }
 
   if (!r.ran) {
@@ -189,8 +195,18 @@ export async function executeCheckCommand(target: string | undefined, options: C
             ? colors.dim('  Fix it, then re-check:  ') + colors.success(`${r.remedy}\n\n`)
             : colors.dim('  Install the test runner, then run check again.\n\n')),
       );
-      process.stdout.write(missingLines());
-      return failedOrWeakened; // couldn't verify; a named test file that is missing still counts
+      process.stdout.write(weakenedText() + missingLines());
+      return exitCode; // couldn't verify (2); a weakened test or a missing named test file still counts (1)
+    }
+    if (r.kind === 'timed-out' || r.kind === 'disabled') {
+      process.stdout.write(
+        colors.error(`${symbols.error} Nothing verified`) +
+          colors.dim(
+            `  — ${r.kind === 'timed-out' ? `'${r.command}' ${r.skippedReason?.replace(/^test re-run /, '')}` : r.skippedReason}.\n`,
+          ),
+      );
+      process.stdout.write(weakenedText() + missingLines());
+      return exitCode;
     }
     process.stdout.write(
       colors.dim(`No test suite codehere can run here — ${r.skippedReason || 'none detected'}.\n`) +
@@ -198,8 +214,8 @@ export async function executeCheckCommand(target: string | undefined, options: C
           'codehere proves the AI by re-running your tests; add one (npm test / node --test / pytest / go test / cargo test) and run check again.\n',
         ),
     );
-    process.stdout.write(missingLines());
-    return failedOrWeakened; // nothing to verify is not a failure; a named test file that is missing still is
+    process.stdout.write(weakenedText() + missingLines());
+    return exitCode; // nothing was verified (2); a weakened test or a missing named test file still counts (1)
   }
 
   // Honesty: runner-missing (exit 126/127) means the test command couldn't be RUN
@@ -214,7 +230,8 @@ export async function executeCheckCommand(target: string | undefined, options: C
           ? colors.dim('  Fix it, then re-check:  ') + colors.success(`${r.remedy}\n\n`)
           : colors.dim('  Install deps, then run check again.\n\n')),
     );
-    return 1; // non-zero for CI (unverified), but NOT a false "tests failed"
+    process.stdout.write(weakenedText() + missingLines());
+    return exitCode; // non-zero for CI (unverified), but NOT a false "tests failed"
   }
 
   const passed = (r.exitCode ?? 1) === 0 && !r.noTests;
@@ -239,13 +256,9 @@ export async function executeCheckCommand(target: string | undefined, options: C
       (r.noTests
         ? colors.dim('  The runner reported 0 tests, so nothing was tested. Check the test file names.\n')
         : '') +
-      (weakened.length
-        ? weakenedLines(weakened)
-            .map((l) => colors.dim(`  ${l}\n`))
-            .join('') + colors.dim(`  › ${options.base ? `git diff ${options.base}...HEAD` : 'git diff HEAD'}\n`)
-        : '') +
+      weakenedText() +
       missingLines() +
       '\n',
   );
-  return passed && !weakened.length && !missingClaimed.length ? 0 : 1;
+  return exitCode;
 }

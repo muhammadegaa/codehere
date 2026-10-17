@@ -26,7 +26,7 @@ codehere check --proof                            # a receipt you can paste into
 
 `codehere help check` lists the options. `--json` adds a `verdict` (`pass`, `fail`, `unverified` or `skipped`) and the receipt text.
 
-It exits 1 when the tests fail, and also when the tests pass but the change made them check nothing: an assertion swapped for `assert True` or `assert.ok(true)`, a skipped test, an assertion commented out, or a `return` above it.
+Exit codes: 0 when the tests ran and passed and nothing was weakened; 1 when the tests fail, no test ran, or the change made a test check nothing (an assertion swapped for `assert True` or `assert.ok(true)`, a skipped test, an assertion commented out, or a `return` above it); 2 when nothing could be verified (the run timed out, no test command was recognized, the runner is not installed, or the re-run was turned off).
 
 ## GitHub Action
 
@@ -34,7 +34,6 @@ A GitHub Action that posts the receipt on each pull request is in [`action/`](ht
 
 ## What it does not catch, and when it exits 0 without a pass
 
-- **It cannot run the tests.** When the run times out, or no test command is recognized, `check` prints why and exits 0, and `--json` gives the verdict `unverified`. In CI, read the verdict, or set the Action's `fail-on-unverified` input. Do not rely on the exit code alone.
 - **A suite where every test is skipped** reads as a pass.
 - **Weakened tests.** The detector reads Python (`test_*.py`, `*_test.py`), JavaScript and TypeScript (`*.test.*`, `*.spec.*`), Go (`*_test.go`) and PHP (`*Test.php`) test files, and files under `test`, `tests` or `__tests__`. It flags an assertion replaced by an always-true one, a skip marker, a commented-out assertion and an early `return`. It does not flag a deleted assertion, a deleted test or test file, a loosened expectation, or an edited test script. It sees uncommitted changes, and with `--base <ref>` everything since the branch left that ref. A very large diff (a 20 MB addition in testing) turns the scan off without a message.
 - **`--claim`** finds test files named in the summary when they are separated by spaces, quotes, parentheses, commas or semicolons. A name in markdown bold or in `path::test` form is not recognized, and is not reported.

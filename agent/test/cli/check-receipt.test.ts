@@ -68,7 +68,7 @@ describe('codehere check --json · verdict and receipt', () => {
     const { out, status } = json(repo({ 'README.md': 'x' }));
     expect(out.verdict).toBe('unverified');
     expect(out.receipt).toContain('nothing verified');
-    expect(status).toBe(0);
+    expect(status).toBe(2);
   });
 
   it('unverified: the test command is not installed', () => {
