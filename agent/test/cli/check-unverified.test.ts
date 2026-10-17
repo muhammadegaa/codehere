@@ -63,4 +63,11 @@ describe('codehere check · nothing verified is not a pass', () => {
     expect(JSON.parse(r.stdout).verdict).toBe('skipped');
     expect(r.status).toBe(2);
   });
+
+  it('a CODEHERE_RERUN_TIMEOUT_MS that is not a number falls back to the default (third review, 2026-10-17)', () => {
+    const cwd = repo({ 'README.md': 'x' });
+    const r = check(cwd, { CODEHERE_TEST_CMD: 'sleep 0.3', CODEHERE_RERUN_TIMEOUT_MS: 'abc' });
+    expect(r.stdout).not.toContain('NaN');
+    expect(r.stdout).not.toContain('timed out');
+  });
 });

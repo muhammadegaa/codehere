@@ -71,7 +71,9 @@ export interface RerunTestsResult {
   remedy?: string;
 }
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.CODEHERE_RERUN_TIMEOUT_MS ?? 120_000);
+const TIMEOUT_SETTING = Number(process.env.CODEHERE_RERUN_TIMEOUT_MS);
+/** A value that is not a positive number falls back to two minutes; NaN would time out at once. */
+const DEFAULT_TIMEOUT_MS = TIMEOUT_SETTING > 0 ? TIMEOUT_SETTING : 120_000;
 
 /** 500 → "0.5s", 120000 → "120s". */
 const seconds = (ms: number) => `${Number.isInteger(ms / 1000) ? ms / 1000 : (ms / 1000).toFixed(1)}s`;
