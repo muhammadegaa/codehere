@@ -22,8 +22,7 @@ Last verified 2026-10-16. One page. Numbers come from commands noted next to the
 - Publish 1.0.2 (needed before the Action can use `--base` and `--claim`).
 - Push: local commits are not pushed; older ones lack review tokens, so the pre-push hook blocks (`git rev-list --count origin/v1-enterprise-spine..HEAD`).
 - Price and whether it recurs (the S11 pre-registration assumes £79 per repo-month).
-- Whether the public repository starts from fresh history (`docs/gates/SLIM-PLAN.md`, Phase 3 notes).
 
 ## Where to look
 
-`agent/README.md` (what a user sees) · `docs/gates/` (decision gates, the slim plan) · `agent/eval/` (false-done eval, S11 and the campaign) · `agent/CLAUDE.md` (how work is done here).
+`agent/README.md` (what a user sees) · `agent/eval/` (false-done eval, S11 and the campaign) · `agent/CLAUDE.md` (how work is done here).

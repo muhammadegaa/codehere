@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Tracked files and line counts per group, used to size the slim-down in docs/gates/SLIM-PLAN.md. Run from anywhere in the repo.
+// Tracked files and line counts per group, used to size the slim-down. Run from anywhere in the repo.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';

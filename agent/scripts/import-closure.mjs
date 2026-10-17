@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Which files under src/ (or test/) are reachable from the given entry files, following static imports,
-// re-exports and dynamic import() with a string literal. Used to size the `check` slim-down (docs/gates/SLIM-PLAN.md).
+// re-exports and dynamic import() with a string literal. Used to size the `check` slim-down.
 //   node scripts/import-closure.mjs <entry.ts> [<entry.ts> ...]            reachable src files with line counts, then unreachable ones
 //   node scripts/import-closure.mjs --tests <entry.ts> [...]               also classify each test file: imports only reachable src files or not
 import fs from 'node:fs';
