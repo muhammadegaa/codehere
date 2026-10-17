@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // S11 step 4: agreement between labelers, and the blind anchor sheet for the human labeler.
 //   node agree.mjs report              kappa and counts for Claude vs qwen (and vs the human once answers exist)
+//   node agree.mjs report --from labels-only.json   the same counts from the published file alone
+//   node agree.mjs export              write labels-only.json from the raw label files (refuses when they are absent)
 //   node agree.mjs anchor              pick 30 PRs (10 flagged by Claude, 10 by qwen only, 10 by neither) and write the blind sheet
 //   node agree.mjs score [--answers f] per-group human counts, kappas, D1 verdict at three C values, Amendment 2 estimate
 // Failing claim = any of L1..L5. "undecidable" and an empty list both count as not failing (PREREG).
@@ -26,8 +28,14 @@ function load(dir, pick) {
   }
   return out;
 }
-const claude = load(path.join(LAB, 'claude'), (j) => norm(j.labels));
-const qwen = load(path.join(LAB, 'qwen'), (j) => (j.parsed ? norm(j.parsed.labels) : null));
+// --from labels-only.json: recompute from the published file instead of the raw label files, which are not published.
+const fromArg = process.argv.indexOf('--from');
+const fromRows = fromArg > 0 ? JSON.parse(fs.readFileSync(process.argv[fromArg + 1], 'utf8')) : null;
+const claude = fromRows ? Object.fromEntries(fromRows.map((r) => [r.pr, norm(r.claude)])) : load(path.join(LAB, 'claude'), (j) => norm(j.labels));
+const qwen = fromRows ? Object.fromEntries(fromRows.map((r) => [r.pr, norm(r.qwen)])) : load(path.join(LAB, 'qwen'), (j) => (j.parsed ? norm(j.parsed.labels) : null));
+const agentOf = fromRows
+  ? Object.fromEntries(fromRows.map((r) => [r.pr, r.agent]))
+  : Object.fromEntries(JSON.parse(fs.readFileSync(path.join(HERE, 'sample-ids.json'), 'utf8')).sample.map((s) => [`${s.repo.replace('/', '__')}__${s.number}`, s.agent]));
 const ansArg = process.argv.indexOf('--answers');
 const humanFile = ansArg > 0 ? process.argv[ansArg + 1] : path.join(LAB, 'human', 'answers.json');
 const keyFile = path.join(LAB, 'human', 'key.json');
@@ -51,6 +59,10 @@ const fmt = (k) => `n=${k.n} both-fail=${k.tt} only-first=${k.tf} only-second=${
 const cmd = process.argv[2];
 if (cmd === 'export') {
   // labels-only.json: PR id and each model's labels, no reason or PR text (the packets and reasons are third-party text).
+  if (fromRows || !Object.keys(claude).length || !Object.keys(qwen).length) {
+    console.error('export needs the raw label files in evidence/S11/labels (not published); to recompute from labels-only.json use: node agree.mjs report --from labels-only.json');
+    process.exit(1);
+  }
   const { sample } = JSON.parse(fs.readFileSync(path.join(HERE, 'sample-ids.json'), 'utf8'));
   const rows = sample
     .map((s) => ({ pr: `${s.repo}#${s.number}`, agent: s.agent, id: `${s.repo.replace('/', '__')}__${s.number}` }))
@@ -67,6 +79,10 @@ if (cmd === 'export') {
   console.log(`failing claim: Claude ${count(claude)}, qwen ${count(qwen)} of ${ids.length}`);
   const per = (m) => { const c = {}; for (const id of ids) for (const l of m[id]) c[l] = (c[l] || 0) + 1; return JSON.stringify(c); };
   console.log('Claude labels', per(claude)); console.log('qwen labels  ', per(qwen));
+  for (const a of [...new Set(ids.map((id) => agentOf[id]))]) {
+    const ai = ids.filter((id) => agentOf[id] === a);
+    console.log(`  ${a} (n=${ai.length}): failing claim Claude ${ai.filter((id) => failing(claude[id])).length}, qwen ${ai.filter((id) => failing(qwen[id])).length}`);
+  }
   const hid = Object.keys(human).filter((id) => claude[id] && qwen[id]);
   if (hid.length) {
     console.log('human vs Claude:', fmt(kappa(human, claude, hid)));
@@ -136,4 +152,4 @@ if (cmd === 'export') {
     console.log(`  C = £${C}: f* = ${pct(f)}; count rule alone: ${l >= f ? 'GO' : u < f ? 'NO-GO' : 'inconclusive'}`);
   }
   console.log(`\nExploratory population estimate (Amendment 2), not a verdict: ${complete ? `${pct(est / n)}, range ${pct(lo / n)} to ${pct(hi / n)}` : 'a group has no answers'}`);
-} else console.log('usage: node agree.mjs report|anchor|score [--answers file]');
+} else console.log('usage: node agree.mjs report [--from labels-only.json]|export|anchor|score [--answers file]');
