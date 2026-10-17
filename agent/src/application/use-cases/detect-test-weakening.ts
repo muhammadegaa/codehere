@@ -9,8 +9,8 @@
  * the branch left that base (committed or not), which is the view a pull request needs.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 export interface TestWeakening {
   file: string;
@@ -157,6 +157,13 @@ function git(cwd: string, args: string[]): string {
   });
 }
 
+function hasGitAbove(cwd: string): boolean {
+  for (let d = resolve(cwd); ; d = dirname(d)) {
+    if (existsSync(join(d, '.git'))) return true;
+    if (dirname(d) === d) return false;
+  }
+}
+
 /**
  * Changes in `cwd` against HEAD, or against where the branch left `base` when it is given. Only test files are
  * diffed, so a large change elsewhere cannot push the test diff past the read limit.
@@ -164,8 +171,12 @@ function git(cwd: string, args: string[]): string {
 export function scanTestWeakening(cwd: string, base?: string): WeakeningScan {
   try {
     git(cwd, ['rev-parse', '--is-inside-work-tree']);
-  } catch {
-    return { findings: [], skipped: 'not a git repository' };
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { findings: [], error: 'git is not installed' };
+    // Skipped only when there is no repository at all. Any other git failure (GIT_DIR, ownership checks, a broken
+    // .git) means the scan should have run and did not; with --base a repository is required.
+    if (!base && !hasGitAbove(cwd)) return { findings: [], skipped: 'not a git repository' };
+    return { findings: [], error: 'git could not read this repository; run `git status` here to see why' };
   }
   if (!base) {
     try {
