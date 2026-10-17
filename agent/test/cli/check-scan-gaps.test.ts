@@ -92,6 +92,16 @@ describe('codehere check · the weakened-test scan does not go quiet', () => {
     expect(out.weakeningScan).toMatch(/not a git repository/);
     expect(check(dir).stdout).toMatch(/weakened-test scan skipped: not a git repository/);
   });
+
+  it('says so in text mode when the suite did not run either (third review, 2026-10-17)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codehere-gaps-nogit-'));
+    dirs.push(dir);
+    const env = { ...process.env, CODEHERE_TEST_CMD: 'sleep 5', CODEHERE_RERUN_TIMEOUT_MS: '300' };
+    delete env.CODEHERE_RERUN_TESTS;
+    const r = spawnSync('node', [CLI, 'check'], { cwd: dir, env, encoding: 'utf8' });
+    expect(r.stdout).toMatch(/Nothing verified/);
+    expect(r.stdout).toMatch(/weakened-test scan skipped: not a git repository/);
+  });
 });
 
 describe('codehere check · the scan in subfolders, renames and odd names (second review, 2026-10-17)', () => {

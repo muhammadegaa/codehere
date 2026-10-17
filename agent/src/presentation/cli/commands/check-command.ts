@@ -237,7 +237,7 @@ export async function executeCheckCommand(target: string | undefined, options: C
             ? colors.dim('  Fix it, then re-check:  ') + colors.success(`${r.remedy}\n\n`)
             : colors.dim('  Install the test runner, then run check again.\n\n')),
       );
-      process.stdout.write(weakenedText() + missingLines());
+      process.stdout.write(weakenedText() + missingLines() + scanText());
       return exitCode; // couldn't verify (2); a weakened test or a missing named test file still counts (1)
     }
     if (r.kind === 'timed-out' || r.kind === 'disabled') {
@@ -247,7 +247,7 @@ export async function executeCheckCommand(target: string | undefined, options: C
             `  — ${r.kind === 'timed-out' ? `'${r.command}' ${r.skippedReason?.replace(/^test re-run /, '')}` : r.skippedReason}.\n`,
           ),
       );
-      process.stdout.write(weakenedText() + missingLines());
+      process.stdout.write(weakenedText() + missingLines() + scanText());
       return exitCode;
     }
     process.stdout.write(
@@ -256,7 +256,7 @@ export async function executeCheckCommand(target: string | undefined, options: C
           'codehere proves the AI by re-running your tests; add one (npm test / node --test / pytest / go test / cargo test) and run check again.\n',
         ),
     );
-    process.stdout.write(weakenedText() + missingLines());
+    process.stdout.write(weakenedText() + missingLines() + scanText());
     return exitCode; // nothing was verified (2); a weakened test or a missing named test file still counts (1)
   }
 
@@ -272,7 +272,7 @@ export async function executeCheckCommand(target: string | undefined, options: C
           ? colors.dim('  Fix it, then re-check:  ') + colors.success(`${r.remedy}\n\n`)
           : colors.dim('  Install deps, then run check again.\n\n')),
     );
-    process.stdout.write(weakenedText() + missingLines());
+    process.stdout.write(weakenedText() + missingLines() + scanText());
     return exitCode; // non-zero for CI (unverified), but NOT a false "tests failed"
   }
 
