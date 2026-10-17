@@ -3,24 +3,25 @@ name: Publish to npm
 # T1-D · Publishes the codehere CLI to npm.
 # Triggered by pushing a v* tag (e.g. v0.3.0-rc.1, v0.3.0).
 #
-# Provenance attestation is OFF in this version because the source repo is
-# currently private — npm provenance requires a public source repo (npm needs
-# to be able to link the published tarball back to viewable source). Re-enable
-# `--provenance` + `id-token: write` permission once the repo is public.
+# Publishes with npm trusted publishing (OIDC): no npm token is stored in the repo.
+# The job's GitHub identity token (id-token: write) is exchanged for a one-time
+# publish credential, and npm attaches a provenance statement linking the tarball
+# to this workflow run. Needs npm CLI 11.5.1 or later and a public repository.
 #
-# Required one-time setup before this works:
-#   1. NPM_TOKEN secret: an Automation token from https://www.npmjs.com/settings/<user>/tokens
-#      (Settings → Secrets and variables → Actions → New repository secret).
-#      Token type must be "Automation" (works with the publish flow regardless
-#      of whether provenance is enabled).
+# Before the first tag:
+#   1. The GitHub repository must be public. npm generates provenance only for a
+#      trusted publish from a public repository; from a private one this fails.
+#   2. On npmjs.com (package codehere → Settings → Trusted Publisher → GitHub
+#      Actions): owner muhammadegaa, repository codehere, workflow filename
+#      publish.yml, no environment, and allow the `npm publish` action.
 #
 # Tag format: v<semver>. Pre-release tags (rc, beta, alpha) auto-publish under
 # the matching dist-tag (rc.1 → @rc, beta.1 → @beta, etc.) so they don't clobber
 # `@latest` for users on `npm install codehere`.
 #
-# Manual override:
-#   gh workflow run publish.yml -f tag=v0.3.0-rc.1
-# (Use this if you tagged locally + pushed but want to retry the publish step.)
+# Manual override (retry the publish for a tag already on the remote). Pass the tag
+# as the ref too, so the provenance names the commit that was built:
+#   gh workflow run publish.yml --ref v1.0.3 -f tag=v1.0.3
 
 on:
   push:
@@ -38,7 +39,9 @@ permissions:
   # the GitHub release (auto-attaching the SBOM and generating release notes).
   # Without it the npm publish succeeds but the GitHub release step 403s.
   contents: write
-  # id-token: write — re-add when re-enabling --provenance (requires public repo).
+  # id-token: write lets npm exchange the job's OIDC token for a publish credential
+  # (trusted publishing) and sign the provenance statement.
+  id-token: write
 
 jobs:
   publish:
@@ -54,13 +57,19 @@ jobs:
           # When invoked via workflow_dispatch, check out the requested tag instead of HEAD.
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Set up Node 20 + npm registry
+      # No registry-url: setup-node would then write an .npmrc that reads a token
+      # from NODE_AUTH_TOKEN, and trusted publishing uses no token.
+      - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: agent/package-lock.json
+
+      - name: npm 11.5.1 or later (trusted publishing)
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
 
       - name: Install dependencies
         run: npm ci
@@ -116,17 +125,15 @@ jobs:
       - name: Generate SBOM
         run: npm run sbom > ${{ steps.meta.outputs.sbom_file }}
 
-      - name: Publish (no provenance · private repo)
-        run: npm publish --access public --tag ${{ steps.meta.outputs.tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish (trusted publishing, with provenance)
+        run: npm publish --provenance --access public --tag ${{ steps.meta.outputs.tag }}
 
       - name: Attach SBOM to GitHub release
         if: github.event_name == 'push'
         # SHA-pinned on purpose.
         # Unpinned `@v2` would let a maintainer compromise of the action repo
         # publish a hostile build to v2; the next codehere tag push would run
-        # that code with NPM_TOKEN access and could publish a malicious package.
+        # that code in a job that can publish to npm and could publish a malicious package.
         # SHA below = `softprops/action-gh-release` v2 tag commit as resolved
         # 2026-05-01 via `gh api repos/softprops/action-gh-release/git/refs/tags/v2`.
         # Bump deliberately when a new v2.x ships, after reviewing the diff.
