@@ -56,3 +56,15 @@ describe('parseTestWeakening · .only and fit are JS/TS calls at the start of a 
     expect(why(file, line)).toEqual([]);
   });
 });
+
+describe('parseTestWeakening · .only after ; or }, and in .JS and .vue files (fifth review, 2026-10-17)', () => {
+  it.each([
+    ['a.test.js', "foo(); test.only('a', () => {"],
+    ['a.test.js', "}); it.only('b', () => {"],
+    ['a.test.js', "void it.only('a', () => {"],
+    ['test/a.test.JS', "it.only('a', () => {"],
+    ['test/a.spec.vue', "it.only('a', () => {"],
+  ])('%s: %s', (file, line) => {
+    expect(why(file, line)).toEqual(['skipped']);
+  });
+});

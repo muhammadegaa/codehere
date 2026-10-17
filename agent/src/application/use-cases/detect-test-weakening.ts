@@ -50,9 +50,10 @@ const SKIP: RegExp[] = [
   /\b(skip|todo)\s*:\s*(true\b|['"`])/,
 ];
 
-/** `.only`, `fit` and `fdescribe` make jest and mocha skip every other test; JS/TS only, as a call opening the line. */
-const JS_FILE = /\.[cm]?[jt]sx?$/;
-const JS_SKIP: RegExp[] = [/^(it|test|describe)\.only\(/, /^(fit|fdescribe)\(/];
+/** `.only`, `fit` and `fdescribe` make jest and mocha skip every other test; JS, TS and Vue test files only. */
+const JS_FILE = /\.([cm]?[jt]sx?|vue)$/i;
+// At the start of a statement: the line start, after `;` or `}`, or after `void`. Not inside a string.
+const JS_SKIP: RegExp[] = [/(^|[;}]\s*|\bvoid\s+)(it|test|describe)\.only\(/, /(^|[;}]\s*|\bvoid\s+)(fit|fdescribe)\(/];
 
 const ASSERTION =
   /\b(assert\w*|expect|should|self\.assert\w*|this->assert\w*|t\.(Error|Fatal)\w*)\s*[.(]|^\s*assert\s+\S/;
