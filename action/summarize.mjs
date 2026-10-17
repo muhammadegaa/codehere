@@ -40,7 +40,7 @@ if (!receipt) {
   const safe = reason
     .trim()
     .slice(0, 200)
-    .replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '?')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\u{e0000}-\u{e007f}]|\u034f/gu, '?')
     .replace(/`/g, "'");
   receipt = `${MARKER}\n> **codehere · verified outcome receipt** — couldn't run the check (\`${safe}\`) · unverified · ${when}`;
 }

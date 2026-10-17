@@ -150,24 +150,31 @@ describe('the receipt keeps findings and stays one blockquote (second review, 20
   });
 
   it('direction overrides and zero-width characters in a file name are replaced (third review, 2026-10-17)', () => {
-    const cwd = repoWith('test/bidi‮yp.txt​.py');
+    const cwd = repoWith('test/bidi\u202eyp.txt\u200b.py');
     const r = check(cwd, '--json');
     const out = JSON.parse(r.stdout);
     expect(out.weakened.length).toBe(1);
-    expect(out.receipt).not.toMatch(/[​‮]/);
-    expect(check(cwd).stdout).not.toMatch(/[​‮]/);
+    expect(out.receipt).not.toMatch(/[\u200b\u202e]/);
+    expect(check(cwd).stdout).not.toMatch(/[\u200b\u202e]/);
+  });
+
+  it('soft hyphens, line separators and tag characters in a file name are replaced (fourth review, 2026-10-17)', () => {
+    const cwd = repoWith('test/a\u00adb\u2028c\u{e0061}d\u034f\u180e.test.js');
+    const out = JSON.parse(check(cwd, '--json').stdout);
+    expect(out.weakened.length).toBe(1);
+    expect(out.receipt).not.toMatch(/[\u00ad\u2028\u034f\u180e]|\u{e0061}/u);
   });
 
   it('the Action fallback receipt replaces direction overrides too', () => {
     const dir = mkdtempSync(join(tmpdir(), 'codehere-escape-bidi-'));
     dirs.push(dir);
     const err = join(dir, 'stderr.txt');
-    writeFileSync(err, 'bad ref ‮exe.txt⁦\n');
+    writeFileSync(err, 'bad ref \u202eexe.txt\u2066 \u00ad\u2028\u{e0061}\n');
     spawnSync('node', [SUMMARIZE, join(dir, 'missing.json'), err, join(dir, 'receipt.md')], {
       encoding: 'utf8',
       env: { PATH: process.env.PATH },
     });
-    expect(readFileSync(join(dir, 'receipt.md'), 'utf8')).not.toMatch(/[‮⁦]/);
+    expect(readFileSync(join(dir, 'receipt.md'), 'utf8')).not.toMatch(/[\u202e\u2066\u00ad\u2028]|\u{e0061}/u);
   });
 
   it('terminal escapes in --claim are not printed back', () => {

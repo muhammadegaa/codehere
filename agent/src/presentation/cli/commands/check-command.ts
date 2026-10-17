@@ -26,9 +26,13 @@ const WHY_TEXT: Record<TestWeakening['why'], string> = {
 // File names, diff lines and branch names come from whoever wrote the change, so they are treated as untrusted:
 // control characters (terminal escapes among them) are replaced, and in the markdown receipt the text sits inside
 // an inline code span, where no link, @mention or emphasis renders.
-// Control characters, plus direction overrides and zero-width characters that can disguise a file name.
+// Control characters, plus direction overrides, zero-width, soft-hyphen, line-separator and tag characters that can
+// disguise a file name.
 const plain = (s: string) =>
-  s.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '?');
+  s.replace(
+    /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\u{e0000}-\u{e007f}]|\u034f/gu,
+    '?',
+  );
 const code = (s: string) => '`' + plain(s).replace(/`/g, "'") + '`';
 /** Characters a branch name usually has; anything else is not repeated in the reproduce command. */
 const SAFE_REF = /^[A-Za-z0-9._/@+-]+$/;
