@@ -63,12 +63,18 @@ jobs:
       - name: Vitest, full suite
         run: npx vitest run --reporter=default
 
-      # The eval re-runs `codehere check` on recorded claims. Without pytest a Python task
-      # grades grey (unmeasured), so install it first. setup-python gives pip a Python it may
-      # install into: the runner's Homebrew Python on macOS refuses (PEP 668).
+      # The eval re-runs `codehere check` on recorded claims, which calls node and npm (setup-node
+      # above), pytest and go. A task whose runner is missing grades grey, so install each one.
+      # setup-python gives pip a Python it may install into: the runner's Homebrew Python on macOS
+      # refuses (PEP 668). macOS runners have no Go on PATH.
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: false
 
       - name: Install pytest for the eval
         run: python3 -m pip install pytest
