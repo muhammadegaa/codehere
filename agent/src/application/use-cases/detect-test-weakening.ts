@@ -156,8 +156,12 @@ const MAX_DIFF = 64 * 1024 * 1024;
 
 /** git with literal paths and unquoted non-ASCII names. */
 function git(cwd: string, args: string[]): string {
+  // GIT_DIFF_OPTS overrides --unified=0, and context lines would shift every line number after them.
+  const env = { ...process.env };
+  delete env.GIT_DIFF_OPTS;
   return execFileSync('git', ['-c', 'core.quotepath=false', '--literal-pathspecs', ...args], {
     cwd,
+    env,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
     maxBuffer: MAX_DIFF,

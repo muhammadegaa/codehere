@@ -149,4 +149,14 @@ describe('codehere check · the scan in subfolders, renames and odd names (secon
     expect(JSON.parse(r.stdout).weakened.map((w: { file: string }) => w.file)).toEqual(['a.test.js']);
     expect(r.status).toBe(1);
   });
+
+  it('reports the right line when GIT_DIFF_OPTS adds context lines (third review, 2026-10-17)', () => {
+    const dir = base({ 'package.json': NODE_PKG, 'a.test.js': REAL });
+    writeFileSync(join(dir, 'a.test.js'), WEAK);
+    const env = { ...process.env, GIT_DIFF_OPTS: '--unified=3' };
+    delete env.CODEHERE_TEST_CMD;
+    delete env.CODEHERE_RERUN_TESTS;
+    const r = spawnSync('node', [CLI, 'check', '--json'], { cwd: dir, env, encoding: 'utf8' });
+    expect(JSON.parse(r.stdout).weakened.map((w: { line: number }) => w.line)).toEqual([3]);
+  });
 });
