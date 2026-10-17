@@ -68,3 +68,22 @@ describe('parseTestWeakening · .only after ; or }, and in .JS and .vue files (f
     expect(why(file, line)).toEqual(['skipped']);
   });
 });
+
+describe('parseTestWeakening · .only and fit in strings and comments, and after { or await (sixth review, 2026-10-17)', () => {
+  it.each([
+    ['a.test.js', 'const s = "a; fit(x)";'],
+    ['a.test.js', 'const s = `${a}; it.only(`;'],
+    ['a.test.js', "// foo; it.only('x')"],
+    ['a.test.js', "log('done; test.only(');"],
+  ])('not flagged: %s: %s', (file, line) => {
+    expect(why(file, line)).toEqual([]);
+  });
+
+  it.each([
+    ['a.test.js', "describe('s', () => { it.only('a', fn) })"],
+    ['a.test.ts', "await test.only('a', fn);"],
+    ['a.test.js', "log('done'); test.only('x', fn)"],
+  ])('flagged: %s: %s', (file, line) => {
+    expect(why(file, line)).toEqual(['skipped']);
+  });
+});

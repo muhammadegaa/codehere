@@ -52,8 +52,13 @@ const SKIP: RegExp[] = [
 
 /** `.only`, `fit` and `fdescribe` make jest and mocha skip every other test; JS, TS and Vue test files only. */
 const JS_FILE = /\.([cm]?[jt]sx?|vue)$/i;
-// At the start of a statement: the line start, after `;` or `}`, or after `void`. Not inside a string.
-const JS_SKIP: RegExp[] = [/(^|[;}]\s*|\bvoid\s+)(it|test|describe)\.only\(/, /(^|[;}]\s*|\bvoid\s+)(fit|fdescribe)\(/];
+// At the start of a statement: the line start, after `;`, `{` or `}`, or after `void` or `await`.
+const JS_SKIP: RegExp[] = [
+  /(^|[;{}]\s*|\b(void|await)\s+)(it|test|describe)\.only\(/,
+  /(^|[;{}]\s*|\b(void|await)\s+)(fit|fdescribe)\(/,
+];
+/** The line with quoted text emptied and a trailing `//` comment dropped, so neither can pose as a call. */
+const jsCode = (text: string) => text.replace(/(["'`])(?:\\.|(?!\1).)*\1/g, '""').replace(/\/\/.*$/, '');
 
 const ASSERTION =
   /\b(assert\w*|expect|should|self\.assert\w*|this->assert\w*|t\.(Error|Fatal)\w*)\s*[.(]|^\s*assert\s+\S/;
@@ -117,7 +122,7 @@ export function parseTestWeakening(diff: string, readLines?: (file: string) => s
       const body = uncomment(text);
       let why: TestWeakening['why'] | null = null;
       if (TRIVIAL.some((re) => re.test(text))) why = 'trivial-assertion';
-      else if (SKIP.some((re) => re.test(text)) || (JS_FILE.test(file) && JS_SKIP.some((re) => re.test(text))))
+      else if (SKIP.some((re) => re.test(text)) || (JS_FILE.test(file) && JS_SKIP.some((re) => re.test(jsCode(text)))))
         why = 'skipped';
       else if (body !== null && wasCommentedOut(body, removed)) why = 'commented-out';
       else if (BARE_RETURN.test(text)) {
