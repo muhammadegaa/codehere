@@ -45,7 +45,8 @@ try {
   let existing;
   for (let page = 1; page <= 5 && !existing; page++) {
     const batch = await api('GET', `${base}/${pr}/comments?per_page=100&page=${page}`);
-    existing = batch.find((c) => c.user?.type === 'Bot' && typeof c.body === 'string' && c.body.includes(MARKER));
+    // Our receipt starts with the marker; another bot quoting PR text that contains it does not.
+    existing = batch.find((c) => c.user?.type === 'Bot' && typeof c.body === 'string' && c.body.startsWith(MARKER));
     if (batch.length < 100) break;
   }
   if (existing) await api('PATCH', `${base}/comments/${existing.id}`, { body: receipt });

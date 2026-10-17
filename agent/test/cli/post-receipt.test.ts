@@ -111,6 +111,16 @@ describe('action/post-receipt.mjs', () => {
     expect(comments).toHaveLength(2);
   });
 
+  it('never edits another bot comment that only quotes the marker (third review, 2026-10-17)', async () => {
+    const quoted = `Summary of the PR body:\n> ${MARKER}`;
+    comments = [{ id: 9, body: quoted, user: { login: 'other-app[bot]', type: 'Bot' } }];
+    const r = await run(`${MARKER}\n> receipt`);
+    expect(r.status).toBe(0);
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
+    expect(comments.find((c) => c.id === 9)?.body).toBe(quoted);
+    expect(comments).toHaveLength(2);
+  });
+
   it('does nothing outside a pull request', async () => {
     comments = [];
     const r = await run(`${MARKER}\n> x`, null);
