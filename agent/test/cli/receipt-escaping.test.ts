@@ -149,6 +149,27 @@ describe('the receipt keeps findings and stays one blockquote (second review, 20
     }
   });
 
+  it('direction overrides and zero-width characters in a file name are replaced (third review, 2026-10-17)', () => {
+    const cwd = repoWith('test/bidi‮yp.txt​.py');
+    const r = check(cwd, '--json');
+    const out = JSON.parse(r.stdout);
+    expect(out.weakened.length).toBe(1);
+    expect(out.receipt).not.toMatch(/[​‮]/);
+    expect(check(cwd).stdout).not.toMatch(/[​‮]/);
+  });
+
+  it('the Action fallback receipt replaces direction overrides too', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codehere-escape-bidi-'));
+    dirs.push(dir);
+    const err = join(dir, 'stderr.txt');
+    writeFileSync(err, 'bad ref ‮exe.txt⁦\n');
+    spawnSync('node', [SUMMARIZE, join(dir, 'missing.json'), err, join(dir, 'receipt.md')], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH },
+    });
+    expect(readFileSync(join(dir, 'receipt.md'), 'utf8')).not.toMatch(/[‮⁦]/);
+  });
+
   it('terminal escapes in --claim are not printed back', () => {
     const cwd = repoWith('a.test.js');
     const r = check(
