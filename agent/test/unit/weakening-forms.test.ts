@@ -87,3 +87,21 @@ describe('parseTestWeakening · .only and fit in strings and comments, and after
     expect(why(file, line)).toEqual(['skipped']);
   });
 });
+
+describe('parseTestWeakening · .only anywhere outside strings, fit after => or return (seventh review, 2026-10-17)', () => {
+  it.each([
+    ['a.test.js', "describe('s', () => it.only('a', fn))"],
+    ['a.test.js', "return it.only('a', fn);"],
+    ['a.test.js', "const t = it.only('a', fn);"],
+    ['a.test.js', "describe('s', () => fit('a', fn))"],
+  ])('flagged: %s: %s', (file, line) => {
+    expect(why(file, line)).toEqual(['skipped']);
+  });
+
+  it.each([
+    ['a.test.js', "db.select(); }).only('id')"],
+    ['a.test.js', 'const r = fit(x);'],
+  ])('not flagged: %s: %s', (file, line) => {
+    expect(why(file, line)).toEqual([]);
+  });
+});

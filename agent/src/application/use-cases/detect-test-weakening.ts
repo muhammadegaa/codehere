@@ -52,10 +52,11 @@ const SKIP: RegExp[] = [
 
 /** `.only`, `fit` and `fdescribe` make jest and mocha skip every other test; JS, TS and Vue test files only. */
 const JS_FILE = /\.([cm]?[jt]sx?|vue)$/i;
-// At the start of a statement: the line start, after `;`, `{` or `}`, or after `void` or `await`.
+// `.only` anywhere in the code (not after a dot, so `qs.only(` and `}).only(` are left alone); `fit` and `fdescribe`,
+// which are also ordinary function names, only where a statement or an arrow body starts.
 const JS_SKIP: RegExp[] = [
-  /(^|[;{}]\s*|\b(void|await)\s+)(it|test|describe)\.only\(/,
-  /(^|[;{}]\s*|\b(void|await)\s+)(fit|fdescribe)\(/,
+  /(?<![\w$.])(it|test|describe)\.only\(/,
+  /(^|[;{}]\s*|=>\s*|\b(void|await|return)\s+)(fit|fdescribe)\(/,
 ];
 /** The line with quoted text emptied and a trailing `//` comment dropped, so neither can pose as a call. */
 const jsCode = (text: string) => text.replace(/(["'`])(?:\\.|(?!\1).)*\1/g, '""').replace(/\/\/.*$/, '');
