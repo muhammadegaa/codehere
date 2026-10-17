@@ -40,8 +40,8 @@ describe('parseTestWeakening · real checks stay unflagged', () => {
     ['test_a.py', '        self.assertEqual(result, 2)'],
     ['test_a.py', '@pytest.mark.skipif(sys.platform == "win32", reason="posix only")'],
     ['a.test.js', '  expect(sum(1, 1)).toBe(2);'],
-    ['a.test.js', "  expect(x).toBe(y)"],
-    ['a.test.js', "const only = list.filter((t) => t.only);"],
+    ['a.test.js', '  expect(x).toBe(y)'],
+    ['a.test.js', 'const only = list.filter((t) => t.only);'],
   ])('%s: %s', (file, line) => {
     expect(why(file, line)).toEqual([]);
   });
