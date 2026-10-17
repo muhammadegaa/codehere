@@ -46,3 +46,13 @@ describe('parseTestWeakening · real checks stay unflagged', () => {
     expect(why(file, line)).toEqual([]);
   });
 });
+
+describe('parseTestWeakening · .only and fit are JS/TS calls at the start of a line (fourth review, 2026-10-17)', () => {
+  it.each([
+    ['test_model.py', '    fit(data)'],
+    ['model_test.go', '\tfit(t, xs)'],
+    ['test/fixtures/sample.js', 'module.exports = "describe.only(\\"x\\", () => {})";'],
+  ])('%s: %s', (file, line) => {
+    expect(why(file, line)).toEqual([]);
+  });
+});

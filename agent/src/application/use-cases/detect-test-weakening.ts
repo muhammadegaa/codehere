@@ -40,9 +40,6 @@ const TRIVIAL: RegExp[] = [
 const SKIP: RegExp[] = [
   /@pytest\.mark\.(skip|xfail)\b/,
   /@pytest\.mark\.skipif\(\s*True\b/,
-  // `.only` and `fit`/`fdescribe` make jest and mocha skip every other test in the file.
-  /\b(it|test|describe)\.only\(/,
-  /^(fit|fdescribe)\(/,
   /\bpytest\.(skip|xfail)\(/,
   /@unittest\.skip/,
   /\b(it|test|describe)\.(skip|todo)\(/,
@@ -52,6 +49,10 @@ const SKIP: RegExp[] = [
   // node:test options: { skip: true } / { skip: 'reason' } / { todo: true }; a conditional skip is left alone
   /\b(skip|todo)\s*:\s*(true\b|['"`])/,
 ];
+
+/** `.only`, `fit` and `fdescribe` make jest and mocha skip every other test; JS/TS only, as a call opening the line. */
+const JS_FILE = /\.[cm]?[jt]sx?$/;
+const JS_SKIP: RegExp[] = [/^(it|test|describe)\.only\(/, /^(fit|fdescribe)\(/];
 
 const ASSERTION =
   /\b(assert\w*|expect|should|self\.assert\w*|this->assert\w*|t\.(Error|Fatal)\w*)\s*[.(]|^\s*assert\s+\S/;
@@ -115,7 +116,8 @@ export function parseTestWeakening(diff: string, readLines?: (file: string) => s
       const body = uncomment(text);
       let why: TestWeakening['why'] | null = null;
       if (TRIVIAL.some((re) => re.test(text))) why = 'trivial-assertion';
-      else if (SKIP.some((re) => re.test(text))) why = 'skipped';
+      else if (SKIP.some((re) => re.test(text)) || (JS_FILE.test(file) && JS_SKIP.some((re) => re.test(text))))
+        why = 'skipped';
       else if (body !== null && wasCommentedOut(body, removed)) why = 'commented-out';
       else if (BARE_RETURN.test(text)) {
         const lines = readLines?.(file);
