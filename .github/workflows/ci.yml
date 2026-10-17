@@ -64,7 +64,12 @@ jobs:
         run: npx vitest run --reporter=default
 
       # The eval re-runs `codehere check` on recorded claims. Without pytest a Python task
-      # grades grey (unmeasured), so install it first.
+      # grades grey (unmeasured), so install it first. setup-python gives pip a Python it may
+      # install into: the runner's Homebrew Python on macOS refuses (PEP 668).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install pytest for the eval
         run: python3 -m pip install pytest
 
