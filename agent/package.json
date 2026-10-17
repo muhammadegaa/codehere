@@ -1,6 +1,6 @@
 {
   "name": "codehere",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Re-runs the tests an AI says passed, and tells you whether they did. Flags weakened tests and test files that do not exist.",
   "main": "dist/index.js",
   "type": "module",

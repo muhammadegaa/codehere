@@ -9,7 +9,18 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ---
 
-## [1.0.2] - unreleased (prepared 2026-10-05)
+## [1.0.3] - unreleased (prepared 2026-10-17)
+
+The package changes are README-only. No change to the `check` command or the Action.
+
+### Changed
+
+- The README no longer says that 1.0.2 and its `--base` and `--claim` options are unpublished, or that the Action's default version is not on npm.
+- Publishing moves to GitHub Actions with npm trusted publishing and provenance, instead of a stored npm token.
+
+---
+
+## [1.0.2] - 2026-10-17
 
 `codehere check` now catches the ways an AI makes a green test run mean nothing,
 and produces a receipt that can be reproduced.
