@@ -25,17 +25,24 @@ const TEST_PATH =
   /(^|\/)(test_[^/]*\.py|[^/]*_test\.py|[^/]*\.(test|spec)\.[cm]?[jt]sx?|[^/]*_test\.go|[^/]*Test\.php)$|(^|\/)(__tests__|tests?)\//;
 
 const TRIVIAL: RegExp[] = [
-  /^assert\s+(True|1|not\s+False)\s*(#.*)?$/,
+  // `assert True`, `assert(True)`, `assert True, "message"`
+  /^assert\s*\(?\s*(True|1|not\s+False)\s*\)?\s*(,.*)?(#.*)?$/,
   /^assert\s+([\w.'"]+)\s*==\s*\1\s*(#.*)?$/,
   /\bexpect\(\s*(true|1)\s*\)\s*\.\s*(toBe|toEqual|toStrictEqual)\(\s*(true|1)\s*\)/,
+  /\bexpect\(\s*([\w.'"]+)\s*\)\s*\.\s*(toBe|toEqual|toStrictEqual)\(\s*\1\s*\)/,
   /\bexpect\(\s*true\s*\)\s*\.\s*toBeTruthy\(\)/,
   /\bassert(\.ok)?\(\s*true\s*\)/,
   /\bassert\.(equal|strictEqual|deepEqual|deepStrictEqual)\(\s*([\w.'"]+)\s*,\s*\2\s*\)/,
-  /\bassertTrue\(\s*true\s*\)/,
+  /\bassert(Equal|Equals|Same)\(\s*([\w.'"]+)\s*,\s*\2\s*\)/,
+  /\bassertTrue\(\s*(true|True)\s*\)/,
 ];
 
 const SKIP: RegExp[] = [
   /@pytest\.mark\.(skip|xfail)\b/,
+  /@pytest\.mark\.skipif\(\s*True\b/,
+  // `.only` and `fit`/`fdescribe` make jest and mocha skip every other test in the file.
+  /\b(it|test|describe)\.only\(/,
+  /^(fit|fdescribe)\(/,
   /\bpytest\.(skip|xfail)\(/,
   /@unittest\.skip/,
   /\b(it|test|describe)\.(skip|todo)\(/,
