@@ -125,8 +125,21 @@ jobs:
       - name: Generate SBOM
         run: npm run sbom > ${{ steps.meta.outputs.sbom_file }}
 
+      # npm logs a missing id-token only at silly level, so say here whether the job has one
+      # (prints yes or no, never the values).
+      - name: OIDC available to this job
+        run: |
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+            echo "id-token request variables present: yes"
+          else
+            echo "id-token request variables present: no"
+          fi
+
+      # --loglevel verbose: npm logs a failed id-token fetch or a rejected token exchange
+      # only at verbose level; without it the run shows just ENEEDAUTH. Those log lines
+      # carry status and error messages, not the tokens.
       - name: Publish (trusted publishing, with provenance)
-        run: npm publish --provenance --access public --tag ${{ steps.meta.outputs.tag }}
+        run: npm publish --provenance --access public --tag ${{ steps.meta.outputs.tag }} --loglevel verbose
 
       - name: Attach SBOM to GitHub release
         if: github.event_name == 'push'
