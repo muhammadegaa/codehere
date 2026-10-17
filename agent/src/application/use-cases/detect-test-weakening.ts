@@ -67,7 +67,8 @@ function wasCommentedOut(body: string, removed: string[]): boolean {
 
 /** `b/path` or git's C-quoted `"b/p\"ath"` form → `path`. */
 function headerPath(raw: string): string | null {
-  const v = raw.slice(4);
+  // git appends a tab to the header when the path contains a space.
+  const v = raw.slice(4).replace(/\t$/, '');
   if (v.startsWith('b/')) return v.slice(2);
   if (v.startsWith('"b/') && v.endsWith('"')) {
     return v.slice(3, -1).replace(/\\(["\\tn])/g, (_, c: string) => (c === 't' ? '\t' : c === 'n' ? '\n' : c));
@@ -174,18 +175,28 @@ export function scanTestWeakening(cwd: string, base?: string): WeakeningScan {
     }
   }
   const from = base ? resolveBase(cwd, base) : 'HEAD';
+  // Fixed diff options, so a user's or the change's own git config cannot alter what the parser reads: paths
+  // relative to `cwd` (a package folder inside a repository), a/ and b/ prefixes, no external diff or textconv,
+  // binary attributes ignored, renames paired.
+  const opts = ['--relative', '--no-ext-diff', '--no-textconv', '--text', '--src-prefix=a/', '--dst-prefix=b/', '-M'];
   let tests: string[];
   try {
-    tests = git(cwd, ['diff', '--name-only', '-z', from])
-      .split('\0')
-      .filter((p) => p && TEST_PATH.test(p));
+    // -z name-status: status, path (and for renames and copies a second path), NUL-separated. Both paths of a
+    // rename go into the pathspec so git can pair them; a test renamed and weakened is still an existing test.
+    const fields = git(cwd, ['diff', ...opts, '--name-status', '-z', from]).split('\0');
+    tests = [];
+    for (let i = 0; i < fields.length - 1; ) {
+      const status = fields[i++];
+      const paths = /^[RC]/.test(status) ? [fields[i++], fields[i++]] : [fields[i++]];
+      if (paths.some((p) => p && TEST_PATH.test(p))) tests.push(...paths.filter(Boolean));
+    }
   } catch {
     return { findings: [], error: 'could not read the diff (the list of changed files)' };
   }
   if (!tests.length) return { findings: [] };
   let diff: string;
   try {
-    diff = git(cwd, ['diff', '--unified=0', '--no-color', from, '--', ...tests]);
+    diff = git(cwd, ['diff', ...opts, '--unified=0', '--no-color', from, '--', ...tests]);
   } catch {
     return {
       findings: [],

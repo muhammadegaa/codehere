@@ -93,3 +93,60 @@ describe('codehere check · the weakened-test scan does not go quiet', () => {
     expect(check(dir).stdout).toMatch(/weakened-test scan skipped: not a git repository/);
   });
 });
+
+describe('codehere check · the scan in subfolders, renames and odd names (second review, 2026-10-17)', () => {
+  function base(files: Record<string, string>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'codehere-gaps2-'));
+    dirs.push(dir);
+    for (const [f, c] of Object.entries(files)) {
+      mkdirSync(join(dir, f, '..'), { recursive: true });
+      writeFileSync(join(dir, f), c);
+    }
+    git(dir, 'init', '-q', '-b', 'main');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'base');
+    return dir;
+  }
+
+  it('sees a weakened test when checking a package folder inside the repository', () => {
+    const dir = base({ 'pkg/package.json': NODE_PKG, 'pkg/test/a.test.js': REAL });
+    writeFileSync(join(dir, 'pkg/test/a.test.js'), WEAK);
+    const r = check(join(dir, 'pkg'), '--json');
+    expect(JSON.parse(r.stdout).weakened.map((w: { file: string }) => w.file)).toEqual(['test/a.test.js']);
+    expect(r.status).toBe(1);
+  });
+
+  it('sees a test that was renamed and weakened in the same change', () => {
+    const dir = base({ 'package.json': NODE_PKG, 'test/a.test.js': REAL });
+    git(dir, 'mv', 'test/a.test.js', 'test/b.test.js');
+    writeFileSync(join(dir, 'test/b.test.js'), WEAK);
+    const r = check(dir, '--json');
+    expect(JSON.parse(r.stdout).weakened.map((w: { file: string }) => w.file)).toEqual(['test/b.test.js']);
+    expect(r.status).toBe(1);
+  });
+
+  it('sees a weakened test whose name has a space', () => {
+    const dir = base({ 'package.json': NODE_PKG, 'my calc.test.js': REAL });
+    writeFileSync(join(dir, 'my calc.test.js'), WEAK);
+    const r = check(dir, '--json');
+    expect(JSON.parse(r.stdout).weakened.map((w: { file: string }) => w.file)).toEqual(['my calc.test.js']);
+    expect(r.status).toBe(1);
+  });
+
+  it('is not switched off by git config prefixes or a .gitattributes that marks tests binary', () => {
+    const dir = base({ 'package.json': NODE_PKG, 'a.test.js': REAL });
+    writeFileSync(join(dir, 'a.test.js'), WEAK);
+    writeFileSync(join(dir, '.gitattributes'), '*.test.js -diff\n');
+    const env = {
+      ...process.env,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'diff.noprefix',
+      GIT_CONFIG_VALUE_0: 'true',
+    };
+    delete env.CODEHERE_TEST_CMD;
+    delete env.CODEHERE_RERUN_TESTS;
+    const r = spawnSync('node', [CLI, 'check', '--json'], { cwd: dir, env, encoding: 'utf8' });
+    expect(JSON.parse(r.stdout).weakened.map((w: { file: string }) => w.file)).toEqual(['a.test.js']);
+    expect(r.status).toBe(1);
+  });
+});
