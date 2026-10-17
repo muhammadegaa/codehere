@@ -23,7 +23,18 @@ const WHY_TEXT: Record<TestWeakening['why'], string> = {
   'unreachable-assertion': 'assertion after an early return',
 };
 
-const weakenedLines = (w: TestWeakening[]) => w.map((f) => `${f.file}:${f.line} · ${WHY_TEXT[f.why]} · ${f.text}`);
+// File names, diff lines and branch names come from whoever wrote the change, so they are treated as untrusted:
+// control characters (terminal escapes among them) are replaced, and in the markdown receipt the text sits inside
+// an inline code span, where no link, @mention or emphasis renders.
+const plain = (s: string) => s.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '?');
+const code = (s: string) => '`' + plain(s).replace(/`/g, "'") + '`';
+/** Characters a branch name usually has; anything else is not repeated in the reproduce command. */
+const SAFE_REF = /^[A-Za-z0-9._/@+-]+$/;
+
+const weakenedLines = (w: TestWeakening[]) =>
+  w.map((f) => `${plain(f.file)}:${f.line} · ${WHY_TEXT[f.why]} · ${plain(f.text)}`);
+const weakenedMarkdown = (w: TestWeakening[]) =>
+  w.map((f) => `${code(f.file)}:${f.line} · ${WHY_TEXT[f.why]} · ${code(f.text)}`);
 
 export interface CheckOptions {
   json?: boolean;
@@ -61,7 +72,7 @@ export function checkVerdict(
 /** The check command that gives the same verdict as this run: the options that changed it are repeated. */
 function reproduceCommand({ base, claim }: { base?: string; claim?: string }): string {
   let cmd = 'codehere check';
-  if (base) cmd += ` --base ${base}`;
+  if (base) cmd += SAFE_REF.test(base) ? ` --base ${base}` : ' --base <the same base>';
   if (claim) {
     const inlineable = claim.length <= 160 && !/[`'\n\r]/.test(claim);
     cmd += inlineable ? ` --claim '${claim}'` : ' --claim <the same summary>';
@@ -113,13 +124,13 @@ function buildProofBlock(
   if (!r.ran) {
     if (r.kind === 'command-not-found') {
       const fix = r.remedy ? ` · fix: \`${r.remedy}\`` : '';
-      return `> **codehere · verified outcome receipt** — couldn't run \`${r.command || 'the tests'}\` (runner/deps not installed) · unverified${fix} · ${when}\n`;
+      return `> **codehere · verified outcome receipt** — couldn't run ${code(r.command || 'the tests')} (runner/deps not installed) · unverified${fix} · ${when}\n`;
     }
-    return `> **codehere · verified outcome receipt** — no suite re-run (${r.skippedReason || 'none detected'}) · nothing verified · ${when}\n`;
+    return `> **codehere · verified outcome receipt** — no suite re-run (${code(r.skippedReason || 'none detected')}) · nothing verified · ${when}\n`;
   }
   if (r.kind === 'runner-missing') {
     const fix = r.remedy ? ` · fix: \`${r.remedy}\`` : '';
-    return `> **codehere · verified outcome receipt** — couldn't run \`${r.command}\` on ${at} (runner not installed, exit ${r.exitCode}) · unverified${fix} · ${when}\n`;
+    return `> **codehere · verified outcome receipt** — couldn't run ${code(r.command ?? '')} on ${at} (runner not installed, exit ${r.exitCode}) · unverified${fix} · ${when}\n`;
   }
   const passed = (r.exitCode ?? 1) === 0 && !r.noTests;
   const counts =
@@ -143,16 +154,16 @@ function buildProofBlock(
       ? `> Weakened-test scan skipped: ${scan.skipped}\n`
       : '';
   const missingNote = missingClaimed.length
-    ? `> The AI named test files that are not in the repo: ${missingClaimed.join(' · ')}\n`
+    ? `> The AI named test files that are not in the repo: ${missingClaimed.map(code).join(' · ')}\n`
     : '';
   // Reproduce line: the real, verifiable trust — anyone can re-run and confirm.
   const reproduce = sha ? `> Reproduce independently: \`git checkout ${sha} && ${reproduceCommand(repro)}\`\n` : '';
   const weakenedNote = weakened.length
-    ? `> Tests changed in this diff, so a pass may check nothing: ${weakenedLines(weakened).join(' · ')}\n`
+    ? `> Tests changed in this diff, so a pass may check nothing: ${weakenedMarkdown(weakened).join(' · ')}\n`
     : '';
   return (
     `> **codehere · verified outcome receipt** · ${verdict}${counts}\n` +
-    `> codehere independently re-ran \`${r.command}\` on ${at} — exit ${r.exitCode}. Observed, not the AI's claim. · ${when}\n` +
+    `> codehere independently re-ran ${code(r.command ?? '')} on ${at} — exit ${r.exitCode}. Observed, not the AI's claim. · ${when}\n` +
     weakenedNote +
     missingNote +
     scanNote +
@@ -181,7 +192,7 @@ export async function executeCheckCommand(target: string | undefined, options: C
     weakened.length
       ? weakenedLines(weakened)
           .map((l) => colors.dim(`  ${l}\n`))
-          .join('') + colors.dim(`  › ${options.base ? `git diff ${options.base}...HEAD` : 'git diff HEAD'}\n`)
+          .join('') + colors.dim(`  › ${options.base ? `git diff ${plain(options.base)}...HEAD` : 'git diff HEAD'}\n`)
       : '';
   const scanText = () =>
     scan.error
@@ -191,7 +202,7 @@ export async function executeCheckCommand(target: string | undefined, options: C
         : '';
   const missingLines = () =>
     missingClaimed.length
-      ? missingClaimed.map((f) => colors.dim(`  ${f} · named by the AI, not in the repo\n`)).join('')
+      ? missingClaimed.map((f) => colors.dim(`  ${plain(f)} · named by the AI, not in the repo\n`)).join('')
       : '';
 
   if (options.json) {

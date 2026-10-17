@@ -35,7 +35,14 @@ if (!receipt) {
     /* keep the default reason */
   }
   const when = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
-  receipt = `${MARKER}\n> **codehere · verified outcome receipt** — couldn't run the check (${reason.trim().slice(0, 200)}) · unverified · ${when}`;
+  // stderr can carry a branch name or other text from the pull request: no control characters, and inside a code
+  // span so nothing in it renders as a link or a mention.
+  const safe = reason
+    .trim()
+    .slice(0, 200)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '?')
+    .replace(/`/g, "'");
+  receipt = `${MARKER}\n> **codehere · verified outcome receipt** — couldn't run the check (\`${safe}\`) · unverified · ${when}`;
 }
 
 // On a pull request the receipt's commit is GitHub's temporary merge commit, which a fresh clone does not have.

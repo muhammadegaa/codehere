@@ -61,7 +61,7 @@ describe('codehere check --claim', () => {
     expect(text).toContain('test/webhook.test.js');
     const proof = check(cwd, '--proof', '--claim', claim).stdout;
     expect(proof).toContain('✕ tests pass · 1 claimed test file not found');
-    expect(proof).toContain('not in the repo: test/webhook.test.js');
+    expect(proof).toContain('not in the repo: `test/webhook.test.js`');
   });
 
   it('still flags a missing file when no suite can run at all', () => {
