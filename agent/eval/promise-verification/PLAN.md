@@ -1,5 +1,7 @@
 # Promise verification plan: codehere 1.0.2
 
+This is the original working plan, kept as written. Many files it names were working files or planned tools and are not part of the published repository, among them `STATE.md`, the scratchpad and handoff files, `NOW.md` and `coverage.mjs`.
+
 Draft 2 · 2026-10-09 · written by Claude for the owner · nothing in this plan has been run yet.
 Revised after the owner's point that AI reliance means there is no definitive way to show a promise is 100% delivered. Section 1 now states what the campaign can and cannot show; sections 4, 5 (S3, S4, S5, S14), 7, 9, 11 and 12 changed to match.
 Scope: codehere only. Tests whether what we say codehere does is true. It does not test whether anyone wants it.
