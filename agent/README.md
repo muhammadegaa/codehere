@@ -13,8 +13,6 @@
 npx codehere check
 ```
 
-The npm release is 1.0.1, which has `check` with `--json` and `--proof`. The options `--base` and `--claim` below are in this repository (version 1.0.2) and are not published yet. To use them now, build from source: `cd agent && npm ci && npm run build && node dist/index.js check`.
-
 ## The four commands
 
 ```
@@ -38,7 +36,7 @@ Settings, as environment variables: `CODEHERE_TEST_CMD` replaces the detected te
 
 ## GitHub Action
 
-A GitHub Action that posts the receipt on each pull request is in [`action/`](https://github.com/muhammadegaa/codehere/tree/main/action). It runs `npx codehere@<version> check --json --base origin/<base> --claim=<PR body>`. Its default version is 1.0.2, which is not on npm yet, so until 1.0.2 is published the Action reports `unverified` and the job stays green with a warning. The 120-second default time limit applies, and the Action has no input to change it. With the default `fail-on-unverified: false`, a pull request that makes the suite unrunnable (removes the test script, breaks the runner) gets `unverified` and a green job with a warning, and a `skipped` verdict (the re-run turned off in the workflow) gets a green job with no warning. Set `fail-on-unverified: true` to fail the job on `unverified`. It is not published to the marketplace.
+A GitHub Action that posts the receipt on each pull request is in [`action/`](https://github.com/muhammadegaa/codehere/tree/main/action). It runs `npx codehere@<version> check --json --base origin/<base> --claim=<PR body>`. Its default version is 1.0.2. The 120-second default time limit applies, and the Action has no input to change it. With the default `fail-on-unverified: false`, a pull request that makes the suite unrunnable (removes the test script, breaks the runner) gets `unverified` and a green job with a warning, and a `skipped` verdict (the re-run turned off in the workflow) gets a green job with no warning. Set `fail-on-unverified: true` to fail the job on `unverified`. It is not published to the marketplace.
 
 ## What it does not catch
 
