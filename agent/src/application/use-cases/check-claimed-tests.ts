@@ -27,10 +27,21 @@ const SKIP_DIRS = new Set([
 const MAX_DEPTH = 8;
 const MAX_ENTRIES = 50_000;
 
+/** Separators: whitespace, quotes, backticks, brackets of every kind, markdown emphasis and table pipes. */
+const SEPARATORS = /[\s`'"(),;[\]<>{}|*]+/;
+
+/** `tests/test_x.py::test_y` → `tests/test_x.py`; `a.spec.ts:42:3` → `a.spec.ts`; `_a.test.js_` → `a.test.js`; trailing punctuation dropped. */
+function cleanToken(raw: string): string {
+  let t = raw.replace(/^\.\//, '').replace(/::.*$/, '');
+  t = t.replace(/[.:…!?]+$/, '').replace(/(:\d+)+$/, '');
+  if (t.length > 2 && t.startsWith('_') && t.endsWith('_')) t = t.slice(1, -1);
+  return t;
+}
+
 export function extractClaimedTestFiles(text: string): string[] {
   const found: string[] = [];
-  for (const raw of text.split(/[\s`'"(),;]+/)) {
-    const token = raw.replace(/^\.\//, '').replace(/[.:]+$/, '');
+  for (const raw of text.split(SEPARATORS)) {
+    const token = cleanToken(raw);
     if (token.startsWith('/') || token.split('/').includes('..')) continue;
     if (TEST_FILE.test(token) && !found.includes(token)) found.push(token);
   }
