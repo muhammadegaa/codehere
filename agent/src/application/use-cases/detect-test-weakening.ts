@@ -50,14 +50,12 @@ const SKIP: RegExp[] = [
   /\b(skip|todo)\s*:\s*(true\b|['"`])/,
 ];
 
-/** `.only`, `fit` and `fdescribe` make jest and mocha skip every other test; JS, TS and Vue test files only. */
+/** `.only` makes jest, mocha and Playwright skip every other test: the original pattern, on any test file. */
+const ONLY = /\b(it|test|describe)\.only\(/;
+/** `fit` and `fdescribe` do the same, but `fit` is also an ordinary function name: JS, TS and Vue files, at a statement
+ * start, after `=>`, or after `void`, `await` or `return`. */
 const JS_FILE = /\.([cm]?[jt]sx?|vue)$/i;
-// `.only` anywhere in the code (not after a dot, so `qs.only(` and `}).only(` are left alone); `fit` and `fdescribe`,
-// which are also ordinary function names, only where a statement or an arrow body starts.
-const JS_SKIP: RegExp[] = [
-  /(?<![\w$.])(it|test|describe)\.only\(/,
-  /(^|[;{}]\s*|=>\s*|\b(void|await|return)\s+)(fit|fdescribe)\(/,
-];
+const JS_FOCUS = /(^|[;{}]\s*|=>\s*|\b(void|await|return)\s+)(fit|fdescribe)\(/;
 /** The line with quoted text emptied and a trailing `//` comment dropped, so neither can pose as a call. */
 const jsCode = (text: string) => text.replace(/(["'`])(?:\\.|(?!\1).)*\1/g, '""').replace(/\/\/.*$/, '');
 
@@ -123,7 +121,11 @@ export function parseTestWeakening(diff: string, readLines?: (file: string) => s
       const body = uncomment(text);
       let why: TestWeakening['why'] | null = null;
       if (TRIVIAL.some((re) => re.test(text))) why = 'trivial-assertion';
-      else if (SKIP.some((re) => re.test(text)) || (JS_FILE.test(file) && JS_SKIP.some((re) => re.test(jsCode(text)))))
+      else if (
+        SKIP.some((re) => re.test(text)) ||
+        ONLY.test(jsCode(text)) ||
+        (JS_FILE.test(file) && JS_FOCUS.test(jsCode(text)))
+      )
         why = 'skipped';
       else if (body !== null && wasCommentedOut(body, removed)) why = 'commented-out';
       else if (BARE_RETURN.test(text)) {

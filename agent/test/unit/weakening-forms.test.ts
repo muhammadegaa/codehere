@@ -105,3 +105,13 @@ describe('parseTestWeakening · .only anywhere outside strings, fit after => or 
     expect(why(file, line)).toEqual([]);
   });
 });
+
+describe('parseTestWeakening · .only as the original pattern, on every test file (eighth review, 2026-10-17)', () => {
+  it.each([
+    ['e2e/a.spec.ts', "test.describe.only('suite', () => {"],
+    ['a.test.js', "t.test.only('a', fn)"],
+    ['test/Button.svelte', "describe.only('b', () => {"],
+  ])('flagged: %s: %s', (file, line) => {
+    expect(why(file, line)).toEqual(['skipped']);
+  });
+});
