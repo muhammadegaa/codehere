@@ -94,4 +94,5 @@ From `agent/eval/promise-verification/studies/S11-demand/`:
 - `node agree.mjs report` for the agreement table and label counts.
 - `node disagreement.mjs --prs` for the by-agent counts, the L1 and L4 checks, and the facts on the eight PRs.
 - The Wilson intervals and f* values come from the formula in `agree.mjs score` (`wilson`, f* = (79 / C) / 20).
-- Raw PRs, packets and both labelers' outputs are in `agent/eval/promise-verification/evidence/S11/` (gitignored; third-party text).
+- [`labels-only.json`](labels-only.json): each PR's id, agent group and both models' labels, with no reason or PR text (`node agree.mjs export` writes it). Every count in this report can be recomputed from it.
+- Raw PRs, packets and both labelers' outputs, with their stated reasons, are in `agent/eval/promise-verification/evidence/S11/` (gitignored; third-party text).

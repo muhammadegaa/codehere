@@ -49,7 +49,16 @@ const both = (a, b) => Object.keys(a).filter((id) => a[id] && b[id]);
 const fmt = (k) => `n=${k.n} both-fail=${k.tt} only-first=${k.tf} only-second=${k.ft} neither=${k.ff} agree=${(k.agree * 100).toFixed(1)}% kappa=${k.kappa === null ? 'n/a' : k.kappa.toFixed(3)}`;
 
 const cmd = process.argv[2];
-if (cmd === 'report') {
+if (cmd === 'export') {
+  // labels-only.json: PR id and each model's labels, no reason or PR text (the packets and reasons are third-party text).
+  const { sample } = JSON.parse(fs.readFileSync(path.join(HERE, 'sample-ids.json'), 'utf8'));
+  const rows = sample
+    .map((s) => ({ pr: `${s.repo}#${s.number}`, agent: s.agent, id: `${s.repo.replace('/', '__')}__${s.number}` }))
+    .filter((s) => claude[s.id] && qwen[s.id])
+    .map((s) => ({ pr: s.pr, agent: s.agent, claude: claude[s.id], qwen: qwen[s.id] }));
+  fs.writeFileSync(path.join(HERE, 'labels-only.json'), JSON.stringify(rows, null, 1) + '\n');
+  console.log(`wrote labels-only.json: ${rows.length} PRs`);
+} else if (cmd === 'report') {
   const ids = both(claude, qwen);
   console.log('Claude vs qwen:', fmt(kappa(claude, qwen, ids)));
   const unparsed = Object.keys(qwen).filter((id) => qwen[id] === null);

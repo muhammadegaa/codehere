@@ -1,0 +1,2048 @@
+[
+ {
+  "pr": "Harshith-ms-addy/Agent_test-#3",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "cletusthegoldenone/the-golden1#50",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "cjmalloy/jasper-ui#1544",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "DSTech-876/PRMSv3#212",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "kiche-allan/spiritual-programme#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Saleh1967/Alghanem#50",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "michaeljwilliams0123/mahoraga#819",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "brianray/ai-observability-engineering#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "comreflex/tcria-09215b00#85",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "ksastry1988/AIQATool#29",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L2"
+  ]
+ },
+ {
+  "pr": "astr0n8t/jack#13",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "amitesh007/remote_agent#38",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Dojo-1/doubt-the-machine#77",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "eyupio/jiggered#58",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Aasim41/StudyQuest#6",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "tgptom/cordova-plugin-push#7",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "tharu8813/Playlist-Canvas#9",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "JuanG-live/matching-engine-automation#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "githubnext/gh-aw-cao#14002",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "evagarciapro/outlook-email-skill#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "sebfrie/homeconnect_local_hass#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L2"
+  ]
+ },
+ {
+  "pr": "barryhession/chess-puzzle-bot#8",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Dymerz/n8n-nodes-discord-dm#2",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "harleycameron-rgb/CLOUDBEAST_burnharness#36",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "MassLegalHelp/docassemble-SNAP#18",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "microsoft/TypeScript#64343",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "stefan-misik/ws2812b-light#2",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "2806shreya/youtube-replica-page#4",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Hakzai/super-arcade#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "wuzbak/Unitary-Manifold-#809",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L1",
+   "L4"
+  ]
+ },
+ {
+  "pr": "allen-kerber-auto-supply/AllenKerberAutoSupply#4",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "StepenkoAnatoli/Research-Kit#251",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "DominicReneSchu/RFT#127",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "JAVA-BT10/wa-gold-rush#39",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "ben443/edk2-msm-r8q#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "maotangqian/RSSHub12#7",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Tonaxel1/WDT#4",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "yuzekesu/Library_MemoryTracker#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "IBEETHAT/deepjudge-legal-search#4",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Ryusei-0429/mlb-run-expectancy-simulator#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "abla86/workforce-competence-management#47",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "c11472/Bharat_Basket_CP_Version1#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "EeroEternal/xtrace#9",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "nextcon-nai-git/nai-gcp#107",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Sanal-Sivakumar/Lclip#8",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "ArthurC02/SkillHub#41",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "yaraya24/booking-room#579",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "biggiebarker8-cloud/tests#13",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "yshapkin/experiments_ai_bot#15",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Ahmad633440/cryptoinsight#69",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "dseph/PowerShell-EWS-CalendarView.ps1#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "jxxghp/MoviePilot#6603",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "ApexG207/Documents#25",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "kimx/NexaForge#75",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "ganlinlaomu/HaiNei#149",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "natoverse/stronger#415",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L2",
+   "L3"
+  ]
+ },
+ {
+  "pr": "Tofferioao/flores-amarillas-para-mi-esposa#2",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "skystream006/ssMusic_Player#75",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "githubnext/gh-aw-cao#15160",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "josue198027/ministere-maison-de-lumiere#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "FernandoFonseca-code/GirlScoutTroop41645Page#25",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "pthornos-ux/seguranca-parque-dos-passaros#8",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Tyrrrz/PolyShim#148",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "kdeyarmin/intel#142",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "DominicReneSchu/RFT#116",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "marketbul/titanic-ml-collab#9",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "LEAGAIZEN/frauddetection#2",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "NCronJob-Dev/NCronJob#379",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "skystream006/g2_github_copilot#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "monbasyama/monbas_passive_calculator#17",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "dreamcheap2000/Clinical-Medicine#90",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "jeffrey82221/pgembed#4",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "dotnet/sdk#56144",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L3"
+  ]
+ },
+ {
+  "pr": "gorhinstroebel/cozypuz#5",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "liushanyong/infinite-grid#14",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "naveedausaf/skills-agentic-workflows-that-read-the-room#13",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "mahinigam/codebase-cartographer-showcase#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "githubnext/gh-aw-cao#12751",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "chinmayacm/text-tool#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "jmb2885m75-cmd/porcini-tracker#46",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "johnathanherbert/dashpesagem#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Hochfrequenz/fristenkalender_generator#418",
+  "agent": "copilot",
+  "claude": [
+   "L3"
+  ],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "builtDifferentCoder/n8n-automation-agent#1",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "RFingAdam/lineforge#35",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "hlin11207/java-oop-edu#6",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Otisigma/halo-world-global-platform#223",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "JustJade2007/github-issue-enhancer#21",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "mlivensp/JamTrackGenerator#2",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "RES-Planer/SchwammSpiel#61",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "dyefim/express-todo#4",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "jlevy122112-star/Comply-Quick#148",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Randymanrammer/Global-money-entercper-I-#2",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "sAI-2025/Swiggy_Customer_Support#3",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "lukasz8504-design/wardrobe-manager#7",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "microsoft/dstoolkit-text2sql-and-imageprocessing#198",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "kimbrasil/simple-accordion-wordpress#5",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "khurram539/Ship-Date-Engine#18",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "AceDataCloud/Skills#1118",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "AdminCapex/OPENmaat-JGP#5",
+  "agent": "copilot",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "nvy878zd22-code/2KsGrantFamily#1",
+  "agent": "copilot",
+  "claude": [
+   "L2"
+  ],
+  "qwen": [
+   "L2"
+  ]
+ },
+ {
+  "pr": "vllm-project/vllm-ascend#16862",
+  "agent": "codex",
+  "claude": [
+   "undecidable"
+  ],
+  "qwen": [
+   "L1",
+   "L3"
+  ]
+ },
+ {
+  "pr": "gyarmathypeter96/nextvisionstudio#7",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "marikol444707-ux/stroyka-app#321",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Brightwav3/sizel#2",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "edwardoffc/OCMI#2",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "averylicious/muon#242",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "othaldo/denti#3",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L3",
+   "L5"
+  ]
+ },
+ {
+  "pr": "woowacourse-teams/2026-toadzip#324",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "sagehou/M365-MCP-Server#4",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "aliasfoxkde/GitForge#208",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "crizant/probe#64",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "jasonmassie01/pg_sage#48",
+  "agent": "codex",
+  "claude": [
+   "undecidable"
+  ],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "FairladyZ625/harness-anything#2380",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "korgeek-sd/tower-chronicles#34",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "newtonlorenz/benchledger#35",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "openboa-ai/ouroboros#2",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "kniepertsebastian-spec/equalizer#29",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Nathandavid01/social-dashboard#234",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "lidge-jun/opencodex#3645",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "JeongJaeSoon/agent-guard#257",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "scatt67/jaxgam#41",
+  "agent": "codex",
+  "claude": [
+   "L1"
+  ],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "dancxjo/conduit#4148",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Musicutd/ruvanas-platform#214",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "kensac/job-scripts#600",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "openanolis/trustee#239",
+  "agent": "codex",
+  "claude": [
+   "L1"
+  ],
+  "qwen": []
+ },
+ {
+  "pr": "milos-agathon/forge3d-web#25",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Jayinsightfactory/nenova-erp-ui#929",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "kdob1042/manga-mac#103",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Will-ODC/odc#224",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "mshamblin5150-code/clinical-skills#1222",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L3"
+  ]
+ },
+ {
+  "pr": "Far-Beyond-Pulsar/Plugin_Blueprints#18",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Pokevaleur/pokevaleur#119",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "PennEwan/Baidu-map#15",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "prisma/composer#340",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "d7xhub-art/d7core-pedidos#9",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "AIowa-LLC/hermes-fleet#179",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "cornhskr1/active-offerings-review#108",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L3"
+  ]
+ },
+ {
+  "pr": "publishpress/publishpress-authors#2475",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "FairladyZ625/harness-anything#2149",
+  "agent": "codex",
+  "claude": [
+   "L5"
+  ],
+  "qwen": []
+ },
+ {
+  "pr": "jacobdeecurtis/facebook-marketplace-dashboard#45",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "ClubAmigosTT/marcelito-finanzas#78",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "aljjang95/vocal-studio#11",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "cisgz3a-hub/KerfDesk#716",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "agenciarhodes-source/flipform#326",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "zda1-hub/kobes-betting-hub#214",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "vivacityrto/unicorn-cms-f09c59e5#693",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "radiansnail-1/codex-meat-proxy#11",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "bruce690813/fifaworldcup2026#35",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "keida/codex-quota-float#12",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "jizw0704-source/lingomate#7",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Xiangran-CHENG/Xiangran-CHENG.github.io#24",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "frankieliu2024-ui/ETF-Trade-System#264",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Lemonkyle/Kalani-course-compass#27",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Sjaakmatt/danny-rossenaar#20",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "shahshawl668-gif/project-Original#43",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "wrongstory/room-management-system-backend#298",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "maxlibin/free-directory-submissions#3",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Jan-Kaspar1/dcs#520",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "cfi7728/photo-matrix#6",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "plutack/wiretap#25",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "mihirhugar-lang/otomy-ai#22",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "tobrien6/voynich-manuscript-research#116",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "DwennK/Plezy-SubtitleFix#20",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "the-omega-institute/trureturing#14656",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "drolu-cmyk/sozorock-health#201",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "suleymankuncan-web/CODEX#1274",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L3"
+  ]
+ },
+ {
+  "pr": "agentstation/starmap#253",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Bittrees-Technology/ai#202",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "anthonyyoo24/justgo#12",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Poryadok/VoiceRoot#746",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "huh0303-cmyk/-WP-QWEN-autobot#61",
+  "agent": "codex",
+  "claude": [
+   "L1"
+  ],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "iwasa-kosui/kamae-ts#49",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "quantumq1981/Parker-songbook-tool#170",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "metric-space-ai/workjet#127",
+  "agent": "codex",
+  "claude": [
+   "L1"
+  ],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "CompleteTech-LLC-AI-Research/pokemon-harness#17",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "JRDN-R/vision#39",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Lisayinyy/MAIB_7002#1",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "hostess-pl/template-hostess-cf-short-form-dev#2",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "7venik-bit/around-g-poizon-desktop#752",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Posnic/POS#1001",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "YannJY02/AutoTranscribe#111",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Brian910cpr/910cpr-class-landers#137",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "andyconley/flow#63",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "jealous-sound/azerothcore-wotlk-coa#405",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "den-run-ai/pystachy#363",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "viplatform/mui-drawer#55",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "dbrckk/xbow-perso#641",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Misael-art/retro-dev-studio#72",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "tdobleta/tiendaiq#160",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Donovoi/triage-with-rclone#21",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "codifydeep/descartavel2#12",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "objcio/swift-talk-backend#132",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "TeamElara/SentinelsAI#8",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "NVIDIA/NemoClaw#11778",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "techmuns/Glow-Central-Research#720",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "weslleyfreitassantos-cell/edumoneyyyy-#326",
+  "agent": "codex",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "moore11j/congress-tracker#574",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "OpenHCSDev/agent-comms#173",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "henrique-devel/ganso-market#356",
+  "agent": "codex",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "loopx-project/loopx#5583",
+  "agent": "codex",
+  "claude": [
+   "L1"
+  ],
+  "qwen": [
+   "L1",
+   "L3"
+  ]
+ },
+ {
+  "pr": "akina12231988-star/immigration-app#370",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L3"
+  ]
+ },
+ {
+  "pr": "T-Crypt/aphotic-hypr#86",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Embassy-of-the-Free-Mind/sourcelibrary-v2#4768",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "sealant-sh/mend#328",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "weeast1521/MyAppleGame#43",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "WhiteLotus1998/IronWake#1079",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "golyakoff/ago-android#169",
+  "agent": "claude",
+  "claude": [
+   "L1"
+  ],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Sriram-Codes-SW/doorprints#150",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "Performant-Labs/holler#262",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "gga2000/Driver#237",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Shaggywize63/kinematic-dashboard#433",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Duncan-Haywood/oss-monorepo#4594",
+  "agent": "claude",
+  "claude": [
+   "L1"
+  ],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "thalia-apps/deployz#205",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "jaroslawherod/micold-ai-ide#587",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "timveil/leaves-of-blocks#165",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "ceraldicontabilita/GestionaleCloud#1095",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Underkut/block7#414",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L3"
+  ]
+ },
+ {
+  "pr": "noxitro/agent-toolkit#5",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "nargothrondir/ansible-playbooks#123",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "TWinston-66/lattice#14",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "RodnaPamet/inflect-compliance#2900",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L3"
+  ]
+ },
+ {
+  "pr": "stephendolan/dotfiles#57",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "mrbam88/bamware-brewdesk#195",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "freeflow-community/flow#549",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "frizat82/fourplay_web#355",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "cephyrixzyth/Oneirodex#114",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Cancore-io/sdk#15",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "gunb-ai/gunbc#11749",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "sam-dumont/immich-memories#2400",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "VibeDarling/darling-cfnetwork#2",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "danibsheehan/gotta-catch-em-all#169",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "felipea92p-ux/cayla-retail#749",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "nminic/btl#240",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "markmohr15/diamond#52",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "hirofukami/hirofukami.github.io#80",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "deeprath/commerce-platform#17",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "nelsonboulangerie/django-shopman#1027",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "bcourbage/unison-ui-mac#130",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "AndreBaleeiro1/Primeiro#5",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Petrolord/petrolord-suite#590",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "hofmiker/altcoin-dashboard#463",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "jdmacleod/kitchen-erp#173",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "leo-aa88/async-chatbot#53",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "DiamondDagger590/McRPG#353",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "diepjustin/ne-campaign-finance#1",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "kurushimee/gdls#549",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "rmpsdroid/BattInsight#11",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "dnobj/mail-letter-irl#410",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "KatOre-Solutions/GuardianCheck#134",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "ScottCooper92/binge-ci#162",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "harisforges/Qada-lah#2",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "ducktape-industries/programs#91",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "atharvb7/friday#16",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "PantaKoda/repo-watch#25",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "enricoag1982/learningChess#47",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "ericputnam/MHMFinds#214",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "dlee1j1/nissan-leaf-app#26",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "AI-X-16-1/BOOKIT#118",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "aviorluxuryshop-ship-it/socialp-media69#10",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "hollis-labs/tachyon#2",
+  "agent": "claude",
+  "claude": [
+   "L1",
+   "L4"
+  ],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Nengeldir/ItWorksOnMyMachine#31",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "DennisHengShuYi/Codenection#28",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Echoes675/FamilyHQ#212",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "uiuirot068-collab/tatesupan#33",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1",
+   "L4"
+  ]
+ },
+ {
+  "pr": "jhheider/edikt#82",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "anilg12/anilg12#1",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "mrchristian-genki/seasonal-portfolio#124",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "Haradasn/keizai-map#10",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "codingnanyong/busan-competition-2026#88",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "robscan/somosnosotros#313",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "virgoone/pixi-gomoku#6",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "decdn/decdn#2037",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L3",
+   "L4"
+  ]
+ },
+ {
+  "pr": "domtriola/dotfiles#93",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L3"
+  ]
+ },
+ {
+  "pr": "dp-web4/SAGE#409",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L4"
+  ]
+ },
+ {
+  "pr": "robertsdotpm/runloom#7",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Lartitiz/nowadaysagency#1285",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "denn-gubsky/loomcycle#1133",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "contactcapai/TournoiEDS#107",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "BIMbeamFLX/bearlett#16",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "qaml-ai/camelAI#57",
+  "agent": "claude",
+  "claude": [
+   "undecidable"
+  ],
+  "qwen": []
+ },
+ {
+  "pr": "tuna-os/gtk-office-suite#471",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "AgentWorkforce/flows#329",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "artgas1/yandex-metrika-mcp#26",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "open-science-pillars/nasa-daac-knowledge#113",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "TheJustinSunPrize/awards#376",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "ainiadra/niadra-sdk-python#13",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "AddisonSouza/lms-nexus-jaas#360",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "gastoncarreecommerce/Auditoria-SFMC#6",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "BladerunnerxRC/Linux_Shell_Scripts#4",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "dudarenok-maker/Castwright#3335",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "will383842/axion-apporteurs#707",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "claudiojara/susurro#34",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "IrosTheBeggar/mstream-mp3-player#7",
+  "agent": "claude",
+  "claude": [
+   "undecidable"
+  ],
+  "qwen": []
+ },
+ {
+  "pr": "Kuisin/ckk-tool-v3#857",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "firmfooting/dbml-sharepoint#501",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "sveltekit-i18n/base#35",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ },
+ {
+  "pr": "Dadaxon82/FIZIKA-VA-ASTRONOMIYA-O-QITISHDA-AXBOROT-TEXNOLOGIYALARINI-QO-LLASH#25",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "qso-graph/eqsl-mcp#8",
+  "agent": "claude",
+  "claude": [],
+  "qwen": []
+ },
+ {
+  "pr": "jordanhubbard/nanolang#215",
+  "agent": "claude",
+  "claude": [],
+  "qwen": [
+   "L1"
+  ]
+ }
+]
