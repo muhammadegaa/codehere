@@ -254,7 +254,11 @@ export async function executeCheckCommand(target: string | undefined, options: C
       colors.dim(`  — codehere re-ran them itself (${r.command}, exit ${r.exitCode})${counts}\n`) +
       colors.dim("This is observed reality, not the agent's claim.\n") +
       (r.noTests
-        ? colors.dim('  The runner reported 0 tests, so nothing was tested. Check the test file names.\n')
+        ? colors.dim(
+            r.allSkipped
+              ? '  The runner says every test was skipped, so nothing was tested.\n'
+              : '  The runner reported 0 tests, so nothing was tested. Check the test file names.\n',
+          )
         : '') +
       weakenedText() +
       missingLines() +

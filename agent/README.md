@@ -32,9 +32,8 @@ Exit codes: 0 when the tests ran and passed and nothing was weakened; 1 when the
 
 A GitHub Action that posts the receipt on each pull request is in [`action/`](https://github.com/muhammadegaa/codehere/tree/main/action). It runs `npx codehere@<version> check --json --base origin/<base> --claim=<PR body>`, so it needs a published release that includes those options. It is not published to the marketplace.
 
-## What it does not catch, and when it exits 0 without a pass
+## What it does not catch
 
-- **A suite where every test is skipped** reads as a pass.
 - **Weakened tests.** The detector reads Python (`test_*.py`, `*_test.py`), JavaScript and TypeScript (`*.test.*`, `*.spec.*`), Go (`*_test.go`) and PHP (`*Test.php`) test files, and files under `test`, `tests` or `__tests__`. It flags an assertion replaced by an always-true one, a skip marker, a commented-out assertion and an early `return`. It does not flag a deleted assertion, a deleted test or test file, a loosened expectation, or an edited test script. It sees uncommitted changes, and with `--base <ref>` everything since the branch left that ref. A very large diff (a 20 MB addition in testing) turns the scan off without a message.
 - **`--claim`** finds test files named in the summary when they are separated by spaces, quotes, parentheses, commas or semicolons. A name in markdown bold or in `path::test` form is not recognized, and is not reported.
 - **A passing suite with a broken build, and code the tests do not cover.** A receipt says what the test suite showed, not that the software is correct.

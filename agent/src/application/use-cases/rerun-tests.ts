@@ -58,8 +58,10 @@ export interface RerunTestsResult {
   /** Parsed-for-display counts from the re-run's own output (not authoritative). */
   passed?: number;
   failed?: number;
-  /** The runner exited 0 but its own summary says it ran 0 tests: nothing was tested. */
+  /** The runner exited 0 but its own summary says it ran 0 tests, or skipped every test: nothing was tested. */
   noTests?: boolean;
+  /** The runner's summary says every test was skipped (also sets noTests). */
+  allSkipped?: boolean;
   durationMs?: number;
   /** Why codehere did NOT re-run (so the surface can stay honest). */
   skippedReason?: string;
@@ -82,6 +84,24 @@ export function reportedZeroTests(out: string): boolean {
   if (counts.length > 0) return counts.every((n) => n === 0);
   // `go test ./...` exits 0 and prints `[no test files]` for every package when the module has no _test.go files.
   return /^\?[ \t]+.*\[no test files\]/m.test(out) && !/^(ok|FAIL|---)[ \t]/m.test(out);
+}
+
+/** True when the runner's own summary says tests were skipped and none passed or failed: node:test (`pass 0`,
+ *  `skipped N`), pytest's final line, and the jest or vitest `Tests` line. A run like that tested nothing. */
+export function reportedOnlySkipped(out: string): boolean {
+  const last = (re: RegExp) => [...out.matchAll(re)].pop();
+  const node = (k: string) => {
+    const m = last(new RegExp(`^[ \\t]*(?:ℹ|#)[ \\t]+${k}[ \\t]+(\\d+)[ \\t]*$`, 'gm'));
+    return m ? Number(m[1]) : null;
+  };
+  const pass = node('pass');
+  const skipped = node('skipped');
+  if (pass !== null && skipped !== null) return pass === 0 && (node('fail') ?? 0) === 0 && skipped > 0;
+  const py = last(/^=+ (.*) in [\d.]+s(?: \([^)]*\))? =+$/gm);
+  if (py) return /\b\d+ skipped\b/.test(py[1]) && !/\b\d+ (passed|failed|errors?|xpassed)\b/.test(py[1]);
+  const js = last(/^[ \t]*Tests:?[ \t]+(.*)$/gm);
+  if (js) return /\b\d+ skipped\b/.test(js[1]) && !/\b\d+ (passed|failed)\b/.test(js[1]);
+  return false;
 }
 
 /** True if `file` exists in `cwd` and its text contains `needle` (case-insensitive). */
@@ -326,7 +346,8 @@ export function rerunTests(cwd: string): Promise<RerunTestsResult> {
       // nothing was tested, so this is NOT a failing suite. Classify it as
       // runner-missing (with the one-command remedy) so no surface renders a
       // red measured-fail for an unrunnable suite.
-      const noTests = ec === 0 && reportedZeroTests(out);
+      const allSkipped = ec === 0 && reportedOnlySkipped(out);
+      const noTests = ec === 0 && (reportedZeroTests(out) || allSkipped);
       const kind: RerunKind = ec === 126 || ec === 127 ? 'runner-missing' : ec === 0 && !noTests ? 'passed' : 'failed';
       done({
         ran: true,
@@ -336,6 +357,7 @@ export function rerunTests(cwd: string): Promise<RerunTestsResult> {
         passed: parsed?.passed,
         failed: parsed?.failed,
         ...(noTests ? { noTests: true } : {}),
+        ...(allSkipped ? { allSkipped: true } : {}),
         durationMs: Date.now() - start,
         ...(kind === 'runner-missing' ? { remedy: detectRemedy(cwd) } : {}),
       });
