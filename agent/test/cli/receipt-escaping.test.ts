@@ -103,3 +103,61 @@ describe('the receipt does not render hostile pull request text', () => {
     expect(r.stdout).not.toContain('\u001b');
   });
 });
+
+describe('the receipt keeps findings and stays one blockquote (second review, 2026-10-17)', () => {
+  function repoWith(name: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'codehere-escape2-'));
+    dirs.push(dir);
+    writeFileSync(join(dir, 'package.json'), NODE_PKG);
+    execFileSync('mkdir', ['-p', join(dir, 'test')]);
+    writeFileSync(join(dir, name), REAL);
+    git(dir, 'init', '-q', '-b', 'main');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'base');
+    writeFileSync(join(dir, name), WEAK);
+    return dir;
+  }
+  const WEAK = REAL.replace('assert.equal(1 + 1, 2)', 'assert.ok(true)');
+
+  it('a weakened test is in the receipt when the run timed out, and the verdict is fail', () => {
+    const cwd = repoWith('a.test.js');
+    const env: Record<string, string | undefined> = { ...process.env, CODEHERE_RERUN_TIMEOUT_MS: '1' };
+    delete env.CODEHERE_TEST_CMD;
+    delete env.CODEHERE_RERUN_TESTS;
+    const r = spawnSync('node', [CLI, 'check', '--json'], { cwd, env, encoding: 'utf8' });
+    const out = JSON.parse(r.stdout);
+    expect(out.verdict).toBe('fail');
+    expect(out.receipt).toContain('`a.test.js`:3');
+    expect(r.status).toBe(1);
+  });
+
+  it('a weakened test with the re-run turned off is fail, not skipped', () => {
+    const cwd = repoWith('a.test.js');
+    const env: Record<string, string | undefined> = { ...process.env, CODEHERE_RERUN_TESTS: '0' };
+    delete env.CODEHERE_TEST_CMD;
+    const r = spawnSync('node', [CLI, 'check', '--json'], { cwd, env, encoding: 'utf8' });
+    expect(JSON.parse(r.stdout).verdict).toBe('fail');
+    expect(r.status).toBe(1);
+  });
+
+  it('a test file name with newlines cannot end the blockquote or the code span', () => {
+    const cwd = repoWith('test/x\n\n@octocat [click](www.evil.example)\n\ny.test.js');
+    const receipt: string = JSON.parse(check(cwd, '--json').stdout).receipt;
+    for (const line of receipt.trim().split('\n')) {
+      expect(line.startsWith('>') || line.startsWith('<!--')).toBe(true);
+      expect(outsideCode(line)).not.toMatch(/@octocat|\]\(/);
+    }
+  });
+
+  it('terminal escapes in --claim are not printed back', () => {
+    const cwd = repoWith('a.test.js');
+    const r = check(
+      cwd,
+      '--proof',
+      '--claim',
+      'ran a.test.js \u001b]8;;https://evil.example\u0007x\u001b]8;;\u0007 \u001b[2J',
+    );
+    expect(r.stdout).not.toContain('\u001b');
+    expect(r.stdout).not.toContain('\u0007');
+  });
+});

@@ -26,7 +26,7 @@ const WHY_TEXT: Record<TestWeakening['why'], string> = {
 // File names, diff lines and branch names come from whoever wrote the change, so they are treated as untrusted:
 // control characters (terminal escapes among them) are replaced, and in the markdown receipt the text sits inside
 // an inline code span, where no link, @mention or emphasis renders.
-const plain = (s: string) => s.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '?');
+const plain = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, '?');
 const code = (s: string) => '`' + plain(s).replace(/`/g, "'") + '`';
 /** Characters a branch name usually has; anything else is not repeated in the reproduce command. */
 const SAFE_REF = /^[A-Za-z0-9._/@+-]+$/;
@@ -61,8 +61,8 @@ export function checkVerdict(
   missingClaimed: unknown[],
   scanError?: string,
 ): CheckVerdict {
-  if (r.kind === 'disabled') return 'skipped';
   if (weakened.length || missingClaimed.length) return 'fail';
+  if (r.kind === 'disabled') return 'skipped';
   if (r.kind === 'failed') return 'fail';
   if (scanError) return 'unverified';
   if (r.kind === 'passed' && r.ran && (r.exitCode ?? 1) === 0) return 'pass';
@@ -75,7 +75,7 @@ function reproduceCommand({ base, claim }: { base?: string; claim?: string }): s
   if (base) cmd += SAFE_REF.test(base) ? ` --base ${base}` : ' --base <the same base>';
   if (claim) {
     const inlineable = claim.length <= 160 && !/[`'\n\r]/.test(claim);
-    cmd += inlineable ? ` --claim '${claim}'` : ' --claim <the same summary>';
+    cmd += inlineable ? ` --claim '${plain(claim)}'` : ' --claim <the same summary>';
   }
   return cmd;
 }
@@ -121,16 +121,29 @@ function buildProofBlock(
   const sha = gitShortSha(cwd);
   const when = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
   const at = sha ? `commit \`${sha}\`` : 'the working tree';
+  const weakenedNote = weakened.length
+    ? `> Tests changed in this diff, so a pass may check nothing: ${weakenedMarkdown(weakened).join(' · ')}\n`
+    : '';
+  const missingNote = missingClaimed.length
+    ? `> The AI named test files that are not in the repo: ${missingClaimed.map(code).join(' · ')}\n`
+    : '';
+  const scanNote = scan.error
+    ? `> Weakened-test scan could not run: ${scan.error}\n`
+    : scan.skipped
+      ? `> Weakened-test scan skipped: ${scan.skipped}\n`
+      : '';
+  // A finding is reported even when the suite could not run.
+  const notes = weakenedNote + missingNote + scanNote;
   if (!r.ran) {
     if (r.kind === 'command-not-found') {
       const fix = r.remedy ? ` · fix: \`${r.remedy}\`` : '';
-      return `> **codehere · verified outcome receipt** — couldn't run ${code(r.command || 'the tests')} (runner/deps not installed) · unverified${fix} · ${when}\n`;
+      return `> **codehere · verified outcome receipt** — couldn't run ${code(r.command || 'the tests')} (runner/deps not installed) · unverified${fix} · ${when}\n${notes}`;
     }
-    return `> **codehere · verified outcome receipt** — no suite re-run (${code(r.skippedReason || 'none detected')}) · nothing verified · ${when}\n`;
+    return `> **codehere · verified outcome receipt** — no suite re-run (${code(r.skippedReason || 'none detected')}) · nothing verified · ${when}\n${notes}`;
   }
   if (r.kind === 'runner-missing') {
     const fix = r.remedy ? ` · fix: \`${r.remedy}\`` : '';
-    return `> **codehere · verified outcome receipt** — couldn't run ${code(r.command ?? '')} on ${at} (runner not installed, exit ${r.exitCode}) · unverified${fix} · ${when}\n`;
+    return `> **codehere · verified outcome receipt** — couldn't run ${code(r.command ?? '')} on ${at} (runner not installed, exit ${r.exitCode}) · unverified${fix} · ${when}\n${notes}`;
   }
   const passed = (r.exitCode ?? 1) === 0 && !r.noTests;
   const counts =
@@ -148,25 +161,12 @@ function buildProofBlock(
           : scan.error
             ? '✕ tests pass · weakened-test scan could not run'
             : '✓ tests pass';
-  const scanNote = scan.error
-    ? `> Weakened-test scan could not run: ${scan.error}\n`
-    : scan.skipped
-      ? `> Weakened-test scan skipped: ${scan.skipped}\n`
-      : '';
-  const missingNote = missingClaimed.length
-    ? `> The AI named test files that are not in the repo: ${missingClaimed.map(code).join(' · ')}\n`
-    : '';
   // Reproduce line: the real, verifiable trust — anyone can re-run and confirm.
   const reproduce = sha ? `> Reproduce independently: \`git checkout ${sha} && ${reproduceCommand(repro)}\`\n` : '';
-  const weakenedNote = weakened.length
-    ? `> Tests changed in this diff, so a pass may check nothing: ${weakenedMarkdown(weakened).join(' · ')}\n`
-    : '';
   return (
     `> **codehere · verified outcome receipt** · ${verdict}${counts}\n` +
     `> codehere independently re-ran ${code(r.command ?? '')} on ${at} — exit ${r.exitCode}. Observed, not the AI's claim. · ${when}\n` +
-    weakenedNote +
-    missingNote +
-    scanNote +
+    notes +
     reproduce +
     `> Scope: the project's test suite — not a security or logic audit.\n`
   );
