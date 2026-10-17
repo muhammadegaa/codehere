@@ -65,23 +65,38 @@ function wasCommentedOut(body: string, removed: string[]): boolean {
   return core.length >= 12 && ASSERTION.test(core) && removed.some((r) => r.includes(core));
 }
 
+/** `b/path` or git's C-quoted `"b/p\"ath"` form → `path`. */
+function headerPath(raw: string): string | null {
+  const v = raw.slice(4);
+  if (v.startsWith('b/')) return v.slice(2);
+  if (v.startsWith('"b/') && v.endsWith('"')) {
+    return v.slice(3, -1).replace(/\\(["\\tn])/g, (_, c: string) => (c === 't' ? '\t' : c === 'n' ? '\n' : c));
+  }
+  return null;
+}
+
 export function parseTestWeakening(diff: string, readLines?: (file: string) => string[] | null): TestWeakening[] {
   const found: TestWeakening[] = [];
   let file: string | null = null;
   let existing = false;
   let line = 0;
   let removed: string[] = [];
+  // File headers (`--- a/...`, `+++ b/...`) only appear between `diff --git` and the first hunk, so an added line
+  // whose text starts with `++ ` cannot pose as a header.
+  let inHeader = false;
   for (const raw of diff.split('\n')) {
     if (raw.startsWith('diff --git ')) {
       file = null;
       existing = true;
       removed = [];
-    } else if (raw.startsWith('--- ')) {
+      inHeader = true;
+    } else if (inHeader && raw.startsWith('--- ')) {
       existing = raw !== '--- /dev/null';
-    } else if (raw.startsWith('+++ ')) {
-      const path = raw.startsWith('+++ b/') ? raw.slice(6) : null;
+    } else if (inHeader && raw.startsWith('+++ ')) {
+      const path = headerPath(raw);
       file = path && existing && TEST_PATH.test(path) ? path : null;
     } else if (raw.startsWith('@@')) {
+      inHeader = false;
       const m = /\+(\d+)/.exec(raw);
       line = m ? Number(m[1]) : 0;
       removed = [];
@@ -121,24 +136,69 @@ function resolveBase(cwd: string, base: string): string {
   }
 }
 
-/** Changes in `cwd` against HEAD, or against where the branch left `base` when it is given. Empty outside a git repo. */
-export function detectTestWeakening(cwd: string, base?: string): TestWeakening[] {
-  const from = base ? resolveBase(cwd, base) : 'HEAD';
+export interface WeakeningScan {
+  findings: TestWeakening[];
+  /** The scan did not apply here (no repository, no commit yet). Not a finding, but said out loud. */
+  skipped?: string;
+  /** The scan was attempted and could not finish: nothing about the test changes was verified. */
+  error?: string;
+}
+
+const MAX_DIFF = 64 * 1024 * 1024;
+
+/** git with literal paths and unquoted non-ASCII names. */
+function git(cwd: string, args: string[]): string {
+  return execFileSync('git', ['-c', 'core.quotepath=false', '--literal-pathspecs', ...args], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    maxBuffer: MAX_DIFF,
+  });
+}
+
+/**
+ * Changes in `cwd` against HEAD, or against where the branch left `base` when it is given. Only test files are
+ * diffed, so a large change elsewhere cannot push the test diff past the read limit.
+ */
+export function scanTestWeakening(cwd: string, base?: string): WeakeningScan {
   try {
-    const diff = execFileSync('git', ['diff', '--unified=0', '--no-color', from], {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    return parseTestWeakening(diff, (f) => {
+    git(cwd, ['rev-parse', '--is-inside-work-tree']);
+  } catch {
+    return { findings: [], skipped: 'not a git repository' };
+  }
+  if (!base) {
+    try {
+      git(cwd, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+    } catch {
+      return { findings: [], skipped: 'no commit to compare against yet' };
+    }
+  }
+  const from = base ? resolveBase(cwd, base) : 'HEAD';
+  let tests: string[];
+  try {
+    tests = git(cwd, ['diff', '--name-only', '-z', from])
+      .split('\0')
+      .filter((p) => p && TEST_PATH.test(p));
+  } catch {
+    return { findings: [], error: 'could not read the diff (the list of changed files)' };
+  }
+  if (!tests.length) return { findings: [] };
+  let diff: string;
+  try {
+    diff = git(cwd, ['diff', '--unified=0', '--no-color', from, '--', ...tests]);
+  } catch {
+    return {
+      findings: [],
+      error: `could not read the diff of ${tests.length} changed test file(s); it may be larger than 64 MB`,
+    };
+  }
+  return {
+    findings: parseTestWeakening(diff, (f) => {
       try {
         return readFileSync(join(cwd, f), 'utf8').split('\n');
       } catch {
         return null;
       }
-    });
-  } catch {
-    return [];
-  }
+    }),
+  };
 }

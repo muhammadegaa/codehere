@@ -9,7 +9,11 @@ import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { colors, symbols } from '../../../ui.js';
 import { rerunTests, type RerunTestsResult } from '../../../application/use-cases/rerun-tests.js';
-import { detectTestWeakening, type TestWeakening } from '../../../application/use-cases/detect-test-weakening.js';
+import {
+  scanTestWeakening,
+  type TestWeakening,
+  type WeakeningScan,
+} from '../../../application/use-cases/detect-test-weakening.js';
 import { findMissingClaimedTests } from '../../../application/use-cases/check-claimed-tests.js';
 
 const WHY_TEXT: Record<TestWeakening['why'], string> = {
@@ -37,13 +41,19 @@ export type CheckVerdict = 'pass' | 'fail' | 'unverified' | 'skipped';
 
 /**
  * One word per result, for CI. Green (`pass`) only when codehere re-ran the suite, it exited 0, no test
- * was weakened and no named test file was missing. Tampering is `fail` even if no suite could run;
- * every other case where nothing was verified is `unverified`, never a pass.
+ * was weakened, no named test file was missing and the weakened-test scan finished. Tampering is `fail` even if
+ * no suite could run; every other case where nothing was verified is `unverified`, never a pass.
  */
-export function checkVerdict(r: RerunTestsResult, weakened: unknown[], missingClaimed: unknown[]): CheckVerdict {
+export function checkVerdict(
+  r: RerunTestsResult,
+  weakened: unknown[],
+  missingClaimed: unknown[],
+  scanError?: string,
+): CheckVerdict {
   if (r.kind === 'disabled') return 'skipped';
   if (weakened.length || missingClaimed.length) return 'fail';
   if (r.kind === 'failed') return 'fail';
+  if (scanError) return 'unverified';
   if (r.kind === 'passed' && r.ran && (r.exitCode ?? 1) === 0) return 'pass';
   return 'unverified';
 }
@@ -95,6 +105,7 @@ function buildProofBlock(
   weakened: TestWeakening[] = [],
   missingClaimed: string[] = [],
   repro: { base?: string; claim?: string } = {},
+  scan: WeakeningScan = { findings: [] },
 ): string {
   const sha = gitShortSha(cwd);
   const when = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -123,7 +134,14 @@ function buildProofBlock(
         ? `✕ tests pass · ${weakened.length} weakened`
         : missingClaimed.length
           ? `✕ tests pass · ${missingClaimed.length} claimed test file not found`
-          : '✓ tests pass';
+          : scan.error
+            ? '✕ tests pass · weakened-test scan could not run'
+            : '✓ tests pass';
+  const scanNote = scan.error
+    ? `> Weakened-test scan could not run: ${scan.error}\n`
+    : scan.skipped
+      ? `> Weakened-test scan skipped: ${scan.skipped}\n`
+      : '';
   const missingNote = missingClaimed.length
     ? `> The AI named test files that are not in the repo: ${missingClaimed.join(' · ')}\n`
     : '';
@@ -137,6 +155,7 @@ function buildProofBlock(
     `> codehere independently re-ran \`${r.command}\` on ${at} — exit ${r.exitCode}. Observed, not the AI's claim. · ${when}\n` +
     weakenedNote +
     missingNote +
+    scanNote +
     reproduce +
     `> Scope: the project's test suite — not a security or logic audit.\n`
   );
@@ -152,9 +171,11 @@ export async function executeCheckCommand(target: string | undefined, options: C
   }
   if (!isFolder) throw new Error(`No such folder: ${target}`);
   const r = await rerunTests(cwd);
-  const weakened = detectTestWeakening(cwd, options.base);
+  const scan = scanTestWeakening(cwd, options.base);
+  const weakened = scan.findings;
   const missingClaimed = options.claim ? findMissingClaimedTests(cwd, options.claim) : [];
-  const verdict = checkVerdict(r, weakened, missingClaimed);
+  const verdict = checkVerdict(r, weakened, missingClaimed, scan.error);
+  const weakeningScan = scan.error ? `could not run: ${scan.error}` : scan.skipped ? `skipped: ${scan.skipped}` : 'ran';
   const exitCode = verdict === 'pass' ? 0 : verdict === 'fail' ? 1 : 2;
   const weakenedText = () =>
     weakened.length
@@ -162,6 +183,12 @@ export async function executeCheckCommand(target: string | undefined, options: C
           .map((l) => colors.dim(`  ${l}\n`))
           .join('') + colors.dim(`  › ${options.base ? `git diff ${options.base}...HEAD` : 'git diff HEAD'}\n`)
       : '';
+  const scanText = () =>
+    scan.error
+      ? colors.dim(`  weakened-test scan could not run: ${scan.error}\n`)
+      : scan.skipped
+        ? colors.dim(`  weakened-test scan skipped: ${scan.skipped}\n`)
+        : '';
   const missingLines = () =>
     missingClaimed.length
       ? missingClaimed.map((f) => colors.dim(`  ${f} · named by the AI, not in the repo\n`)).join('')
@@ -171,14 +198,16 @@ export async function executeCheckCommand(target: string | undefined, options: C
     const receipt =
       RECEIPT_MARKER +
       '\n' +
-      buildProofBlock(cwd, r, weakened, missingClaimed, { base: options.base, claim: options.claim });
-    process.stdout.write(JSON.stringify({ cwd, ...r, weakened, missingClaimed, verdict, receipt }, null, 2) + '\n');
+      buildProofBlock(cwd, r, weakened, missingClaimed, { base: options.base, claim: options.claim }, scan);
+    process.stdout.write(
+      JSON.stringify({ cwd, ...r, weakened, missingClaimed, weakeningScan, verdict, receipt }, null, 2) + '\n',
+    );
     return exitCode;
   }
 
   if (options.proof) {
     process.stdout.write(
-      buildProofBlock(cwd, r, weakened, missingClaimed, { base: options.base, claim: options.claim }),
+      buildProofBlock(cwd, r, weakened, missingClaimed, { base: options.base, claim: options.claim }, scan),
     );
     return exitCode;
   }
@@ -247,7 +276,9 @@ export async function executeCheckCommand(target: string | undefined, options: C
         ? colors.error(`${symbols.error} Tests pass · ${weakened.length} weakened in this change`)
         : missingClaimed.length
           ? colors.error(`${symbols.error} Tests pass · ${missingClaimed.length} claimed test file not found`)
-          : colors.success(`${symbols.success} Tests pass`);
+          : scan.error
+            ? colors.error(`${symbols.error} Tests pass · weakened-test scan could not run`)
+            : colors.success(`${symbols.success} Tests pass`);
   process.stdout.write(
     '\n' +
       headline +
@@ -262,6 +293,7 @@ export async function executeCheckCommand(target: string | undefined, options: C
         : '') +
       weakenedText() +
       missingLines() +
+      scanText() +
       '\n',
   );
   return exitCode;
