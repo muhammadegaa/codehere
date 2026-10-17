@@ -72,8 +72,14 @@ export interface RerunTestsResult {
 }
 
 const TIMEOUT_SETTING = Number(process.env.CODEHERE_RERUN_TIMEOUT_MS);
-/** A value that is not a positive number falls back to two minutes; NaN would time out at once. */
-const DEFAULT_TIMEOUT_MS = TIMEOUT_SETTING > 0 ? TIMEOUT_SETTING : 120_000;
+/**
+ * Whole milliseconds that a timer can hold; anything else falls back to two minutes. Node fires a NaN, fractional
+ * or over-2^31 timer after 1 ms, which would time out every run.
+ */
+const DEFAULT_TIMEOUT_MS =
+  Number.isInteger(TIMEOUT_SETTING) && TIMEOUT_SETTING > 0 && TIMEOUT_SETTING <= 2 ** 31 - 1
+    ? TIMEOUT_SETTING
+    : 120_000;
 
 /** 500 → "0.5s", 120000 → "120s". */
 const seconds = (ms: number) => `${Number.isInteger(ms / 1000) ? ms / 1000 : (ms / 1000).toFixed(1)}s`;

@@ -70,4 +70,12 @@ describe('codehere check · nothing verified is not a pass', () => {
     expect(r.stdout).not.toContain('NaN');
     expect(r.stdout).not.toContain('timed out');
   });
+
+  it.each(['Infinity', '3000000000', '0.5'])(
+    'CODEHERE_RERUN_TIMEOUT_MS=%s does not time out a 0.3 s command (fourth review, 2026-10-17)',
+    (v) => {
+      const r = check(repo({ 'README.md': 'x' }), { CODEHERE_TEST_CMD: 'sleep 0.3', CODEHERE_RERUN_TIMEOUT_MS: v });
+      expect(r.stdout).not.toContain('timed out');
+    },
+  );
 });
