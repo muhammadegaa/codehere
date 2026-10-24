@@ -21,14 +21,14 @@ Codehere is built to remove work, not add it. You keep using Claude Code as usua
 ## Install (2 minutes)
 
 ```bash
-npm install -g codehere     # or, from this folder: npm link
+npm install -g codehere@next   # the 2.0 beta; codehere@latest is still 1.x
 cd your-project
 codehere init               # finds your test command, adds hooks to .claude/settings.json
 git add .codehere .claude/settings.json .gitignore
 git commit -m "Add Codehere" && git push
 ```
 
-Each teammate installs the CLI once (`npm install -g codehere`). The hooks and the brain arrive through git.
+Each teammate installs the CLI once (`npm install -g codehere@next`). The hooks and the brain arrive through git.
 
 ## The team loop
 
