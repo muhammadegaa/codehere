@@ -83,7 +83,14 @@ r = ch(['hook', 'session-start'], ana, { ...S, hook_event_name: 'SessionStart', 
 agentSees(r.stdout);
 await pause();
 
-scene(3, 'The agent hits the same failing test again and again', 'PostToolUse hook after each `npm test`');
+scene(3, 'Ana asks for a new feature, with no way to check it', 'UserPromptSubmit hook, before any code is written');
+console.log(`${c.dim}  Ana: "Add a discount code feature to the checkout page"${c.off}`);
+r = ch(['hook', 'prompt'], ana, { ...S, hook_event_name: 'UserPromptSubmit', prompt: 'Add a discount code feature to the checkout page' });
+agentSees(JSON.parse(r.stdout).hookSpecificOutput.additionalContext);
+console.log(`${c.dim}  (The agent asks Ana first. Her answer becomes a test before any code.)${c.off}`);
+await pause();
+
+scene(4, 'The agent hits the same failing test again and again', 'PostToolUse hook after each `npm test`');
 const fail = (got) => ({ ...S, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: { stderr: `AssertionError: expected 20 but got ${got}` } });
 for (const got of [10, 12, 10]) {
   r = ch(['hook', 'post-tool'], ana, fail(got));
@@ -94,19 +101,25 @@ for (const got of [10, 12, 10]) {
 console.log(`${c.dim}  (Ana typed nothing. The agent was stopped from guessing a 4th time.)${c.off}`);
 await pause();
 
-scene(4, 'The agent says "Done!" but the tests still fail', 'Stop hook runs the tests itself');
+scene(5, 'Ana is tired and types only "masih error, benerin dong"', 'UserPromptSubmit hook');
+r = ch(['hook', 'prompt'], ana, { ...S, hook_event_name: 'UserPromptSubmit', prompt: 'masih error, benerin dong' });
+agentSees(JSON.parse(r.stdout).hookSpecificOutput.additionalContext);
+console.log(`${c.dim}  (Her four words now reach the agent with the real error and how often it came back.)${c.off}`);
+await pause();
+
+scene(6, 'The agent says "Done!" but the tests still fail', 'Stop hook runs the tests itself');
 fs.writeFileSync(path.join(ana, 'cart.js'), 'export const total = (items) => items.reduce((s, i) => s + i.price * 1, 0);\n');
 r = ch(['hook', 'stop'], ana, { ...S, hook_event_name: 'Stop', stop_hook_active: false });
 agentSees(JSON.parse(r.stdout).reason);
 await pause();
 
-scene(5, 'Still stuck: Ana asks a teammate with one command', '$ codehere help "Cart total ignores quantity"');
+scene(7, 'Still stuck: Ana asks a teammate with one command', '$ codehere help "Cart total ignores quantity"');
 r = ch(['help', 'Cart total ignores quantity'], ana);
 humanSees(r.stdout.split('---')[0]);
 sh('git add -A && git commit -qm "help: cart total" && git push -q', ana);
 await pause();
 
-scene(6, 'Budi, on his own laptop, starts his day', 'git pull, then Claude Code SessionStart');
+scene(8, 'Budi, on his own laptop, starts his day', 'git pull, then Claude Code SessionStart');
 sh(`git clone -q -b main "${remote}" budi`, tmp);
 const budi = path.join(tmp, 'budi');
 sh('git config user.name Budi && git config user.email budi@x.dev', budi);
@@ -116,14 +129,14 @@ r = ch(['inbox'], budi);
 humanSees(r.stdout);
 await pause();
 
-scene(7, 'Budi answers in 30 seconds and marks it solved', '$ codehere reply <id> "..." --solved');
+scene(9, 'Budi answers in 30 seconds and marks it solved', '$ codehere reply <id> "..." --solved');
 const id = r.stdout.split('\n')[0].trim();
 r = ch(['reply', id, 'total must use price * qty; we had the same bug in checkout.js', '--solved'], budi);
 humanSees(r.stdout);
 sh('git add -A && git commit -qm "answer cart help" && git push -q', budi);
 await pause();
 
-scene(8, 'Next week, Citra hits the same bug. Her agent gets the fix on the first failure.', 'git pull, then PostToolUse on the first failure');
+scene(10, 'Next week, Citra hits the same bug. Her agent gets the fix on the first failure.', 'git pull, then PostToolUse on the first failure');
 sh(`git clone -q -b main "${remote}" citra`, tmp);
 const citra = path.join(tmp, 'citra');
 sh('git config user.name Citra && git config user.email citra@x.dev', citra);
@@ -131,7 +144,7 @@ r = ch(['hook', 'post-tool'], citra, { session_id: 'citra-1', cwd: citra, hook_e
 agentSees(JSON.parse(r.stdout).hookSpecificOutput.additionalContext);
 await pause();
 
-scene(9, 'The fix lands; "done" is checked, not claimed', 'Stop hook');
+scene(11, 'The fix lands; "done" is checked, not claimed', 'Stop hook');
 fs.writeFileSync(path.join(ana, 'cart.js'), 'export const total = (items) => items.reduce((s, i) => s + i.price * (i.qty ?? 1), 0);\n');
 r = ch(['hook', 'stop'], ana, { ...S, hook_event_name: 'Stop', stop_hook_active: true });
 let j = JSON.parse(r.stdout || '{}');
@@ -142,6 +155,6 @@ if (j.decision === 'block') {
 }
 humanSees(j.systemMessage || '(tests passed)');
 
-console.log(`\n${c.bold}${c.magenta}What the humans did: 1 setup, 1 rule, 1 help card, 1 reply.${c.off}`);
+console.log(`\n${c.bold}${c.magenta}What the humans did: 1 setup, 1 rule, 1 answer to \"how will you know it works?\", 1 help card, 1 reply.${c.off}`);
 console.log(`${c.magenta}Everything else happened inside the agent, from plain files in git.${c.off}\n`);
 fs.rmSync(tmp, { recursive: true, force: true });

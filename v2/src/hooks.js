@@ -7,7 +7,9 @@ import {
   findRoot, paths, readConfig, readState, writeState, session, readRules,
   listDocs, git, isGitRepo, me, slug, today,
 } from './brain.js';
-import { responseText, signature, errorLines, similarity, tamperFindings } from './signals.js';
+import {
+  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature,
+} from './signals.js';
 
 function readStdin() {
   try {
@@ -37,6 +39,7 @@ export async function runHook(event) {
   if (!root) quiet();
   try {
     if (event === 'session-start') return sessionStart(root, input);
+    if (event === 'prompt') return promptSubmit(root, input);
     if (event === 'post-tool') return postTool(root, input);
     if (event === 'stop') return stop(root, input);
   } catch (err) {
@@ -129,8 +132,17 @@ function changedThisSession(root, s) {
 // ---------- PostToolUse (Bash): loop breaker + just-in-time team lessons ----------
 
 // Commands that only read files. Their output may contain the word "error"
-// (source code, logs) without anything having failed.
-const READ_ONLY = /^\s*(cat|head|tail|less|more|grep|rg|ag|sed\s+-n|awk|ls|find|tree|wc|git\s+(diff|show|log|blame|grep))\b/;
+// (source code, logs) without anything having failed. A chain such as
+// `cd x && cat a; ls b` is read-only only if every part is. Quoted text is
+// emptied first so `grep "error|fail"` stays one part, and a part that runs
+// another command ($(...), backticks, <(...)) is never read-only.
+const READ_ONLY = /^\s*(cd|pwd|echo|cat|head|tail|less|more|grep|rg|ag|sed\s+-n|awk|ls|find|tree|wc|git\s+(diff|show|log|blame|grep|status))\b/;
+export function readOnly(command) {
+  const runsSomething = /\$\(|`|<\(/;
+  if (runsSomething.test(command)) return false;
+  const bare = command.replace(/(["'])(?:\\.|(?!\1)[^\\])*\1/g, "''");
+  return bare.split(/&&|\|\||\|&|[;|\n]/).every((part) => !part.trim() || READ_ONLY.test(part));
+}
 
 function matchLesson(root, sig, shown) {
   let best = null;
@@ -153,16 +165,26 @@ function lessonText(doc) {
 function postTool(root, input) {
   if (input.tool_name && input.tool_name !== 'Bash') quiet();
   const command = (input.tool_input && input.tool_input.command) || '';
-  if (READ_ONLY.test(command)) quiet();
+  if (readOnly(command)) quiet();
   const text = responseText(input.tool_response) + '\n' + (input.error || '');
   const sig = signature(text);
-  if (!sig) quiet();
+  if (!sig) {
+    // the command that failed last now runs clean: that failure is over
+    const state = readState(root);
+    const s = state.sessions[input.session_id || 'default'];
+    if (s && s.lastFailure && s.lastFailure.command === command) {
+      s.lastFailure = null;
+      writeState(root, state);
+    }
+    quiet();
+  }
 
   const cfg = readConfig(root);
   const state = readState(root);
   const s = session(state, input.session_id);
   s.errors[sig] = (s.errors[sig] || 0) + 1;
   s.rawErrors[sig] = errorLines(text, 8);
+  s.lastFailure = { sig, command, test: failingTest(text), lines: errorLines(text, 3), prompt: s.prompts || 0 };
   const count = s.errors[sig];
 
   const lesson = matchLesson(root, sig, s.shownLessons);
@@ -171,6 +193,8 @@ function postTool(root, input) {
 
   const threshold = cfg.loopThreshold;
   if (count === threshold || count === threshold + 2) {
+    s.loopsStopped = (s.loopsStopped || 0) + 1;
+    writeState(root, state);
     const msg = [
       `Codehere: the same error has come back ${count} times this session:`,
       `  ${sig}`,
@@ -202,6 +226,108 @@ function postTool(root, input) {
   quiet();
 }
 
+// ---------- UserPromptSubmit: restore what a short prompt leaves out ----------
+// One message at most, only about this session, under 300 tokens. Silent on normal turns.
+
+function promptSubmit(root, input) {
+  if (!input.session_id) quiet(); // without it, sessions cannot be told apart
+  const prompt = String(input.prompt || '');
+  const cfg = readConfig(root);
+  const state = readState(root);
+  const s = session(state, input.session_id);
+  s.transcript = input.transcript_path || s.transcript;
+  s.prompts = (s.prompts || 0) + 1;
+
+  // Only a failure from the agent's last turn counts: an older one may be fixed or forgotten.
+  const f = s.lastFailure && (s.lastFailure.prompt || 0) === s.prompts - 1 ? s.lastFailure : null;
+  const repeats = f ? s.errors[f.sig] || 1 : 0;
+  const low = !!f && lowInfoPrompt(prompt);
+  if (f && !s.episode) s.episode = { kind: low ? 'still-broken' : 'with-detail', start: s.prompts };
+
+  let msg = null;
+  if (low) {
+    const changed = isGitRepo(root) ? quickChanged(root, s) : [];
+    msg = [
+      "Codehere context from this session's tool output (the user did not type this):",
+      "The user's short message most likely means the last failure is still there.",
+      `- Error (seen ${repeats}x): ${((f.lines && f.lines[0]) || f.sig).slice(0, 200)}`,
+      ...(f.test ? [`- Failing test: ${f.test}`] : []),
+      `- Command: ${f.command.slice(0, 120)}`,
+      ...(changed.length ? [`- Files changed this session: ${changed.join(', ')}`] : []),
+      'Find the root cause before editing again. If a fix already failed, try a different hypothesis.',
+    ].join('\n');
+  } else if (f && !s.briefSuggested && repeats >= cfg.loopThreshold && transcriptTokens(s) >= cfg.longSessionTokens) {
+    s.briefSuggested = true;
+    msg = [
+      `Codehere: this session is long (about ${Math.round(transcriptTokens(s) / 1000)}k tokens) and the same error came back ${repeats} times.`,
+      'Fresh sessions with one clear spec fix bugs better than long ones.',
+      'In one line, suggest the user run `codehere brief` and start a new session (it loads the brief). Then continue with their request.',
+    ].join('\n');
+  } else if (!f && !s.askedHowToCheck && vagueFeature(prompt)) {
+    s.askedHowToCheck = true;
+    msg = [
+      'Codehere: this feature request has no way to check it yet.',
+      'Before writing code, ask the user only this one question: "How will you know it works?"',
+      'You may offer 2 to 4 checkable examples they can accept. Then wait for the answer.',
+      'Turn the answer into failing tests first, then build in small steps and run the tests after each one.',
+    ].join('\n');
+  }
+
+  writeState(root, state);
+  if (msg) {
+    emitJson({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: msg.slice(0, 1100) } });
+  }
+  quiet();
+}
+
+// Fast list for a prompt (no hashing): tracked files changed since the session started.
+function quickChanged(root, s) {
+  return git(root, `diff --name-only ${s.startHead || 'HEAD'}`)
+    .split('\n')
+    .filter((x) => x && !IGNORE(x))
+    .slice(0, 5);
+}
+
+// How big the agent's context is now. Claude Code records each reply's token usage in the
+// transcript; the file itself is no guide, as it also stores full request bodies.
+// 0 means unknown (no usage recorded).
+export function transcriptTokens(s) {
+  try {
+    const size = fs.statSync(s.transcript).size;
+    const fd = fs.openSync(s.transcript, 'r');
+    const len = Math.min(size, 1024 * 1024);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    fs.closeSync(fd);
+    const lines = buf.toString('utf8').split('\n').reverse();
+    for (const line of lines) {
+      if (!line.includes('"usage"')) continue;
+      try {
+        const u = JSON.parse(line).message?.usage;
+        const n = u ? (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : 0;
+        if (n > 0) return n;
+      } catch {}
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
+// The session reached a verified green: close the open fix attempt, if any.
+function recordGreen(state, s) {
+  if (s.firstGreenAt == null) s.firstGreenAt = s.prompts || 0;
+  if (s.episode) {
+    state.episodes = state.episodes || [];
+    state.episodes.push({ kind: s.episode.kind, turns: Math.max(1, (s.prompts || 0) - s.episode.start + 1) });
+    state.episodes = state.episodes.slice(-200);
+    s.episode = null;
+  }
+  // A green test run ends a test failure, not an unrelated one such as a failed build.
+  const f = s.lastFailure;
+  if (f && (f.test || /\b(test|tests|pytest|jest|vitest|mocha|spec)\b/.test(f.command || ''))) s.lastFailure = null;
+}
+
 // ---------- Stop: verify "done" outside the agent ----------
 
 function runTests(root, cfg) {
@@ -225,7 +351,7 @@ function stop(root, input) {
   const cfg = readConfig(root);
   const state = readState(root);
   const s = session(state, input.session_id);
-  if (s.stopBlocks >= 3) quiet(); // never trap the agent
+  const mayBlock = (s.stopBlocks || 0) < 3; // never trap the agent: after 3 blocks, only observe
 
   if (!isGitRepo(root)) quiet();
   const base = s.startHead || 'HEAD';
@@ -237,7 +363,7 @@ function stop(root, input) {
   const nameStatus = git(root, `diff ${base} --name-status -- ${files}`);
   const findings = tamperFindings(nameStatus, git(root, `diff ${base} -U0 -- ${files}`));
   const key = findings.join('|');
-  if (findings.length && s.tamperReported !== key) {
+  if (findings.length && s.tamperReported !== key && mayBlock) {
     s.tamperReported = key;
     s.stopBlocks++;
     writeState(root, state);
@@ -255,6 +381,10 @@ function stop(root, input) {
   let verified = null;
   if (cfg.verifyOnStop && cfg.testCommand) {
     const t = runTests(root, cfg);
+    if (!t.ok && !mayBlock) {
+      writeState(root, state);
+      quiet();
+    }
     if (!t.ok) {
       s.stopBlocks++;
       writeState(root, state);
@@ -269,12 +399,15 @@ function stop(root, input) {
       );
     }
     verified = cfg.testCommand;
-    state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };
+    if (!findings.length) {
+      state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };
+      recordGreen(state, s);
+    }
   }
 
   // 3. turn a solved repeated error into a team lesson (asked once per session)
   const solved = Object.entries(s.errors).filter(([, n]) => n >= 2);
-  if (solved.length && !s.lessonAsked) {
+  if (solved.length && !s.lessonAsked && mayBlock) {
     s.lessonAsked = true;
     s.stopBlocks++;
     writeState(root, state);
@@ -300,6 +433,10 @@ function stop(root, input) {
   }
 
   writeState(root, state);
+  // Green only for intact evidence (DESIGN.md §1): a pass with a weakened test is not verified.
+  if (verified && findings.length) {
+    emitJson({ systemMessage: `Codehere ran \`${verified}\`. It passed, but a file changed this session has a weakened check: ${findings.join('; ')}.` });
+  }
   if (verified) emitJson({ systemMessage: `Codehere verified: \`${verified}\` passed.` });
   quiet();
 }

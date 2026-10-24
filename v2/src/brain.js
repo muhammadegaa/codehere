@@ -41,6 +41,7 @@ const DEFAULT_CONFIG = {
   verifyOnStop: true,
   loopThreshold: 3,
   testTimeoutSeconds: 120,
+  longSessionTokens: 120000,
   gemmaModel: 'gemma4:e4b',
 };
 

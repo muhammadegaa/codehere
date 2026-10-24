@@ -4,6 +4,9 @@ const ERROR_LINE =
   /(error|exception|traceback|failed|failure|fatal|cannot|can't|not found|undefined is not|is not defined|is not a function|segmentation fault|ERR!|panic:|denied|refused|unexpected token|syntaxerror|typeerror|referenceerror|modulenotfound|no such file)/i;
 
 const NOISE = /^(\s*at\s|\s*\^+\s*$|\s*$)/;
+// A passing test whose name mentions an error ("✔ returns an error for bad input"),
+// or a summary that says zero failed ("ℹ fail 0"), is not a failure.
+const PASSING = /^\s*(✔|✓|√|ok \d+\b|PASS\b)|^\s*(ℹ\s*)?(fail|failed|failures|errors)\s*[:=]?\s*0\s*$/i;
 
 export function stripAnsi(s) {
   return String(s).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
@@ -26,7 +29,7 @@ export function errorLines(text, max = 12) {
   const lines = stripAnsi(text).split('\n');
   const hits = [];
   for (let i = 0; i < lines.length && hits.length < max; i++) {
-    if (ERROR_LINE.test(lines[i]) && !NOISE.test(lines[i])) hits.push(lines[i].trim());
+    if (ERROR_LINE.test(lines[i]) && !NOISE.test(lines[i]) && !PASSING.test(lines[i])) hits.push(lines[i].trim());
   }
   return hits;
 }
@@ -47,6 +50,56 @@ export function signature(text) {
   const lines = errorLines(text, 3);
   if (!lines.length) return null;
   return normalize(lines[0]);
+}
+
+// The name of the failing test, from node --test / TAP, jest, pytest or go test output.
+export function failingTest(text) {
+  const t = stripAnsi(text);
+  const m =
+    t.match(/^\s*(?:✖|×|✗|not ok \d+ -)\s+(?!failing tests)(.+?)(?:\s+\(?\d[\d.]*\s?m?s\)?)?\s*$/m) ||
+    t.match(/^\s*●\s+(.+?)\s*$/m) ||
+    t.match(/^FAILED\s+(\S+)/m) ||
+    t.match(/^--- FAIL:\s+(\S+)/m);
+  return m ? m[1].trim().slice(0, 120) : null;
+}
+
+// ---------- prompts (UserPromptSubmit) ----------
+
+const words = (p) => String(p || '').trim().split(/\s+/).filter(Boolean);
+// A file path, inline code, a pasted error line or a number: the prompt carries its own
+// information. The bare word "error" does not count ("still error", "masih error").
+const SPECIFIC = /`|[\w-]+\/[\w./-]+|\.\w{1,5}\b|\w*(error|exception)\s*[:[(]|\b(traceback|line \d+|expected|got)\b|\d{3,}/i;
+// English and Indonesian words that ask for a repair. Thanks and "works now" never count.
+const REPAIR =
+  /\b(still|again|broken|fix|fail|fails|failing|failed|wrong|same|bug|error|errors|wtf|ugh|stuck|nope|masih|lagi|rusak|gagal|eror|salah|belum|tolong|perbaiki|benerin|betulin)\b|\b(not|doesn'?t|didn'?t|isn'?t|won'?t|can'?t|gak|nggak|ngga|ga|tidak|blm)\s+(work|working|run|running|pass|passing|load|loading|jalan|bisa|berhasil)\b/i;
+const POSITIVE = /\b(thanks|thank you|thx|works now|working now|great|nice|good|perfect|awesome|mantap|makasih|terima kasih|sip|berhasil|sudah bisa|udah bisa)\b/i;
+
+// "still broken", "fix it", "masih error": short, no specifics, asks for a repair.
+export function lowInfoPrompt(p) {
+  const w = words(p);
+  if (!w.length || w.length > 8 || SPECIFIC.test(p) || POSITIVE.test(p)) return false;
+  return REPAIR.test(p);
+}
+
+const BUILD_START =
+  /^\s*(please\s+|tolong\s+|can you\s+|could you\s+)?(build|create|make|add|implement|develop|design|set up|setup|buat|buatkan|bikin|bikinin|tambah|tambahkan|bangun)\b/i;
+const BIG = /\b(app|application|feature|system|platform|website|site|dashboard|service|bot|game|aplikasi|fitur|sistem|situs|web)\b/i;
+const SMALL = /\b(make sure|pastikan|instead|still|again|fix|bug|error|rename|change|ubah|ganti|refactor|button|color|colour|font|style)\b/i;
+const CHECKABLE =
+  /\b(tests?|spec|expect|assert|should (return|show|be|print)|when i|given|acceptance|example|input|output|returns?|tes|uji|contoh|harus|kalau|jika)\b/i;
+
+// "build me a todo app with login": a new feature with nothing that says how to check it.
+// Questions and small edits ("make the button blue") do not count.
+export function vagueFeature(p) {
+  return (
+    words(p).length >= 6 &&
+    BUILD_START.test(p) &&
+    BIG.test(p) &&
+    !SMALL.test(p) &&
+    !CHECKABLE.test(p) &&
+    !SPECIFIC.test(p) &&
+    !/\?\s*$/.test(p)
+  );
 }
 
 function tokens(s) {

@@ -7,9 +7,11 @@ import {
 } from './brain.js';
 import { redact } from './signals.js';
 import { summarize } from './gemma.js';
+import { transcriptTokens } from './hooks.js';
 
 const HOOK_EVENTS = {
   SessionStart: { cmd: 'codehere hook session-start' },
+  UserPromptSubmit: { cmd: 'codehere hook prompt', timeout: 10 },
   PostToolUse: { cmd: 'codehere hook post-tool', matcher: 'Bash' },
   PostToolUseFailure: { cmd: 'codehere hook post-tool', matcher: 'Bash' },
   Stop: { cmd: 'codehere hook stop', timeout: 180 },
@@ -195,6 +197,8 @@ function lastSession(root) {
   return { state, s };
 }
 
+const times = (n) => (n === 1 ? 'once' : `${n} times`);
+
 function repeatedErrors(s) {
   if (!s) return [];
   return Object.entries(s.errors || {})
@@ -238,7 +242,7 @@ export async function brief(flags) {
   }
   if (errs.length) {
     lines.push('## What kept failing (do not repeat these attempts)');
-    errs.forEach((e) => lines.push(`- ${e.sig} (seen ${e.n} times)`));
+    errs.forEach((e) => lines.push(`- ${e.sig} (seen ${times(e.n)})`));
     lines.push('');
   }
   lines.push('## Current state');
@@ -253,7 +257,7 @@ export async function brief(flags) {
       `Rewrite this into one clear, complete instruction for a coding agent. Keep every requirement and constraint. Plain English, max 120 words.\n\n${text}`,
       cfg.gemmaModel
     );
-    if (summary) text = text.replace('## Goal', `## In one paragraph (written by local Gemma, check it)\n${summary}\n\n## Goal`);
+    if (summary) text = text.replace('## Goal', `## In one paragraph (written by ${summary.model} on this machine; an opinion, check it)\n${summary.text}\n\n## Goal`);
     else console.error('(Gemma not reachable through Ollama; using the plain brief.)');
   }
 
@@ -283,7 +287,7 @@ export async function help(question, flags) {
   if (errs.length) {
     body.push('## The error');
     errs.slice(0, 2).forEach((e) => {
-      body.push(`Seen ${e.n} times: \`${e.sig}\``);
+      body.push(`Seen ${times(e.n)}: \`${e.sig}\``);
       if (e.raw.length) body.push('```', ...e.raw.slice(0, 6), '```');
     });
     body.push('');
@@ -303,7 +307,8 @@ export async function help(question, flags) {
       `Summarise this help request for a busy teammate in 2 sentences: what is wrong and what you need from them.\n\n${text}`,
       cfg.gemmaModel
     );
-    if (summary) text = `## In short (written by local Gemma, check it)\n${summary}\n\n${text}`;
+    if (summary) text = `## In short (written by ${summary.model} on this machine; an opinion, check it)\n${summary.text}\n\n${text}`;
+    else console.error('(Gemma not reachable through Ollama; using the plain help card.)');
   }
 
   const id = `${stamp()}-${slug(ask, 30)}`;
@@ -401,4 +406,40 @@ export function status() {
     const errs = repeatedErrors(s);
     console.log(`- This session: ${errs.length ? errs.map((e) => `${e.n}x "${e.sig}"`).join('; ') : 'no repeated errors'}`);
   }
+}
+
+// ---------- stats ----------
+
+const median = (xs) => {
+  const a = [...xs].sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+};
+const k = (n) => `${Math.round(n / 1000)}k`;
+const fixes = (n) => (n === 1 ? '1 fix' : `${n} fixes`);
+
+export function stats() {
+  const root = requireRoot();
+  const state = readState(root);
+  const sessions = Object.values(state.sessions || {}).filter(
+    (x) => x.prompts || x.transcript || Object.keys(x.errors || {}).length
+  );
+  const greens = sessions.map((x) => x.firstGreenAt).filter((n) => n > 0);
+  const loops = sessions.reduce((n, x) => n + (x.loopsStopped || 0), 0);
+  const sizes = sessions.map(transcriptTokens).filter(Boolean);
+  const turns = (kind) => (state.episodes || []).filter((e) => e.kind === kind).map((e) => e.turns);
+  const detail = turns('with-detail');
+  const short = turns('still-broken');
+
+  console.log(`Codehere stats · ${sessions.length} recent sessions on this machine`);
+  console.log(
+    `- Turns to green: ${greens.length ? `median ${median(greens)} prompts · ${greens.length} of ${sessions.length} sessions reached green` : 'no session has reached green yet'}`
+  );
+  console.log(`- Loops stopped: ${loops}`);
+  console.log(
+    `- Context size: ${sizes.length ? `largest ${k(Math.max(...sizes))} tokens · median ${k(median(sizes))} (last request of each session)` : 'no transcripts yet'}`
+  );
+  console.log(
+    `- Turns to fix a failure: ${detail.length ? `${median(detail)} when the prompt gave details (${fixes(detail.length)})` : 'no fix after a detailed prompt yet'} · ${short.length ? `${median(short)} after a short "still broken" (${fixes(short.length)})` : 'no fix after a short "still broken" yet'}`
+  );
 }

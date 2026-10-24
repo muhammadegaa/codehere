@@ -20,7 +20,7 @@ for (let i = 0; i < argv.length; i++) {
 
 const [command, ...rest] = pos;
 
-const USAGE = `codehere — a git-native team brain for vibe coders
+const USAGE = `codehere · a git-native team brain for vibe coders
 
 Setup
   codehere init [--test "npm test"]   set up .codehere/ and Claude Code hooks
@@ -40,9 +40,10 @@ When you're stuck
                                       answer; --solved turns it into a team lesson
 
   codehere status                     what Codehere has seen
+  codehere stats                      turns to green, loops stopped, session size
 
 Hooks (called by Claude Code, not by you)
-  codehere hook session-start | post-tool | stop
+  codehere hook session-start | prompt | post-tool | stop
 `;
 
 const run = async () => {
@@ -70,8 +71,14 @@ const run = async () => {
       return cmd.reply(rest[0], rest.slice(1).join(' '), flags);
     case 'status':
       return cmd.status();
+    case 'stats':
+      return cmd.stats();
     default:
-      console.log(USAGE);
+      if (!command || command === '-h') return console.log(USAGE);
+      // stderr only: a hook's stdout can land in the agent's context (e.g. a codehere 1.x
+      // user-level hook such as `codehere scan-tool`). Exit 0 when a hook called us.
+      console.error(`Unknown command "${command}". Run codehere --help.`);
+      if (process.stdin.isTTY) process.exitCode = 1;
   }
 };
 
