@@ -1,0 +1,83 @@
+#!/usr/bin/env node
+import { runHook } from '../src/hooks.js';
+import * as cmd from '../src/commands.js';
+
+const argv = process.argv.slice(2);
+const BOOLEAN = new Set(['gemma', 'solved', 'all', 'help', 'h']);
+const flags = {};
+const pos = [];
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a.startsWith('--')) {
+    const key = a.slice(2);
+    const next = argv[i + 1];
+    if (!BOOLEAN.has(key) && next !== undefined && !next.startsWith('--')) {
+      flags[key] = next;
+      i++;
+    } else flags[key] = true;
+  } else pos.push(a);
+}
+
+const [command, ...rest] = pos;
+
+const USAGE = `codehere — a git-native team brain for vibe coders
+
+Setup
+  codehere init [--test "npm test"]   set up .codehere/ and Claude Code hooks
+
+Team brain
+  codehere rule ["text"]              add a team rule (or list rules)
+  codehere lesson ["problem" --fix "what fixed it" --sig "error text"]
+                                      add a lesson (or list lessons)
+
+When you're stuck
+  codehere brief [--gemma]            write a restart brief; the next session loads it
+  codehere help ["question"] [--gemma]
+                                      write a redacted help card for a teammate
+  codehere inbox [--all]              see teammates' help cards
+  codehere show <id>                  read a help card
+  codehere reply <id> "answer" [--solved]
+                                      answer; --solved turns it into a team lesson
+
+  codehere status                     what Codehere has seen
+
+Hooks (called by Claude Code, not by you)
+  codehere hook session-start | post-tool | stop
+`;
+
+const run = async () => {
+  switch (command) {
+    case 'hook':
+      return runHook(rest[0]);
+    case 'init':
+      return cmd.init(flags);
+    case 'rule':
+    case 'rules':
+      return cmd.rule(rest.join(' '));
+    case 'lesson':
+    case 'lessons':
+      return cmd.lesson(rest.join(' '), flags);
+    case 'brief':
+      return cmd.brief(flags);
+    case 'help':
+      if (flags.h) return console.log(USAGE);
+      return cmd.help(rest.join(' '), flags);
+    case 'inbox':
+      return cmd.inbox(flags);
+    case 'show':
+      return cmd.show(rest[0]);
+    case 'reply':
+      return cmd.reply(rest[0], rest.slice(1).join(' '), flags);
+    case 'status':
+      return cmd.status();
+    default:
+      console.log(USAGE);
+  }
+};
+
+run().catch((err) => {
+  // hooks must never break the agent
+  if (command === 'hook') process.exit(0);
+  console.error(err.message);
+  process.exit(1);
+});
