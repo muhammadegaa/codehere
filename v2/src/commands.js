@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   findRoot, paths, ensureDirs, readConfig, writeConfig, readState, writeState,
-  readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
+  readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me, commitId,
 } from './brain.js';
 import { redact } from './signals.js';
 import { summarize } from './gemma.js';
@@ -212,7 +212,7 @@ function gitSummary(root, base) {
   return {
     branch: git(root, 'rev-parse --abbrev-ref HEAD'),
     head: git(root, 'log -1 --format="%h %s"'),
-    stat: git(root, `diff ${base || 'HEAD'} --stat`).split('\n').slice(-12).join('\n'),
+    stat: git(root, ['diff', commitId(base) || 'HEAD', '--stat']).split('\n').slice(-12).join('\n'),
   };
 }
 

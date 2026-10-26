@@ -280,6 +280,47 @@ check('questions and small edits are not vague features', !['how do I add auth t
 check('vague feature (en + id)', vagueFeature('Buatkan aplikasi kasir untuk warung dengan laporan bulanan') && vagueFeature('Add a discount code feature to the checkout page'));
 check('a feature that says how to check it is not vague (en + id)', !vagueFeature('Buatkan fitur login, harus menolak password salah') && !vagueFeature('Build a login page; it should return 401 for a wrong password'));
 
+console.log('\n18. text from the repo or the state file never reaches a shell');
+// git overwrites ignored files on pull, so a teammate can commit .codehere/local/state.json with `git add -f`
+const S = (sid, dir, active = false) => ch(['hook', 'stop'], dir, { session_id: sid, cwd: dir, hook_event_name: 'Stop', stop_hook_active: active });
+const start = (sid, dir) => ch(['hook', 'session-start'], dir, { session_id: sid, cwd: dir, hook_event_name: 'SessionStart', source: 'startup' });
+const exists = (dir, f) => fs.existsSync(path.join(dir, f));
+fs.writeFileSync(path.join(tmp, 'secret.txt'), 'SECRET-OUTSIDE-THE-REPO');
+const forgedState = JSON.parse(fs.readFileSync(path.join(ana, '.codehere/local/state.json'), 'utf8'));
+forgedState.sessions.x = { startHead: '$(touch pwned-state.txt)', errors: { 'E: boom': 2 }, rawErrors: {}, shownLessons: [], stopBlocks: 0 };
+forgedState.sessions.y = { startHead: `--output=${path.join(tmp, 'pwned-option.txt')}`, errors: {}, rawErrors: {}, shownLessons: [], stopBlocks: 0 };
+forgedState.lastSession = 'x';
+forgedState.pendingBrief = path.join(tmp, 'secret.txt');
+fs.writeFileSync(path.join(ana, '.codehere/local/state.json'), JSON.stringify(forgedState));
+sh('git add -f .codehere/local/state.json && git commit -qm "forged state" && git push -q origin main', ana);
+const resetTo = (dir) => sh('git checkout -q -- . && git clean -fdq && git pull -q origin main', dir);
+resetTo(budi);
+r = start('t8', budi);
+check('a committed state.json cannot load a file from outside .codehere/briefs', !r.out.includes('SECRET-OUTSIDE'), r.out);
+ch(['brief'], budi);
+fs.appendFileSync(path.join(budi, 'app.js'), '// edit 8\n');
+S('x', budi);
+check('a committed state.json cannot run a command through git', !exists(budi, 'pwned-state.txt'));
+S('y', budi);
+check('a committed state.json cannot pass an option to git', !fs.existsSync(path.join(tmp, 'pwned-option.txt')));
+start('t10', budi);
+fs.writeFileSync(path.join(budi, 'a$(touch pwned-by-name.txt).js'), '');
+S('t10', budi);
+check('a file name with $(...) is never run as shell code', !exists(budi, 'pwned-by-name.txt'));
+
+resetTo(budi);
+start('t15', budi);
+fs.appendFileSync(path.join(budi, 'test', 'run.test.js'), "it.skip('add works', () => {});\n");
+fs.writeFileSync(path.join(budi, ':(exclude)*.test.js'), '');
+r = S('t15', budi);
+check('a file name cannot act as a git pathspec and hide a weakened test', (r.out || '').includes('weaken tests'), r.out);
+resetTo(budi);
+fs.writeFileSync(path.join(budi, '.codehere/local/state.json'), '{}');
+start('t16', budi);
+fs.appendFileSync(path.join(budi, 'test', 'run.test.js'), "it.skip('add works', () => {});\n");
+r = S('t16', budi);
+check('a state.json of the wrong shape does not switch Codehere off', (r.out || '').includes('weaken tests'), r.out);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (!process.env.KEEP) fs.rmSync(tmp, { recursive: true, force: true }); else console.log(tmp);
 process.exit(failed ? 1 : 0);

@@ -2,7 +2,7 @@
 // Local, per-machine state lives in .codehere/local/ (git-ignored).
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 
 export function findRoot(start = process.cwd()) {
   let dir = path.resolve(start);
@@ -62,10 +62,11 @@ export function writeConfig(root, cfg) {
 
 export function readState(root) {
   try {
-    return JSON.parse(fs.readFileSync(paths(root).state, 'utf8'));
-  } catch {
-    return { sessions: {}, lastSession: null, lastGreen: null, pendingBrief: null };
-  }
+    const state = JSON.parse(fs.readFileSync(paths(root).state, 'utf8'));
+    // state.json can arrive through git: a file of the wrong shape counts as empty
+    if (state && state.sessions && typeof state.sessions === 'object') return state;
+  } catch {}
+  return { sessions: {}, lastSession: null, lastGreen: null, pendingBrief: null };
 }
 
 export function writeState(root, state) {
@@ -167,14 +168,21 @@ export function readRules(root) {
 
 // ---------- git helpers (all fail-safe) ----------
 
+// Pass an array whenever an argument comes from the repo or the state file: it never
+// goes through a shell, so a file name such as a$(cmd).js stays a file name.
 export function git(root, args) {
   try {
-    return execSync(`git ${args}`, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString()
-      .trim();
+    const opts = { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] };
+    return (Array.isArray(args) ? execFileSync('git', ['--literal-pathspecs', ...args], opts) : execSync(`git ${args}`, opts)).toString().trim();
   } catch {
     return '';
   }
+}
+
+// A commit id read back from state.json, or null. The state file can arrive through git,
+// so anything else (such as --output=<file>) must never reach git as an argument.
+export function commitId(x) {
+  return typeof x === 'string' && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(x) ? x : null;
 }
 
 export function isGitRepo(root) {

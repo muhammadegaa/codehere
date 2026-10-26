@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules,
-  listDocs, git, isGitRepo, me, slug, today,
+  listDocs, git, isGitRepo, me, slug, today, commitId,
 } from './brain.js';
 import {
   responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature,
@@ -68,11 +68,13 @@ function sessionStart(root, input) {
     rules.slice(0, 20).forEach((r) => out.push(`- ${r}`));
   }
 
-  if (state.pendingBrief && fs.existsSync(state.pendingBrief)) {
+  // Only a brief in .codehere/briefs/: state.json can arrive through git and point anywhere.
+  const brief = briefFile(root, state.pendingBrief);
+  if (brief) {
     out.push('', 'Restart brief from the previous session. Treat it as the full, current spec:');
-    out.push(fs.readFileSync(state.pendingBrief, 'utf8').slice(0, 4000));
-    state.pendingBrief = null;
+    out.push(fs.readFileSync(brief, 'utf8').slice(0, 4000));
   }
+  state.pendingBrief = null;
 
   const mine = me(root);
   const open = listDocs(paths(root).help).filter((d) => d.meta.status === 'open' && d.meta.author !== mine);
@@ -91,6 +93,15 @@ function sessionStart(root, input) {
   quiet();
 }
 
+function briefFile(root, file) {
+  try {
+    const real = fs.realpathSync(path.resolve(root, file));
+    return real.startsWith(fs.realpathSync(paths(root).briefs) + path.sep) ? real : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- what changed in THIS session ----------
 
 const IGNORE = (f) => f.startsWith('.codehere/') || f.startsWith('.claude/');
@@ -104,7 +115,7 @@ export function dirtySnapshot(root) {
     .filter((f) => f && !IGNORE(f));
   const snap = {};
   for (const f of files) {
-    snap[f] = fs.existsSync(path.join(root, f)) ? git(root, `hash-object -- "${f}"`) || 'x' : 'deleted';
+    snap[f] = fs.existsSync(path.join(root, f)) ? git(root, ['hash-object', '--', f]) || 'x' : 'deleted';
   }
   return snap;
 }
@@ -120,8 +131,8 @@ function changedThisSession(root, s) {
       if (now[f] !== before[f]) changed.add(f);
     }
   }
-  if (s.startHead) {
-    git(root, `diff ${s.startHead} HEAD --name-only`)
+  if (commitId(s.startHead)) {
+    git(root, ['diff', s.startHead, 'HEAD', '--name-only'])
       .split('\n')
       .filter((f) => f && !IGNORE(f))
       .forEach((f) => changed.add(f));
@@ -282,7 +293,7 @@ function promptSubmit(root, input) {
 
 // Fast list for a prompt (no hashing): tracked files changed since the session started.
 function quickChanged(root, s) {
-  return git(root, `diff --name-only ${s.startHead || 'HEAD'}`)
+  return git(root, ['diff', '--name-only', commitId(s.startHead) || 'HEAD'])
     .split('\n')
     .filter((x) => x && !IGNORE(x))
     .slice(0, 5);
@@ -354,14 +365,13 @@ function stop(root, input) {
   const mayBlock = (s.stopBlocks || 0) < 3; // never trap the agent: after 3 blocks, only observe
 
   if (!isGitRepo(root)) quiet();
-  const base = s.startHead || 'HEAD';
+  const base = commitId(s.startHead) || 'HEAD';
   const changed = changedThisSession(root, s);
   if (!changed.length) quiet(); // the agent changed nothing this session: stay silent
 
   // 1. tampering with tests or checks (only in files changed this session)
-  const files = changed.map((f) => `"${f}"`).join(' ');
-  const nameStatus = git(root, `diff ${base} --name-status -- ${files}`);
-  const findings = tamperFindings(nameStatus, git(root, `diff ${base} -U0 -- ${files}`));
+  const nameStatus = git(root, ['diff', base, '--name-status', '--', ...changed]);
+  const findings = tamperFindings(nameStatus, git(root, ['diff', base, '-U0', '--', ...changed]));
   const key = findings.join('|');
   if (findings.length && s.tamperReported !== key && mayBlock) {
     s.tamperReported = key;
