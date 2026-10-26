@@ -184,3 +184,42 @@ export function redact(text) {
   );
   return out;
 }
+
+// Passed and failed counts from a test runner's own summary line, or null. Exactly one
+// summary must be found: with two runners in one command, or a runner that prints one per
+// package, a count would cover only part of the run, so the finish line says "exit 0".
+const num = (s, re) => {
+  const m = s.match(re);
+  return m ? Number(m[1]) : null;
+};
+const counts = (passed, failed) => (passed == null && failed == null ? null : { passed: passed || 0, failed: failed || 0 });
+const SUMMARIES = [
+  // node --test, spec and TAP reporters: "ℹ tests 3", "ℹ pass 2", "ℹ fail 1"
+  { re: /^(?:ℹ|#) tests \d+$/gm, read: (t) => counts(num(t, /^(?:ℹ|#) pass (\d+)$/m), num(t, /^(?:ℹ|#) fail (\d+)$/m)) },
+  // jest "Tests:       2 failed, 46 passed, 48 total", vitest " Tests  2 failed | 46 passed (48)"
+  { re: /^\s*Tests:?\s+.*\d+ (?:passed|failed)\b.*$/gm, read: (t, line) => counts(num(line, /(\d+) passed/), num(line, /(\d+) failed/)) },
+  // pytest "===== 1 failed, 1 passed in 0.02s ====="
+  {
+    re: /^[=\s]*(?:\d+ \w+(?:, )?)+ in [\d.]+s\b.*$/gm,
+    read: (t, line) => counts(num(line, /(\d+) passed/), (num(line, /(\d+) failed/) || 0) + (num(line, /(\d+) errors?/) || 0)),
+  },
+  // mocha "46 passing" and "2 failing"
+  { re: /^\s*\d+ passing\b.*$/gm, read: (t) => counts(num(t, /^\s*(\d+) passing\b/m), num(t, /^\s*(\d+) failing\b/m)) },
+  // python unittest "Ran 5 tests in 0.001s", then "OK" or "FAILED (failures=2, errors=1)"
+  {
+    re: /^Ran \d+ tests? in [\d.]+s$/gm,
+    read: (t) => {
+      if (/expected failures|unexpected successes/.test(t)) return null; // neither passed nor failed
+      const failed = (num(t, /failures=(\d+)/) || 0) + (num(t, /errors=(\d+)/) || 0);
+      return counts(num(t, /^Ran (\d+) tests?/m) - failed - (num(t, /skipped=(\d+)/) || 0), failed);
+    },
+  },
+  // cargo "test result: ok. 4 passed; 0 failed", one line per test binary
+  { re: /^test result: \w+\. \d+ passed; \d+ failed\b.*$/gm, read: (t, line) => counts(num(line, /(\d+) passed/), num(line, /(\d+) failed/)) },
+];
+
+export function testCounts(output) {
+  const t = stripAnsi(output);
+  const found = SUMMARIES.flatMap((s) => [...t.matchAll(s.re)].map((m) => ({ s, line: m[0] })));
+  return found.length === 1 ? found[0].s.read(t, found[0].line) : null;
+}

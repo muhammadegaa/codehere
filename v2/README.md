@@ -47,7 +47,17 @@ codehere reply <id> "Use price * qty; same bug was in checkout.js" --solved
 git add .codehere && git commit -m "answer" && git push
 ```
 
-`--solved` turns the answer into a **team lesson**. From then on, any teammate's agent that hits a similar error gets that fix automatically. When an agent solves a repeated error by itself, Codehere asks it to write a short lesson too.
+`--solved` turns the answer into a **team lesson**. From then on, any teammate's agent that hits a similar error gets that fix automatically. When an agent solves a repeated error by itself, Codehere saves a lesson with the proof from that test run (command, exit code, commit, the files the fix changed) and asks the agent to fill in the cause and the fix.
+
+You see one line per event:
+
+```
+codehere › Ana's lesson given to the agent · verified on Ana's machine · 21 Oct
+codehere ✕ npm test · 2 failed · agent sent back · 1 of 3
+codehere ✓ npm test · 48 passed · re-run here · 6.2 s
+```
+
+✓ marks only a test run Codehere just made on your machine. A teammate's "verified" is plain text: it was true on their machine, and anyone with push access can edit a lesson file. The agent is told whether the files the fix changed have changed since.
 
 Don't want to commit help cards? Copy the printed text into WhatsApp, Discord or Slack instead.
 
@@ -103,7 +113,7 @@ npm test                    # end-to-end checks
 ## Known limits (2.0.0, not released yet)
 
 - Claude Code only for now. Gemini CLI and Codex hooks are next.
-- Lessons match by error text. Very generic errors can bring up a lesson that doesn't fit, which is why the agent is told it "may apply".
+- Lessons match by error text. Very generic errors can bring up a lesson that doesn't fit, which is why the agent gets it as reference, not as an instruction.
 - Redaction catches common keys, tokens and emails. Always read a help card before sharing it.
 - The "done" check needs a test command. Without one, only the tampering check runs.
 - Approvals are per folder. Each git worktree or extra clone needs its own `codehere approve`.

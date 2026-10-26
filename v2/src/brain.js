@@ -244,13 +244,56 @@ export function printable(text) {
 
 // Pass an array whenever an argument comes from the repo or the state file: it never
 // goes through a shell, so a file name such as a$(cmd).js stays a file name.
-export function git(root, args) {
+// raw keeps the output as git wrote it: -z lists, and porcelain lines whose first character is a space.
+export function git(root, args, raw = false) {
   try {
     const opts = { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] };
-    return (Array.isArray(args) ? execFileSync('git', ['--literal-pathspecs', ...args], opts) : execSync(`git ${args}`, opts)).toString().trim();
+    const out = (Array.isArray(args) ? execFileSync('git', ['--literal-pathspecs', ...args], opts) : execSync(`git ${args}`, opts)).toString();
+    return raw ? out : out.trim();
   } catch {
     return '';
   }
+}
+
+// Files with uncommitted changes, relative to root, which may be a subfolder of the repo.
+export function statusFiles(root) {
+  const prefix = git(root, ['rev-parse', '--show-prefix']);
+  const entries = git(root, ['status', '--porcelain', '-z', '--untracked-files=all', '--', '.'], true).split('\0');
+  const files = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.length < 4) continue;
+    if (e.slice(3).startsWith(prefix)) files.push(e.slice(3 + prefix.length));
+    if (e[0] === 'R' || e[0] === 'C') i++; // the old name of a rename or copy
+  }
+  return files;
+}
+
+// What `git hash-object` gives for each file (git's filters applied), 'deleted' for a missing
+// file, null when git cannot say. One git call for all of them; absolute paths, because
+// --stdin-paths ignores the subfolder git was started in.
+export function gitHashes(root, files) {
+  const present = files.filter((f) => !f.includes('\n') && fs.existsSync(path.join(root, f)));
+  let out = [];
+  try {
+    if (present.length) {
+      out = execFileSync('git', ['hash-object', '--stdin-paths'], { cwd: root, input: present.map((f) => path.resolve(root, f)).join('\n') + '\n', stdio: ['pipe', 'pipe', 'ignore'] })
+        .toString()
+        .trim()
+        .split('\n');
+    }
+  } catch {}
+  return files.map((f) => {
+    const i = present.indexOf(f);
+    if (i >= 0) return out[i] || null;
+    return f.includes('\n') ? null : 'deleted';
+  });
+}
+
+// A tick is Codehere's mark for a run it made on this machine (DESIGN.md §1). Text from the
+// repo or from a teammate never brings its own.
+export function noTick(text) {
+  return String(text).replace(/[✓✔☑✅]/g, '?');
 }
 
 // A commit id read back from state.json, or null. The state file can arrive through git,

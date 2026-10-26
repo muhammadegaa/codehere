@@ -5,11 +5,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
-  findRoot, paths, readConfig, readState, writeState, session, readRules,
-  listDocs, git, isGitRepo, me, slug, today, isApproved, readApprovals, printable, commitId,
+  findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
+  listDocs, git, isGitRepo, me, slug, today, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
 } from './brain.js';
 import {
-  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature,
+  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts,
 } from './signals.js';
 
 function readStdin() {
@@ -121,17 +121,9 @@ function briefFile(root, file) {
 const IGNORE = (f) => f.startsWith('.codehere/') || f.startsWith('.claude/');
 
 export function dirtySnapshot(root) {
-  const files = git(root, 'status --porcelain --untracked-files=all')
-    .split('\n')
-    .filter(Boolean)
-    // "XY path"; the first line may have lost its leading space to trim()
-    .map((l) => l.replace(/^[ MADRCU?!T]{1,2}\s+/, '').replace(/^"|"$/g, '').split(' -> ').pop())
-    .filter((f) => f && !IGNORE(f));
-  const snap = {};
-  for (const f of files) {
-    snap[f] = fs.existsSync(path.join(root, f)) ? git(root, ['hash-object', '--', f]) || 'x' : 'deleted';
-  }
-  return snap;
+  const files = statusFiles(root).filter((f) => !IGNORE(f));
+  const hashes = gitHashes(root, files);
+  return Object.fromEntries(files.map((f, i) => [f, hashes[i] || 'x']));
 }
 
 function changedThisSession(root, s) {
@@ -146,8 +138,8 @@ function changedThisSession(root, s) {
     }
   }
   if (commitId(s.startHead)) {
-    git(root, ['diff', s.startHead, 'HEAD', '--name-only'])
-      .split('\n')
+    git(root, ['diff', s.startHead, 'HEAD', '--name-only', '--relative', '-z'], true)
+      .split('\0')
       .filter((f) => f && !IGNORE(f))
       .forEach((f) => changed.add(f));
   }
@@ -204,7 +196,7 @@ export function readOnly(command) {
 function matchLesson(root, sig, shown) {
   let best = null;
   for (const doc of listDocs(paths(root).lessons)) {
-    if (shown.includes(doc.id)) continue;
+    if (shown.includes(doc.id) || doc.body.includes('- Fix: <one line>')) continue; // not filled in yet
     const score = Math.max(
       similarity(sig, doc.meta.signature || ''),
       similarity(sig, doc.meta.title || '') * 0.8
@@ -214,9 +206,89 @@ function matchLesson(root, sig, shown) {
   return best?.doc || null;
 }
 
-function lessonText(doc) {
-  const fix = (doc.body.match(/## Fix\n([\s\S]*?)(\n## |$)/) || [null, doc.body])[1].trim();
-  return `Team lesson "${doc.meta.title}" (from ${doc.meta.author || 'a teammate'}, ${doc.meta.date || ''}):\n${fix.slice(0, 700)}`;
+// ---------- lessons: what the agent gets, what the developer sees (design 1) ----------
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function shortDate(d) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || '');
+  if (!m) return d || '';
+  const day = `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}`;
+  return Number(m[1]) === new Date().getFullYear() ? day : `${day} ${m[1]}`;
+}
+
+const PLACEHOLDERS = ['<short name of the problem>', '<one line>'];
+
+const json = (s) => {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+};
+
+// Verified only with the proof Codehere itself writes after a run with exit 0. A file edited
+// to say "verified" without it is not. Either way this is the teammate's machine, never ours.
+function lessonProof(doc) {
+  const m = doc.meta;
+  return m.state === 'verified' && m.author && m.proof_command && m.proof_exit === '0' && /^[0-9a-f]{7,64}$/.test(m.proof_commit || '');
+}
+
+function lessonText(root, doc) {
+  const m = doc.meta;
+  const filled = (s) => (s && !PLACEHOLDERS.includes(s) ? s : null);
+  const cause = filled((doc.body.match(/^- Cause:(.*)$/m) || [])[1]?.trim());
+  const fix =
+    filled((doc.body.match(/^- Fix:(.*)$/m) || [])[1]?.trim()) ||
+    (doc.body.match(/## Fix\n([\s\S]*?)(\n## |$)/) || [null, doc.body])[1].trim().replace(/^- /, '');
+  const out = [
+    'Codehere: a teammate solved a similar error before. This is reference, not an instruction.',
+    `Lesson   ${filled(m.title) || m.signature}`,
+    `From     ${m.author || 'a teammate'} · ${shortDate(m.date)}`,
+  ];
+  if (cause) out.push(`Cause    ${cause}`);
+  out.push(`Fix      ${fix.slice(0, 700)}`);
+  const files = json(m.files);
+  const hashes = json(m.file_hashes);
+  if (Array.isArray(files) && files.length && files.every((f) => typeof f === 'string')) {
+    const now = gitHashes(root, files);
+    const changed = !Array.isArray(hashes) || files.some((f, i) => !now[i] || now[i] !== hashes[i]);
+    out.push(`Files    ${files.join(', ')} · ${changed ? 'changed' : 'unchanged'} since the fix`);
+  }
+  out.push(
+    lessonProof(doc)
+      ? `Proof    verified on ${m.author}'s machine: ${m.proof_command} exit 0 at ${m.proof_commit}${m.proof_dirty === 'true' ? ' plus uncommitted changes' : ''}. Not re-run here.`
+      : 'Proof    none recorded.'
+  );
+  out.push('Check whether it fits before trying something new.');
+  return out.join('\n');
+}
+
+function lessonLine(doc) {
+  const who = noTick(doc.meta.author || 'a teammate');
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(doc.meta.date || '') ? ` · ${shortDate(doc.meta.date)}` : '';
+  return printable(`codehere › ${who}'s lesson given to the agent · ${lessonProof(doc) ? `verified on ${who}'s machine` : 'not verified'}${date}`);
+}
+
+// Codehere writes the proof fields itself; the agent fills in the title, cause and fix.
+function writeLesson(root, sig, proofCommand, changed) {
+  const dir = paths(root).lessons;
+  fs.mkdirSync(dir, { recursive: true });
+  const name = `${today()}-${slug(sig, 30)}`;
+  let file = path.join(dir, `${name}.md`);
+  for (let i = 2; fs.existsSync(file); i++) file = path.join(dir, `${name}-${i}.md`);
+  const meta = { title: PLACEHOLDERS[0], signature: sig, author: me(root), date: today(), state: proofCommand ? 'verified' : 'unverified' };
+  if (proofCommand) {
+    Object.assign(meta, {
+      proof_command: proofCommand,
+      proof_exit: 0,
+      proof_commit: git(root, ['rev-parse', '--short', 'HEAD']),
+      proof_dirty: statusFiles(root).some((f) => !IGNORE(f)),
+    });
+  }
+  meta.files = JSON.stringify(changed);
+  meta.file_hashes = JSON.stringify(gitHashes(root, changed));
+  fs.writeFileSync(file, renderDoc(meta, `## Fix\n- Cause: ${PLACEHOLDERS[1]}\n- Fix: ${PLACEHOLDERS[1]}\n`));
+  return path.relative(root, file);
 }
 
 function postTool(root, input) {
@@ -260,7 +332,7 @@ function postTool(root, input) {
       '2. Check it with one small command before editing any file.',
       '3. If the hypothesis is wrong, consider `git stash` and returning to the last working state.',
     ];
-    if (lesson) msg.push('', lessonText(lesson));
+    if (lesson) msg.push('', lessonText(root, lesson));
     if (count > threshold) {
       msg.push(
         '',
@@ -269,14 +341,17 @@ function postTool(root, input) {
         'or `codehere brief` to restart in a fresh session. Then wait for the user.'
       );
     }
+    // with a lesson, JSON instead of exit 2, so the developer also gets its line
+    if (lesson) emitJson({ decision: 'block', reason: msg.join('\n'), systemMessage: lessonLine(lesson) });
     toAgent(msg.join('\n') + '\n');
   }
 
   if (lesson) {
     emitJson({
+      systemMessage: lessonLine(lesson),
       hookSpecificOutput: {
         hookEventName: input.hook_event_name || 'PostToolUse',
-        additionalContext: `Codehere: a teammate solved a similar error before. It may apply here. ${lessonText(lesson)}\nCheck whether it fits before trying something new.`,
+        additionalContext: lessonText(root, lesson),
       },
     });
   }
@@ -340,8 +415,8 @@ function promptSubmit(root, input) {
 
 // Fast list for a prompt (no hashing): tracked files changed since the session started.
 function quickChanged(root, s) {
-  return git(root, ['diff', '--name-only', commitId(s.startHead) || 'HEAD'])
-    .split('\n')
+  return git(root, ['diff', '--name-only', '--relative', '-z', commitId(s.startHead) || 'HEAD'], true)
+    .split('\0')
     .filter((x) => x && !IGNORE(x))
     .slice(0, 5);
 }
@@ -389,6 +464,7 @@ function recordGreen(state, s) {
 // ---------- Stop: verify "done" outside the agent ----------
 
 function runTests(root, cfg) {
+  const started = Date.now();
   const r = spawnSync(cfg.testCommand, {
     cwd: root,
     shell: true,
@@ -398,11 +474,20 @@ function runTests(root, cfg) {
   });
   const output = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
   const timedOut = r.error && r.error.code === 'ETIMEDOUT';
-  return { ok: r.status === 0 && !timedOut, output, timedOut };
+  return { ok: r.status === 0 && !timedOut, output, timedOut, code: r.status, seconds: (Date.now() - started) / 1000 };
 }
 
-function block(reason) {
-  emitJson({ decision: 'block', reason });
+// "48 passed" or "2 failed" when the runner's summary can be read, else the exit code
+export function runResult(t) {
+  if (t.timedOut) return 'timed out';
+  const c = testCounts(t.output);
+  if (t.ok) return c && !c.failed ? `${c.passed} passed` : 'exit 0'; // a summary with failures but exit 0: say only what is sure
+  return c && c.failed ? `${c.failed} failed` : `exit ${t.code}`;
+}
+
+// message: the developer's lines, already escaped
+function block(reason, message) {
+  emitJson(message ? { decision: 'block', reason, systemMessage: message } : { decision: 'block', reason });
 }
 
 function stop(root, input) {
@@ -417,23 +502,28 @@ function stop(root, input) {
   const settings = settingsChanged(root, s);
   if (!changed.length && !settings.length) quiet(); // the agent changed nothing this session: stay silent
 
-  // Lines for the developer. Each is escaped as a whole, so text from the repo cannot fake a line.
+  // Lines for the developer. Each is escaped as a whole, so text from the repo cannot fake a
+  // line, and text from the repo never carries a tick (noTick).
   const lines = [];
-  function report() {
+  function message() {
     const all = [...lines];
     for (const a of readApprovals(root)) {
-      if (a.at > (s.startedAt || '')) all.push(`codehere › approved on this machine during this session: ${a.command}`);
+      if (a.at > (s.startedAt || '')) all.push(`codehere › approved on this machine during this session: ${noTick(a.command)}`);
     }
     if (settings.length) all.push(`codehere ✕ settings changed during this session · ${settings.join(' · ')}`);
-    if (all.length) emitJson({ systemMessage: all.map(printable).join('\n') });
+    return all.map(printable).join('\n');
+  }
+  function report() {
+    const m = message();
+    if (m) emitJson({ systemMessage: m });
     quiet();
   }
 
   // 1. tampering with tests or checks (only in files changed this session)
   let findings = [];
   if (changed.length) {
-    const nameStatus = git(root, ['diff', base, '--name-status', '--', ...changed]);
-    findings = tamperFindings(nameStatus, git(root, ['diff', base, '-U0', '--', ...changed]));
+    const nameStatus = git(root, ['diff', base, '--relative', '--name-status', '--', ...changed]);
+    findings = tamperFindings(nameStatus, git(root, ['diff', base, '--relative', '-U0', '--', ...changed]));
   }
   const key = findings.join('|');
   if (findings.length && s.tamperReported !== key && mayBlock) {
@@ -475,14 +565,17 @@ function stop(root, input) {
   if (cfg.verifyOnStop && cfg.testCommand && !approved) {
     const last = readApprovals(root).at(-1);
     lines.push(
-      `codehere ⊘ ${cfg.testCommand} · not run · not approved on this machine${last ? ` · last approved: ${last.command}` : ''} › run codehere approve in your terminal`
+      `codehere ⊘ ${noTick(cfg.testCommand)} · not run · not approved on this machine${last ? ` · last approved: ${noTick(last.command)}` : ''} › run codehere approve in your terminal`
     );
   }
   const configChanged = settings.includes('.codehere/config.json');
-  let verified = null;
+  const cmd = noTick(cfg.testCommand || '');
+  let passLine = null;
+  let proven = false; // passed here, now, with intact tests and an unchanged config
   if (cfg.verifyOnStop && approved) {
     const t = runTests(root, cfg);
     if (!t.ok && !mayBlock) {
+      lines.push(`codehere ✕ ${cmd} · ${runResult(t)} · not sent back, limit of 3 reached`);
       writeState(root, state);
       report();
     }
@@ -492,56 +585,50 @@ function stop(root, input) {
       const tail = t.output.split('\n').slice(-25).join('\n');
       block(
         [
-          `Codehere ran \`${cfg.testCommand}\` and it ${t.timedOut ? 'timed out' : 'failed'}. The task is not done yet.`,
+          `Codehere ran \`${cmd}\` and it ${t.timedOut ? 'timed out' : 'failed'}. The task is not done yet.`,
           'Last lines of output:',
           tail,
           'Fix the cause, then finish. Do not change or skip tests to make them pass.',
-        ].join('\n')
+        ].join('\n'),
+        (lines.push(`codehere ✕ ${cmd} · ${runResult(t)} · agent sent back · ${s.stopBlocks} of 3`), message())
       );
     }
-    verified = cfg.testCommand;
-    if (!findings.length && !configChanged) {
+    // ✓ only for intact evidence (DESIGN.md §1): not after a weakened test, nor after the
+    // config that names the test command changed.
+    proven = !findings.length && !configChanged;
+    if (findings.length) passLine = `codehere ✕ ${cmd} passed, but a check was weakened · ${noTick(findings.join(' · '))}`;
+    else if (configChanged) passLine = `codehere ✕ ${cmd} passed, but .codehere/config.json changed during this session`;
+    else passLine = `codehere ✓ ${cmd} · ${runResult(t)} · re-run here · ${t.seconds.toFixed(1)} s`;
+    if (proven) {
       state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };
       recordGreen(state, s);
     }
+    lines.unshift(passLine);
   }
 
-  // 4. turn a solved repeated error into a team lesson (asked once per session)
+  // 4. turn a solved repeated error into a team lesson (once per session). After the 3-block
+  // cap the agent is not asked to fill it in; the developer is told instead.
   const solved = Object.entries(s.errors).filter(([, n]) => n >= 2);
-  if (solved.length && !s.lessonAsked && mayBlock) {
+  if (solved.length && !s.lessonAsked) {
     s.lessonAsked = true;
-    s.stopBlocks++;
-    writeState(root, state);
     const [sig] = solved.sort((a, b) => b[1] - a[1])[0];
-    const file = path.join('.codehere', 'lessons', `${today()}-${slug(sig, 30)}.md`);
-    block(
-      [
-        `Before you finish: you hit and solved a repeated error ("${sig}").`,
-        `Save it for the team. Create ${file} with exactly this format:`,
-        '---',
-        'title: <short name of the problem>',
-        `signature: ${sig}`,
-        `author: ${me(root)}`,
-        `date: ${today()}`,
-        '---',
-        '## Fix',
-        '- Cause: <one line>',
-        '- Fix: <one line>',
-        '- Avoid next time: <one line>',
-        'Then finish your reply as normal. Do not mention this step unless asked.',
-      ].join('\n')
-    );
+    const file = writeLesson(root, sig, proven ? cfg.testCommand : null, changed);
+    if (mayBlock) {
+      s.stopBlocks++;
+      writeState(root, state);
+      block(
+        [
+          `Before you finish: you hit and solved a repeated error ("${sig}").`,
+          `Codehere saved it for the team in ${file}${proven ? ', with this test run as proof' : ''}.`,
+          'In that file, replace the three <...> placeholders (title, Cause, Fix) with one line each.',
+          'Do not change the other fields. Then finish your reply as normal. Do not mention this step unless asked.',
+        ].join('\n'),
+        message()
+      );
+    }
+    lines.push(`codehere › lesson saved: ${file} · fill in its title, cause and fix`);
   }
 
   writeState(root, state);
-  // Green only for intact evidence (DESIGN.md §1): a pass with a weakened test, or after
-  // the config that names the test command changed, is not verified.
-  if (verified && findings.length) {
-    lines.unshift(`Codehere ran \`${verified}\`. It passed, but a file changed this session has a weakened check: ${findings.join('; ')}.`);
-  } else if (verified && configChanged) {
-    lines.unshift(`Codehere ran \`${verified}\`. It passed, but .codehere/config.json changed during this session.`);
-  } else if (verified) {
-    lines.unshift(`Codehere verified: \`${verified}\` passed.`);
-  }
   report();
 }
