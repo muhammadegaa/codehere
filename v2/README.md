@@ -23,12 +23,14 @@ Codehere is built to remove work, not add it. You keep using Claude Code as usua
 ```bash
 npm install -g codehere@next   # the 2.0 beta; codehere@latest is still 1.x
 cd your-project
-codehere init               # finds your test command, adds hooks to .claude/settings.json
+codehere init               # finds your test command, adds hooks to .claude/settings.json, asks you to approve the command
 git add .codehere .claude/settings.json .gitignore
 git commit -m "Add Codehere" && git push
 ```
 
-Each teammate installs the CLI once (`npm install -g codehere@next`). The hooks and the brain arrive through git.
+Each teammate installs the CLI once (`npm install -g codehere@next`) and runs `codehere approve` once in the repo. Until they do, their agent tells them at session start that the test check is off. The hooks and the brain arrive through git.
+
+The test command is in `.codehere/config.json`, which anyone with push access can change. So Codehere runs it only after you approve that exact command on your machine, at your terminal. If a pull or the agent changes it, the finish check skips it and tells you, until you approve it again. Approvals are kept in `~/.config/codehere/approvals.json`, outside the repo, so nothing that arrives through git can approve a command.
 
 ## The team loop
 
@@ -53,6 +55,7 @@ Don't want to commit help cards? Copy the printed text into WhatsApp, Discord or
 
 ```
 codehere init [--test "npm test"]       set up (safe to run again)
+codehere approve                        let the finish check run the test command on this machine
 codehere rule ["text"]                  add or list team rules
 codehere lesson ["problem" --fix "..."] add or list lessons
 codehere brief [--gemma]                restart brief for a fresh session
@@ -73,7 +76,7 @@ codehere stats                          turns to green, loops stopped, context s
   help/           help cards
   briefs/         restart briefs
   config.json     test command, loop threshold
-  local/          this machine only, git-ignored
+  local/          this machine only, git-ignored (session state)
 ```
 
 Everything is plain markdown, so you can read, edit, review and delete it like any other file.
@@ -103,6 +106,10 @@ npm test                    # end-to-end checks
 - Lessons match by error text. Very generic errors can bring up a lesson that doesn't fit, which is why the agent is told it "may apply".
 - Redaction catches common keys, tokens and emails. Always read a help card before sharing it.
 - The "done" check needs a test command. Without one, only the tampering check runs.
+- Approvals are per folder. Each git worktree or extra clone needs its own `codehere approve`.
+- Approving `npm test` approves that command, not the scripts behind it in `package.json`. And Claude Code runs any hook a teammate adds to the committed `.claude/settings.json`. Both are your repo's code, with the same trust as running it yourself.
+- When the agent changes `.codehere/config.json`, `.codehere/rules.md` or the hook and env settings in `.claude/settings*.json` during a session, the finish check tells you. It cannot tell you if the session ends without a finish check, for example when you close it mid-turn. An agent that sets out to fake your terminal or rewrite Codehere's local files can also get around this.
+- Only the test command needs approval. A teammate who sets `verifyOnStop` to `false` in `.codehere/config.json` turns the finish check off for everyone; `codehere status` shows it as off.
 - Sharing is through git. There is no server, so teammates see updates after `git pull`.
 - Prompt checks are plain word lists (English and Indonesian). They can miss a short prompt in another language.
 - The weakened-test scan catches skipped tests, deleted test files and removed assertions. It does not yet catch an edited expected value; see `docs/overlap-with-check.md`.

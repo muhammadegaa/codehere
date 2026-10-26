@@ -24,6 +24,7 @@ const USAGE = `codehere · a git-native team brain for vibe coders
 
 Setup
   codehere init [--test "npm test"]   set up .codehere/ and Claude Code hooks
+  codehere approve                    let the finish check run the test command on this machine
 
 Team brain
   codehere rule ["text"]              add a team rule (or list rules)
@@ -52,6 +53,8 @@ const run = async () => {
       return runHook(rest[0]);
     case 'init':
       return cmd.init(flags);
+    case 'approve':
+      return cmd.approve();
     case 'rule':
     case 'rules':
       return cmd.rule(rest.join(' '));

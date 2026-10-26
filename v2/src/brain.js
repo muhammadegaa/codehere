@@ -1,6 +1,7 @@
 // The team brain: plain markdown files in .codehere/, committed to git.
 // Local, per-machine state lives in .codehere/local/ (git-ignored).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 
@@ -164,6 +165,79 @@ export function readRules(root) {
     .split('\n')
     .filter((l) => l.startsWith('- '))
     .map((l) => l.slice(2).trim());
+}
+
+// ---------- approved test commands (this machine only) ----------
+// config.json travels through git, so a teammate's commit can change the test
+// command. The finish check runs only a command approved on this machine. The
+// approvals live outside the repo: any file in .codehere/, even a git-ignored one
+// (git add -f), can arrive through a pull.
+
+// The real path of p, for a p that may not exist yet.
+function realish(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    const parent = path.dirname(p);
+    return parent === p ? p : path.join(realish(parent), path.basename(p));
+  }
+}
+
+function repoKey(root) {
+  return realish(path.resolve(root));
+}
+
+// null when the file would be inside the repo: settings committed to the repo can set
+// XDG_CONFIG_HOME or HOME for the agent's processes, and so for these hooks.
+function approvalsFile(root) {
+  const xdg = process.env.XDG_CONFIG_HOME;
+  const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), '.config');
+  const file = path.join(base, 'codehere', 'approvals.json');
+  return realish(file).startsWith(repoKey(root) + path.sep) ? null : file;
+}
+
+function readAllApprovals(root) {
+  try {
+    const all = JSON.parse(fs.readFileSync(approvalsFile(root), 'utf8'));
+    return all && all.repos && typeof all.repos === 'object' ? all : { repos: {} };
+  } catch {
+    return { repos: {} };
+  }
+}
+
+export function readApprovals(root) {
+  const list = readAllApprovals(root).repos[repoKey(root)]?.commands;
+  return Array.isArray(list) ? list : [];
+}
+
+export function isApproved(root, command) {
+  return readApprovals(root).some((a) => a.command === command);
+}
+
+// false when the approvals file would be inside the repo
+export function addApproval(root, command) {
+  const file = approvalsFile(root);
+  if (!file) return false;
+  const all = readAllApprovals(root);
+  const list = readApprovals(root).filter((a) => a.command !== command);
+  list.push({ command, by: me(root), at: new Date().toISOString() });
+  all.repos[repoKey(root)] = { commands: list };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n');
+  return true;
+}
+
+// Control, format (bidi, zero-width), filler and variation characters escaped, so text from the repo cannot print a fake
+// line, move the cursor or hide part of a command.
+const ESCAPES = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };
+export function printable(text) {
+  return String(text).replace(
+    /[\p{Cc}\p{Cf}\u034f\u115f\u1160\u2028\u2029\u3164\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu,
+    (c) => {
+      const n = c.codePointAt(0).toString(16);
+      return ESCAPES[c] || (n.length > 4 ? `\\u{${n}}` : `\\u${n.padStart(4, '0')}`);
+    }
+  );
 }
 
 // ---------- git helpers (all fail-safe) ----------

@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import readline from 'node:readline/promises';
 import {
   findRoot, paths, ensureDirs, readConfig, writeConfig, readState, writeState,
-  readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me, commitId,
+  readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
+  readApprovals, isApproved, addApproval, printable, commitId,
 } from './brain.js';
 import { redact } from './signals.js';
 import { summarize } from './gemma.js';
@@ -71,9 +73,50 @@ function addGitignore(root) {
   }
 }
 
+// ---------- approving the test command (this machine only) ----------
+
+// Approval needs a terminal. An agent's shell tool has none, though an agent that fakes one
+// can answer, so an approval made during a session is reported at the finish check.
+const atTerminal = () => !!(process.stdin.isTTY && process.stdout.isTTY);
+
+async function askApproval(root, command) {
+  const last = git(root, 'log -1 --format="%an on %ad (%h)" --date=short -- .codehere/config.json');
+  const uncommitted = git(root, 'status --porcelain -- .codehere/config.json');
+  const prev = readApprovals(root).at(-1);
+  console.log('When the agent says it is done, Codehere runs this command on this machine:');
+  console.log(`  ${printable(command)}`);
+  if (last) console.log(`Last changed in git by ${printable(last)}.`); // a teammate picks their own author name
+  if (uncommitted) console.log('.codehere/config.json also has uncommitted changes on this machine.');
+  if (prev) console.log(`Last approved here: ${printable(prev.command)}`);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await rl.question('Approve it? [y/N] ');
+  rl.close();
+  if (!/^y(es)?$/i.test(answer.trim())) {
+    console.log('Not approved. The finish check will not run it.');
+    return;
+  }
+  if (!addApproval(root, command)) {
+    console.error('Not approved: HOME or XDG_CONFIG_HOME points inside this repo, where a teammate could write approvals.');
+    process.exit(1);
+  }
+  console.log('Approved on this machine.');
+}
+
+export async function approve() {
+  const root = requireRoot();
+  const command = readConfig(root).testCommand;
+  if (!command) return console.log('No test command set. Set one: codehere init --test "npm test"');
+  if (isApproved(root, command)) return console.log(`Already approved on this machine: ${printable(command)}`);
+  if (!atTerminal()) {
+    console.error('codehere approve asks you to confirm at a terminal. Run it in your own terminal.');
+    process.exit(1);
+  }
+  await askApproval(root, command);
+}
+
 // ---------- init ----------
 
-export function init(flags) {
+export async function init(flags) {
   const root = process.cwd();
   const p = ensureDirs(root);
   const cfg = readConfig(root);
@@ -112,8 +155,13 @@ export function init(flags) {
   console.log('Codehere is set up.');
   console.log(`- Team brain: ${path.relative(root, p.base)}/`);
   console.log(`- Claude Code hooks: ${path.relative(root, settingsFile)}`);
-  console.log(`- Test check on "done": ${cfg.testCommand ? cfg.testCommand : 'none found (set one with: codehere init --test "npm test")'}`);
+  console.log(`- Test check on "done": ${cfg.testCommand ? printable(cfg.testCommand) : 'none found (set one with: codehere init --test "npm test")'}`);
   console.log('');
+  if (cfg.testCommand && !isApproved(root, cfg.testCommand)) {
+    if (atTerminal()) await askApproval(root, cfg.testCommand);
+    else console.log('The test command runs only after you approve it on this machine: codehere approve');
+    console.log('');
+  }
   console.log('Next: commit .codehere/ and .claude/settings.json so your team gets it too.');
   console.log('Then just use Claude Code as usual. Codehere stays quiet unless it helps.');
 }
@@ -400,7 +448,8 @@ export function status() {
   console.log(`- Team rules: ${readRules(root).length}`);
   console.log(`- Team lessons: ${listDocs(p.lessons).length}`);
   console.log(`- Open help requests: ${listDocs(p.help).filter((d) => d.meta.status === 'open').length}`);
-  console.log(`- Test check on "done": ${cfg.testCommand || 'off'}`);
+  const approval = isApproved(root, cfg.testCommand) ? 'approved on this machine' : 'not approved on this machine (codehere approve)';
+  console.log(`- Test check on "done": ${cfg.testCommand && cfg.verifyOnStop ? `${printable(cfg.testCommand)} · ${approval}` : 'off'}`);
   if (state.lastGreen) console.log(`- Last green: ${state.lastGreen.commit.slice(0, 8)} at ${state.lastGreen.at.slice(0, 16)}`);
   if (s) {
     const errs = repeatedErrors(s);

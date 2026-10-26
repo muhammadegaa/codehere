@@ -2,10 +2,11 @@
 // it exits 0 and the agent carries on as if Codehere were not installed.
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules,
-  listDocs, git, isGitRepo, me, slug, today, commitId,
+  listDocs, git, isGitRepo, me, slug, today, isApproved, readApprovals, printable, commitId,
 } from './brain.js';
 import {
   responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature,
@@ -59,6 +60,10 @@ function sessionStart(root, input) {
     // ever react to what the agent changes now.
     s.startHead = git(root, 'rev-parse HEAD') || null;
     s.baseline = dirtySnapshot(root);
+    s.settings = settingsSnapshot(root);
+  } else if (input.source === 'resume') {
+    // While the session was closed only the developer or a pull could change settings.
+    s.settings = settingsSnapshot(root);
   }
 
   const out = [];
@@ -85,6 +90,15 @@ function sessionStart(root, input) {
         .slice(0, 3)
         .map((d) => d.meta.author)
         .join(', ')}). Mention this once, briefly: they can run \`codehere inbox\`.`
+    );
+  }
+
+  // Without this, an unapproved command only shows up as ⊘ at the end of a turn.
+  const cfg = readConfig(root);
+  if (cfg.verifyOnStop && cfg.testCommand && !isApproved(root, cfg.testCommand)) {
+    out.push(
+      '',
+      `Note for the user: Codehere's test check is off in this repo, because the test command \`${printable(cfg.testCommand)}\` is not approved on this machine. Mention this once, briefly: they can turn it on by running \`codehere approve\` in their own terminal. Do not run it for them.`
     );
   }
 
@@ -138,6 +152,38 @@ function changedThisSession(root, s) {
       .forEach((f) => changed.add(f));
   }
   return [...changed];
+}
+
+// Files that decide what Codehere runs and tells every agent, and the agent's own hook
+// settings. Claude Code loads hooks at session start, so a hook removed mid-session
+// still runs at this session's finish check and can report it.
+const PROTECTED = ['.codehere/config.json', '.codehere/rules.md', '.claude/settings.json', '.claude/settings.local.json'];
+
+function settingsSnapshot(root) {
+  const snap = {};
+  for (const f of PROTECTED) {
+    let text = null;
+    try {
+      text = fs.readFileSync(path.join(root, f), 'utf8');
+    } catch {}
+    // In .claude/ only the hook and env settings count: Claude Code also saves permission
+    // rules there when the developer picks "don't ask again". env can move HOME or
+    // XDG_CONFIG_HOME, where approvals are kept. A missing file has none of them.
+    if (f.startsWith('.claude/')) {
+      try {
+        const j = JSON.parse(text ?? '{}');
+        text = JSON.stringify([j.hooks ?? null, j.disableAllHooks ?? null, j.env ?? null]);
+      } catch {}
+    }
+    snap[f] = text == null ? null : crypto.createHash('sha256').update(text).digest('hex');
+  }
+  return snap;
+}
+
+function settingsChanged(root, s) {
+  if (!s.settings) return []; // no snapshot from session start: cannot tell
+  const now = settingsSnapshot(root);
+  return PROTECTED.filter((f) => now[f] !== s.settings[f]);
 }
 
 // ---------- PostToolUse (Bash): loop breaker + just-in-time team lessons ----------
@@ -248,6 +294,7 @@ function promptSubmit(root, input) {
   const s = session(state, input.session_id);
   s.transcript = input.transcript_path || s.transcript;
   s.prompts = (s.prompts || 0) + 1;
+  if (!s.settings) s.settings = settingsSnapshot(root); // session start did not run for this session
 
   // Only a failure from the agent's last turn counts: an older one may be fixed or forgotten.
   const f = s.lastFailure && (s.lastFailure.prompt || 0) === s.prompts - 1 ? s.lastFailure : null;
@@ -346,7 +393,7 @@ function runTests(root, cfg) {
     cwd: root,
     shell: true,
     encoding: 'utf8',
-    timeout: cfg.testTimeoutSeconds * 1000,
+    timeout: Math.max(1, Number(cfg.testTimeoutSeconds) || 120) * 1000, // 0 would mean no limit
     env: { ...process.env, CI: '1', FORCE_COLOR: '0' },
   });
   const output = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
@@ -367,11 +414,27 @@ function stop(root, input) {
   if (!isGitRepo(root)) quiet();
   const base = commitId(s.startHead) || 'HEAD';
   const changed = changedThisSession(root, s);
-  if (!changed.length) quiet(); // the agent changed nothing this session: stay silent
+  const settings = settingsChanged(root, s);
+  if (!changed.length && !settings.length) quiet(); // the agent changed nothing this session: stay silent
+
+  // Lines for the developer. Each is escaped as a whole, so text from the repo cannot fake a line.
+  const lines = [];
+  function report() {
+    const all = [...lines];
+    for (const a of readApprovals(root)) {
+      if (a.at > (s.startedAt || '')) all.push(`codehere › approved on this machine during this session: ${a.command}`);
+    }
+    if (settings.length) all.push(`codehere ✕ settings changed during this session · ${settings.join(' · ')}`);
+    if (all.length) emitJson({ systemMessage: all.map(printable).join('\n') });
+    quiet();
+  }
 
   // 1. tampering with tests or checks (only in files changed this session)
-  const nameStatus = git(root, ['diff', base, '--name-status', '--', ...changed]);
-  const findings = tamperFindings(nameStatus, git(root, ['diff', base, '-U0', '--', ...changed]));
+  let findings = [];
+  if (changed.length) {
+    const nameStatus = git(root, ['diff', base, '--name-status', '--', ...changed]);
+    findings = tamperFindings(nameStatus, git(root, ['diff', base, '-U0', '--', ...changed]));
+  }
   const key = findings.join('|');
   if (findings.length && s.tamperReported !== key && mayBlock) {
     s.tamperReported = key;
@@ -387,13 +450,41 @@ function stop(root, input) {
     );
   }
 
-  // 2. run the tests ourselves
+  // 2. Codehere's settings or the agent's hook settings changed during the session.
+  // The agent is sent back only for the ones that can game or switch off the check;
+  // a rules.md change is shown to the developer alone.
+  const settingsKey = settings.join('|');
+  const sendBack = settings.some((f) => f !== '.codehere/rules.md');
+  if (sendBack && s.settingsReported !== settingsKey && mayBlock) {
+    s.settingsReported = settingsKey;
+    s.stopBlocks++;
+    writeState(root, state);
+    block(
+      [
+        'Codehere settings or hook settings changed during this session:',
+        ...settings.map((f) => `- ${f}`),
+        'If you changed them and the user did not ask for it, undo your change.',
+        'Then tell the user in one line what changed and why, and finish.',
+      ].join('\n')
+    );
+  }
+
+  // 3. run the tests ourselves, but only a command approved on this machine:
+  // a teammate's commit or the agent may have changed it
+  const approved = cfg.testCommand && isApproved(root, cfg.testCommand);
+  if (cfg.verifyOnStop && cfg.testCommand && !approved) {
+    const last = readApprovals(root).at(-1);
+    lines.push(
+      `codehere ⊘ ${cfg.testCommand} · not run · not approved on this machine${last ? ` · last approved: ${last.command}` : ''} › run codehere approve in your terminal`
+    );
+  }
+  const configChanged = settings.includes('.codehere/config.json');
   let verified = null;
-  if (cfg.verifyOnStop && cfg.testCommand) {
+  if (cfg.verifyOnStop && approved) {
     const t = runTests(root, cfg);
     if (!t.ok && !mayBlock) {
       writeState(root, state);
-      quiet();
+      report();
     }
     if (!t.ok) {
       s.stopBlocks++;
@@ -409,13 +500,13 @@ function stop(root, input) {
       );
     }
     verified = cfg.testCommand;
-    if (!findings.length) {
+    if (!findings.length && !configChanged) {
       state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };
       recordGreen(state, s);
     }
   }
 
-  // 3. turn a solved repeated error into a team lesson (asked once per session)
+  // 4. turn a solved repeated error into a team lesson (asked once per session)
   const solved = Object.entries(s.errors).filter(([, n]) => n >= 2);
   if (solved.length && !s.lessonAsked && mayBlock) {
     s.lessonAsked = true;
@@ -443,10 +534,14 @@ function stop(root, input) {
   }
 
   writeState(root, state);
-  // Green only for intact evidence (DESIGN.md §1): a pass with a weakened test is not verified.
+  // Green only for intact evidence (DESIGN.md §1): a pass with a weakened test, or after
+  // the config that names the test command changed, is not verified.
   if (verified && findings.length) {
-    emitJson({ systemMessage: `Codehere ran \`${verified}\`. It passed, but a file changed this session has a weakened check: ${findings.join('; ')}.` });
+    lines.unshift(`Codehere ran \`${verified}\`. It passed, but a file changed this session has a weakened check: ${findings.join('; ')}.`);
+  } else if (verified && configChanged) {
+    lines.unshift(`Codehere ran \`${verified}\`. It passed, but .codehere/config.json changed during this session.`);
+  } else if (verified) {
+    lines.unshift(`Codehere verified: \`${verified}\` passed.`);
   }
-  if (verified) emitJson({ systemMessage: `Codehere verified: \`${verified}\` passed.` });
-  quiet();
+  report();
 }
