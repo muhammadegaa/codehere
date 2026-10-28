@@ -2,7 +2,7 @@
 
 **A team brain for vibe coders.** It stops your AI coding agent from going in circles, checks "done" for real, and shares what your team learns. It works through plain files in git.
 
-Codehere is built to remove work, not add it. You keep using Claude Code as usual. Codehere talks to the agent, not to you, and stays silent unless it helps.
+Codehere is built to remove work, not add it. You keep using Claude Code or Codex CLI as usual. Codehere talks to the agent, not to you, and stays silent unless it helps.
 
 ## What it does
 
@@ -23,12 +23,18 @@ Codehere is built to remove work, not add it. You keep using Claude Code as usua
 ```bash
 npm install -g codehere@next   # the 2.0 beta; codehere@latest is still 1.x
 cd your-project
-codehere init               # finds your test command, adds hooks to .claude/settings.json, asks you to approve the command
-git add .codehere .claude/settings.json .gitignore
+codehere init --agent claude,codex   # finds your test command, adds the hooks, asks you to approve the command
+git add .codehere .claude/settings.json .codex/hooks.json .gitignore
 git commit -m "Add Codehere" && git push
 ```
 
+Use `--agent claude` or `--agent codex` for one agent; with no `--agent`, `init` sets up Claude Code. The hooks go in `.claude/settings.json` and `.codex/hooks.json`.
+
 Each teammate installs the CLI once (`npm install -g codehere@next`) and runs `codehere approve` once in the repo. Until they do, their agent tells them at session start that the test check is off. The hooks and the brain arrive through git.
+
+Codex runs a repo's hooks only after each developer trusts them. Open Codex in the repo, trust the project if asked, then type `/hooks` and trust the four Codehere hooks. Do it once per clone, and again after an update that changes the hooks. Until then Codex skips them, and `codex exec` does not warn.
+
+`codehere uninstall` removes the hooks, and `.codehere/` too when it holds no rules, lessons, help cards or briefs.
 
 The test command is in `.codehere/config.json`, which anyone with push access can change. So Codehere runs it only after you approve that exact command on your machine, at your terminal. If a pull or the agent changes it, the finish check skips it and tells you, until you approve it again. Approvals are kept in `~/.config/codehere/approvals.json`, outside the repo, so nothing that arrives through git can approve a command.
 
@@ -61,11 +67,30 @@ codehere ✓ npm test · 48 passed · re-run here · 6.2 s
 
 Don't want to commit help cards? Copy the printed text into WhatsApp, Discord or Slack instead.
 
+## Which agents
+
+| | Claude Code | Codex CLI |
+|---|---|---|
+| Team rules at session start | yes | yes |
+| A teammate's lesson after a failed command | yes | yes |
+| "Same error 3 times: stop and find the root cause" | yes | yes, given next to the error output |
+| Context added to a short prompt such as "still broken" | yes | yes |
+| Finish check: your tests re-run, the agent sent back | yes | yes |
+| Your one line (✓ ✕ ⊘ ›) | yes | in the interactive screen, as `↳ Hook · codehere ✓ …`; not in `codex exec` |
+| Restart-brief suggestion in long sessions | yes | no |
+| Before it works | nothing | each developer trusts the hooks in `/hooks` |
+| MCP tools, instruction file | no | no |
+| Tested on | 2.1.311 with haiku: [result](docs/conformance/2026-10-27-claude-2.1.311-haiku.md) | 0.164.0 with a local model (Qwen 3.5 9B through Ollama): [result](docs/conformance/2026-10-27-codex-0.164.0-qwen3.5-9b-q4-K-M.md) |
+
+The rows for rules, lessons and the finish check are checked on the real agent by `node scripts/conformance.mjs`. The other rows are checked by `npm test` on hook inputs recorded from each agent.
+
 ## Commands
 
 ```
-codehere init [--test "npm test"]       set up (safe to run again)
+codehere init [--agent claude,codex] [--test "npm test"]
+                                        set up (safe to run again)
 codehere approve                        let the finish check run the test command on this machine
+codehere uninstall                      remove Codehere from this repo (asks first)
 codehere rule ["text"]                  add or list team rules
 codehere lesson ["problem" --fix "..."] add or list lessons
 codehere brief [--gemma]                restart brief for a fresh session
@@ -110,16 +135,17 @@ node demo/demo.mjs --step   # press Enter between scenes (good for a live talk)
 npm test                    # end-to-end checks
 ```
 
-## Known limits (2.0.0, not released yet)
+## Known limits (2.0 beta)
 
-- Claude Code only for now. Gemini CLI and Codex hooks are next.
+- Claude Code and Codex CLI. Copilot and OpenCode are next. See [Which agents](#which-agents) for what works on each.
 - Lessons match by error text. Very generic errors can bring up a lesson that doesn't fit, which is why the agent gets it as reference, not as an instruction.
 - Redaction catches common keys, tokens and emails. Always read a help card before sharing it.
 - The "done" check needs a test command. Without one, only the tampering check runs.
 - Approvals are per folder. Each git worktree or extra clone needs its own `codehere approve`.
-- `codehere approve` asks only in your own terminal. It refuses when Claude Code or another coding agent is among the processes above it, or when those processes cannot be read. An agent that detaches its terminal on purpose can still answer, so the finish check of a session that was open tells you when an approval happened.
-- Approving `npm test` approves that command, not the scripts behind it in `package.json`. And Claude Code runs any hook a teammate adds to the committed `.claude/settings.json`. Both are your repo's code, with the same trust as running it yourself.
-- When the agent changes `.codehere/config.json`, `.codehere/rules.md` or the hook and env settings in `.claude/settings*.json` during a session, the finish check tells you. It cannot tell you if the session ends without a finish check, for example when you close it mid-turn. An agent that sets out to fake your terminal or rewrite Codehere's local files can also get around this.
+- In `codex exec`, Codex shows you none of Codehere's lines. The agent still gets every message, and the finish check still sends it back.
+- `codehere approve` and `codehere uninstall` ask only in your own terminal. They refuse when Claude Code or Codex is among the processes above them, and inside Codex's sandbox. An agent that detaches its terminal on purpose can still answer, so the finish check of a session that was open tells you when an approval or an uninstall happened.
+- Approving `npm test` approves that command, not the scripts behind it in `package.json`. And Claude Code runs any hook a teammate adds to the committed `.claude/settings.json`; Codex asks each developer to trust a new or changed hook first. Both are your repo's code, with the same trust as running it yourself.
+- When the agent changes `.codehere/config.json`, `.codehere/rules.md`, the hook and env settings in `.claude/settings*.json`, or `.codex/hooks.json` or `.codex/config.toml` during a session, the finish check tells you. It cannot tell you if the session ends without a finish check, for example when you close it mid-turn. An agent that sets out to fake your terminal or rewrite Codehere's local files can also get around this.
 - Only the test command needs approval. A teammate who sets `verifyOnStop` to `false` in `.codehere/config.json` turns the finish check off for everyone; `codehere status` shows it as off.
 - Sharing is through git. There is no server, so teammates see updates after `git pull`.
 - Prompt checks are plain word lists (English and Indonesian). They can miss a short prompt in another language.

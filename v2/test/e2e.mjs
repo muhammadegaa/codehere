@@ -40,11 +40,11 @@ function ch(args, cwd, input) {
 // terminal opened under an agent, and these tests may themselves run under one.
 let terminals = 0;
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-function atTerminal(args, cwd, answer) {
+function atTerminal(args, cwd, answer, env = {}) {
   const run = `node "${BIN}" ${args}`;
   const term = process.platform === 'darwin' ? `script -q /dev/null ${run}` : `script -qec '${run}' /dev/null`;
   const f = path.join(tmp, `terminal-${++terminals}`);
-  spawnSync('bash', ['-c', `( (sleep 0.8; printf '${answer}\\r'; sleep 0.5) | ${term} > "${f}.out" 2>&1; echo $? > "${f}.code" ) & exit 0`], { cwd, stdio: 'ignore' });
+  spawnSync('bash', ['-c', `( (sleep 0.8; printf '${answer}\\r'; sleep 0.5) | ${term} > "${f}.out" 2>&1; echo $? > "${f}.code" ) & exit 0`], { cwd, env: { ...process.env, ...env }, stdio: 'ignore' });
   while (!(fs.existsSync(`${f}.code`) && fs.readFileSync(`${f}.code`, 'utf8').endsWith('\n'))) pause(50);
   return { code: Number(fs.readFileSync(`${f}.code`, 'utf8')), out: fs.readFileSync(`${f}.out`, 'utf8') };
 }
@@ -804,6 +804,271 @@ H('session-start', pkg, { session_id: 'k2', hook_event_name: 'SessionStart', sou
 fs.appendFileSync(path.join(pkg, 'test/a.test.js'), "test.skip('later', () => {});\n");
 r = H('stop', pkg, { session_id: 'k2', hook_event_name: 'Stop', stop_hook_active: false });
 check('in a subfolder: a skipped test is caught', r.j.decision === 'block' && r.j.reason.includes('weaken tests'), r.out);
+
+console.log('\n23. Codex CLI: install, the same scenario on both agents, uninstall');
+const freshRepo = (name, files = {}) => {
+  const dir = path.join(tmp, name);
+  fs.mkdirSync(dir);
+  sh('git init -q -b main', dir);
+  user(dir, 'Kai');
+  for (const [f, text] of Object.entries({ 'README.md': 'demo\n', ...files })) {
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.writeFileSync(path.join(dir, f), text);
+  }
+  sh('git add -A && git commit -qm start', dir);
+  return dir;
+};
+const readJson = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
+const commandsIn = (f) => (fs.existsSync(f) ? Object.entries(readJson(f).hooks || {}).flatMap(([e, gs]) => gs.flatMap((g) => g.hooks.map((h) => ({ e, matcher: g.matcher, ...h })))) : []);
+
+const cx = freshRepo('cx');
+r = ch(['init', '--agent', 'codex'], cx);
+const codexHooks = commandsIn(path.join(cx, '.codex/hooks.json'));
+check(
+  'init --agent codex writes the four Codex hooks',
+  r.code === 0 &&
+    JSON.stringify(codexHooks.map((h) => [h.e, h.matcher || null, h.command, h.timeout || null])) ===
+      JSON.stringify([
+        ['SessionStart', null, 'codehere hook session-start --agent codex', null],
+        ['UserPromptSubmit', null, 'codehere hook prompt --agent codex', 10],
+        ['PostToolUse', 'Bash', 'codehere hook post-tool --agent codex', null],
+        ['Stop', null, 'codehere hook stop --agent codex', 180],
+      ]) &&
+    !fs.existsSync(path.join(cx, '.claude')),
+  r.out + JSON.stringify(codexHooks)
+);
+check('init tells Codex users to trust the hooks in /hooks, and that codex exec does not warn', r.out.includes('/hooks') && r.out.includes('codex exec'), r.out);
+const cxBefore = fs.readFileSync(path.join(cx, '.codex/hooks.json'), 'utf8');
+ch(['init', '--agent', 'codex'], cx);
+check('init --agent codex twice adds nothing', fs.readFileSync(path.join(cx, '.codex/hooks.json'), 'utf8') === cxBefore);
+const cy = freshRepo('cy', { '.codex/hooks.json': JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'other-tool stop' }] }] } }) });
+r = ch(['init', '--agent', 'claude,codex'], cy);
+check('--agent claude,codex installs both and keeps hooks that were there', commandsIn(path.join(cy, '.codex/hooks.json')).some((h) => h.command === 'other-tool stop') && commandsIn(path.join(cy, '.codex/hooks.json')).length === 5 && commandsIn(path.join(cy, '.claude/settings.json')).some((h) => h.command === 'codehere hook stop'), r.out);
+const cz = freshRepo('cz');
+r = ch(['init', '--agent', 'copilot'], cz);
+check('an unknown agent exits 1 and writes nothing', r.code === 1 && !fs.existsSync(path.join(cz, '.codehere')) && !fs.existsSync(path.join(cz, '.codex')) && sh('git status --porcelain', cz) === '', r.out + r.err);
+
+// The scenario of section 21, driven by inputs recorded from real sessions (test/fixtures/payloads)
+const fixture = (name) => fs.readFileSync(path.join(path.dirname(BIN), '..', 'test', 'fixtures', 'payloads', name), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+const codexRec = fixture('codex-0.159.0.jsonl');
+const claudeRec = fixture('claude-code-2.1.310.jsonl');
+const recorded = (rows, event, dir, sid, extra = {}) => ({ ...rows.find((x) => x.event === event).input, cwd: dir, session_id: sid, ...extra });
+const HX = (event, dir, input, agent) => {
+  const x = spawnSync('node', [BIN, 'hook', event, ...(agent ? ['--agent', agent] : [])], { cwd: dir, input: JSON.stringify(input), encoding: 'utf8' });
+  let j = {};
+  let json = true;
+  try {
+    j = x.stdout ? JSON.parse(x.stdout) : {};
+  } catch {
+    json = false;
+  }
+  return { code: x.status, out: x.stdout, err: x.stderr, j, json };
+};
+const priceText = priceError.tool_response.stderr;
+
+const kai = path.join(tmp, 'kai');
+sh(`git clone -q "${remote2}" kai`, tmp);
+user(kai, 'Kai');
+ch(['init', '--agent', 'codex'], kai);
+atTerminal('approve', kai, 'y');
+ch(['rule', 'Prices are integer pence'], kai);
+sh('git add -A && git commit -qm "codex too"', kai);
+
+r = HX('session-start', kai, recorded(codexRec, 'session-start', kai, 'x1'), 'codex');
+check('Codex, session start: the team rules go in as context', r.code === 0 && r.out.includes('- Prices are integer pence'), r.out);
+// Codex sends the output as text, with no exit code, under PostToolUse
+const codexFail = (sid) => recorded(codexRec, 'post-tool', kai, sid, { tool_input: { command: 'npm test' }, tool_response: priceText });
+r = HX('post-tool', kai, codexFail('x1'), 'codex');
+check(
+  "Codex, failed command: Ana's lesson as context, her line for the developer, nothing blocked",
+  r.code === 0 && (r.j.hookSpecificOutput?.additionalContext || '').startsWith('Codehere: a teammate solved a similar error before.') && r.j.hookSpecificOutput.hookEventName === 'PostToolUse' && (r.j.systemMessage || '').startsWith("codehere › Ana's lesson given to the agent · verified on Ana's machine") && !('decision' in r.j),
+  r.out
+);
+HX('post-tool', kai, codexFail('x1'), 'codex');
+r = HX('post-tool', kai, codexFail('x1'), 'codex');
+check(
+  'Codex, third repeat: the loop breaker goes in as context, never as a block or exit 2 (either would hide the output)',
+  r.code === 0 && r.err === '' && !('decision' in r.j) && (r.j.hookSpecificOutput?.additionalContext || '').includes('the same error has come back 3 times'),
+  `${r.code} ${r.out} ${r.err}`
+);
+r = HX('prompt', kai, recorded(codexRec, 'prompt', kai, 'x1', { prompt: 'still broken' }), 'codex');
+check('Codex, a short prompt after a failure gets the last error as context', r.code === 0 && r.j.hookSpecificOutput?.hookEventName === 'UserPromptSubmit' && (r.j.hookSpecificOutput.additionalContext || '').includes("Codehere context from this session's tool output") && (r.j.hookSpecificOutput.additionalContext || '').includes('- Command: npm test'), r.out);
+
+HX('session-start', kai, recorded(codexRec, 'session-start', kai, 'x2'), 'codex');
+fs.writeFileSync(path.join(kai, 'src/price.js'), 'export const parsePrice = (s) => Number(s);\n');
+const codexStops = [];
+for (let i = 0; i < 4; i++) codexStops.push(HX('stop', kai, recorded(codexRec, 'stop', kai, 'x2', { stop_hook_active: i > 0 }), 'codex'));
+check(
+  'Codex, finish check: sent back with the reason and the developer line, 3 times at most',
+  codexStops.filter((x) => x.j.decision === 'block').length === 3 &&
+    codexStops[0].j.reason.startsWith('Codehere ran `npm test --silent` and it failed.') &&
+    codexStops[0].j.systemMessage === 'codehere ✕ npm test --silent · 1 failed · agent sent back · 1 of 3' &&
+    codexStops[3].j.systemMessage === 'codehere ✕ npm test --silent · 1 failed · not sent back, limit of 3 reached',
+  codexStops.map((x) => x.out).join('\n')
+);
+sh('git checkout -q -- src/price.js', kai);
+HX('session-start', kai, recorded(codexRec, 'session-start', kai, 'x3'), 'codex');
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HX('stop', kai, recorded(codexRec, 'stop', kai, 'x3'), 'codex');
+check('Codex, finish check: a pass is the ✓ line alone', r.code === 0 && !('decision' in r.j) && /^codehere ✓ npm test --silent · 2 passed · re-run here · /.test(r.j.systemMessage || ''), r.out);
+check('Codex: every Stop output is JSON or empty', [...codexStops, r].every((x) => x.json && x.code === 0));
+sh('git checkout -q -- src/price.js', kai);
+
+// The same scenario on Claude Code's recorded inputs: a failed command arrives as PostToolUseFailure with `error`
+const claudeFail = (sid) => recorded(claudeRec, 'post-tool-failure', kai, sid, { tool_input: { command: 'npm test' }, error: `Exit code 1\n${priceText}` });
+HX('session-start', kai, recorded(claudeRec, 'session-start', kai, 'c1'));
+r = HX('post-tool', kai, claudeFail('c1'));
+check("Claude Code, failed command: Ana's lesson and line, as before", r.code === 0 && r.j.hookSpecificOutput?.hookEventName === 'PostToolUseFailure' && (r.j.hookSpecificOutput.additionalContext || '').startsWith('Codehere: a teammate solved') && (r.j.systemMessage || '').startsWith("codehere › Ana's lesson") && !('decision' in r.j), r.out);
+HX('post-tool', kai, claudeFail('c1'));
+r = HX('post-tool', kai, claudeFail('c1'));
+check('Claude Code, third repeat: exit 2 with the loop breaker on stderr, as before', r.code === 2 && r.err.includes('the same error has come back 3 times') && r.out === '', `${r.code} ${r.out} ${r.err}`);
+HX('session-start', kai, recorded(claudeRec, 'session-start', kai, 'c2'));
+fs.writeFileSync(path.join(kai, 'src/price.js'), 'export const parsePrice = (s) => Number(s);\n');
+r = HX('stop', kai, recorded(claudeRec, 'stop', kai, 'c2'));
+check('Claude Code, finish check: sent back as before', r.j.decision === 'block' && r.j.systemMessage === 'codehere ✕ npm test --silent · 1 failed · agent sent back · 1 of 3', r.out);
+sh('git checkout -q -- src/price.js', kai);
+
+// .codex/ settings are protected in every agent's session, and are not code changes
+const kaiCodex = path.join(kai, '.codex/hooks.json');
+const kaiCodexText = fs.readFileSync(kaiCodex, 'utf8');
+HX('session-start', kai, recorded(codexRec, 'session-start', kai, 'x4'), 'codex');
+fs.writeFileSync(kaiCodex, JSON.stringify({ hooks: {} }));
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HX('stop', kai, recorded(codexRec, 'stop', kai, 'x4'), 'codex');
+let r2 = HX('stop', kai, recorded(codexRec, 'stop', kai, 'x4', { stop_hook_active: true }), 'codex');
+check('Codex session: removing the Codex hooks sends the agent back once and is shown', r.j.decision === 'block' && r.j.reason.includes('- .codex/hooks.json') && !r2.j.decision && (r2.j.systemMessage || '').includes('codehere ✕ settings changed during this session · .codex/hooks.json'), r.out + r2.out);
+fs.writeFileSync(kaiCodex, kaiCodexText);
+sh('git checkout -q -- src/price.js', kai);
+HX('session-start', kai, recorded(claudeRec, 'session-start', kai, 'c3'));
+fs.writeFileSync(path.join(kai, '.codex/config.toml'), '[features]\nhooks = false\n');
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HX('stop', kai, recorded(claudeRec, 'stop', kai, 'c3'));
+r2 = HX('stop', kai, recorded(claudeRec, 'stop', kai, 'c3', { stop_hook_active: true }));
+check("Claude Code session: switching off Codex's hooks is reported too", r.j.decision === 'block' && r.j.reason.includes('- .codex/config.toml') && (r2.j.systemMessage || '').includes('settings changed during this session · .codex/config.toml'), r.out + r2.out);
+fs.rmSync(path.join(kai, '.codex/config.toml'));
+sh('git checkout -q -- src/price.js', kai);
+HX('session-start', kai, recorded(codexRec, 'session-start', kai, 'x5'), 'codex');
+fs.writeFileSync(path.join(kai, '.codex/notes.md'), 'scratch\n');
+r = HX('stop', kai, recorded(codexRec, 'stop', kai, 'x5'), 'codex');
+check('a file under .codex/ is not a code change: nothing to check, nothing said', r.out === '' && r.code === 0, r.out);
+fs.rmSync(path.join(kai, '.codex/notes.md'));
+// a session that started before this build has no hash for the .codex/ files: they are not reported
+HX('session-start', kai, recorded(claudeRec, 'session-start', kai, 'c4'));
+const kaiState = path.join(kai, '.codehere/local/state.json');
+const oldState = readJson(kaiState);
+delete oldState.sessions.c4.settings['.codex/hooks.json'];
+delete oldState.sessions.c4.settings['.codex/config.toml'];
+fs.writeFileSync(kaiState, JSON.stringify(oldState));
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HX('stop', kai, recorded(claudeRec, 'stop', kai, 'c4'));
+check('a session from before this build reports no .codex/ change', !(r.j.systemMessage || '').includes('settings changed') && (r.j.systemMessage || '').startsWith('codehere ✓'), r.out);
+sh('git checkout -q -- src/price.js', kai);
+
+r = ch(['status'], kai);
+check('status lists the agents installed in this repo', r.out.includes('- Agents: Claude Code, Codex CLI'), r.out);
+r = ch(['-h'], kai);
+check('usage lists uninstall and --agent', r.out.includes('codehere uninstall') && r.out.includes('--agent claude,codex'), r.out);
+
+// uninstall
+const u1 = freshRepo('u1');
+ch(['init', '--agent', 'claude,codex'], u1);
+r = ch(['uninstall'], u1);
+check('uninstall without a terminal exits 1 and changes nothing', r.code === 1 && fs.existsSync(path.join(u1, '.codex/hooks.json')) && fs.existsSync(path.join(u1, '.codehere/config.json')), r.out + r.err);
+r = atTerminal('uninstall', u1, 'n');
+check('uninstall answered no changes nothing', fs.existsSync(path.join(u1, '.codex/hooks.json')) && fs.existsSync(path.join(u1, '.claude/settings.json')), r.out);
+r = atTerminal('uninstall', u1, 'y');
+check('init for both agents, then uninstall: git status is clean', sh('git status --porcelain --ignored', u1) === '', r.out + sh('git status --porcelain --ignored', u1));
+const u2 = freshRepo('u2', {
+  '.gitignore': 'node_modules/\n',
+  '.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash(ls:*)'] }, hooks: { Stop: [{ hooks: [{ type: 'command', command: 'other-tool stop' }] }] } }),
+  'package.json': JSON.stringify({ name: 'u2', scripts: { test: 'node -e 0' } }),
+});
+atTerminal('init --agent claude,codex', u2, 'y');
+ch(['rule', 'Keep this rule'], u2);
+check('(setup) the test command is approved in u2', ch(['status'], u2).out.includes('approved on this machine'));
+r = atTerminal('uninstall', u2, 'y');
+const u2Claude = readJson(path.join(u2, '.claude/settings.json'));
+check('uninstall keeps other hooks and settings, and removes a hooks file left empty', JSON.stringify(u2Claude.permissions) === '{"allow":["Bash(ls:*)"]}' && commandsIn(path.join(u2, '.claude/settings.json')).map((h) => h.command).join() === 'other-tool stop' && !fs.existsSync(path.join(u2, '.codex')), JSON.stringify(u2Claude));
+check('uninstall keeps the .gitignore line when it keeps .codehere/', fs.readFileSync(path.join(u2, '.gitignore'), 'utf8') === 'node_modules/\n.codehere/local/\n');
+check('uninstall keeps .codehere/ when it holds team content, and says so', fs.existsSync(path.join(u2, '.codehere/rules.md')) && !fs.existsSync(path.join(u2, '.codehere/local')) && /kept/i.test(r.out) && r.out.includes('1 rule'), r.out);
+const approvalsNow = readJson(path.join(process.env.XDG_CONFIG_HOME, 'codehere', 'approvals.json'));
+check("uninstall removes this repo's approvals on this machine, and no other repo's", !(fs.realpathSync(u2) in approvalsNow.repos) && fs.realpathSync(kai) in approvalsNow.repos);
+
+console.log('\n24. build 3 review: uninstall under an agent and mid-session, where uninstall acts, --agent');
+const a1 = freshRepo('a1', { 'package.json': JSON.stringify({ name: 'a1', scripts: { test: 'node -e 0' } }) });
+ch(['init', '--agent', 'codex'], a1);
+r = underAgent('uninstall', a1, 'y');
+check('uninstall from a terminal opened under an agent process is refused', r.code === 1 && fs.existsSync(path.join(a1, '.codex/hooks.json')) && fs.existsSync(path.join(a1, '.codehere')), r.out);
+
+// An agent that gets past that (it detaches its terminal on purpose) and uninstalls mid-session is reported
+const a2 = freshRepo('a2', { 'package.json': JSON.stringify({ name: 'a2', scripts: { test: 'node -e 0' } }), 'app.js': 'x\n' });
+atTerminal('init --agent claude,codex', a2, 'y');
+sh('git add -A && git commit -qm codehere', a2);
+H('session-start', a2, { session_id: 'g1', hook_event_name: 'SessionStart', source: 'startup' });
+fs.appendFileSync(path.join(a2, 'app.js'), 'y\n');
+r = atTerminal('uninstall', a2, 'y');
+check('(setup) uninstall removed .codehere/ in a2', !fs.existsSync(path.join(a2, '.codehere')), r.out);
+r = H('stop', a2, { session_id: 'g1', hook_event_name: 'Stop', stop_hook_active: false });
+check('uninstall during a session: the finish check still tells the developer, though .codehere/ is gone', r.code === 0 && /^codehere ✕ codehere uninstall ran at \d\d:\d\d · this repo's checks are removed$/.test(r.j.systemMessage || ''), r.out);
+const a3 = freshRepo('a3', { 'package.json': JSON.stringify({ name: 'a3', scripts: { test: 'node -e 0' } }), 'app.js': 'x\n' });
+atTerminal('init --agent claude', a3, 'y');
+ch(['rule', 'Keep it'], a3);
+sh('git add -A && git commit -qm codehere', a3);
+HX('session-start', a3, { cwd: a3, session_id: 'g2', hook_event_name: 'SessionStart', source: 'startup' });
+fs.appendFileSync(path.join(a3, 'app.js'), 'y\n');
+atTerminal('uninstall', a3, 'y');
+r = H('stop', a3, { session_id: 'g2', hook_event_name: 'Stop', stop_hook_active: false });
+check('uninstall during a session, .codehere/ kept: the finish check tells the developer', (r.j.systemMessage || '').includes("codehere ✕ codehere uninstall ran at") && !(r.j.systemMessage || '').includes('✓'), r.out);
+ch(['init', '--agent', 'claude'], a3);
+HX('session-start', a3, { cwd: a3, session_id: 'g3', hook_event_name: 'SessionStart', source: 'startup' });
+r = H('stop', a3, { session_id: 'g3', hook_event_name: 'Stop', stop_hook_active: false });
+check('init again clears the note', !(r.j.systemMessage || '').includes('uninstall ran'), r.out);
+
+// Where uninstall acts: never a home folder, never outside git, and it says which folder
+const home = path.join(tmp, 'home');
+fs.mkdirSync(path.join(home, 'proj'), { recursive: true });
+sh('git init -q', home);
+fs.mkdirSync(path.join(home, '.codehere/local'), { recursive: true });
+fs.writeFileSync(path.join(home, '.codehere/local/keep.txt'), 'x');
+fs.mkdirSync(path.join(home, '.codex'));
+fs.writeFileSync(path.join(home, '.codex/hooks.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'codehere hook stop --agent codex' }] }] } }));
+r = atTerminal('uninstall', path.join(home, 'proj'), 'y', { HOME: home });
+check('uninstall refuses when the nearest .codehere/ is the home folder', r.code === 1 && /home folder/.test(r.out) && fs.existsSync(path.join(home, '.codehere/local/keep.txt')) && fs.readFileSync(path.join(home, '.codex/hooks.json'), 'utf8').includes('codehere hook'), r.out);
+const nogit = path.join(tmp, 'nogit');
+fs.mkdirSync(nogit);
+ch(['init'], nogit);
+r = atTerminal('uninstall', nogit, 'y');
+check('uninstall refuses outside a git repo', r.code === 1 && /not a git repo/.test(r.out) && fs.existsSync(path.join(nogit, '.codehere')), r.out);
+const a4 = freshRepo('a4');
+ch(['init'], a4);
+r = atTerminal('uninstall', a4, 'n');
+check('the uninstall question names the folder', r.out.includes(`Remove Codehere from ${fs.realpathSync(a4)}? [y/N]`) || r.out.includes(`Remove Codehere from ${a4}? [y/N]`), r.out);
+
+// What uninstall keeps
+const a5 = freshRepo('a5', { '.gitignore': 'node_modules/\n' });
+ch(['init', '--agent', 'codex'], a5);
+const a5hooks = readJson(path.join(a5, '.codex/hooks.json'));
+a5hooks.hooks.Stop.unshift(null);
+fs.writeFileSync(path.join(a5, '.codex/hooks.json'), JSON.stringify(a5hooks));
+r = atTerminal('uninstall', a5, 'y');
+check('uninstall removes only its own .gitignore line, and copes with a null entry in a hooks file', r.code === 0 && fs.readFileSync(path.join(a5, '.gitignore'), 'utf8') === 'node_modules/\n' && !fs.existsSync(path.join(a5, '.codehere')) && !commandsIn(path.join(a5, '.codex/hooks.json')).length, r.out);
+const a6 = freshRepo('a6');
+ch(['init'], a6);
+fs.appendFileSync(path.join(a6, '.codehere/rules.md'), 'We deploy on Fridays only after the smoke test.\n');
+r = atTerminal('uninstall', a6, 'y');
+check('uninstall keeps .codehere/ when rules.md was edited, even with no "- " rules', fs.existsSync(path.join(a6, '.codehere/rules.md')) && /edited rules\.md/.test(r.out), r.out);
+
+// --agent parsing
+const a7 = freshRepo('a7');
+r = ch(['init', '--agent=codex'], a7);
+check('--agent=codex works like --agent codex', r.code === 0 && fs.existsSync(path.join(a7, '.codex/hooks.json')) && !fs.existsSync(path.join(a7, '.claude')), r.out + r.err);
+const a8 = freshRepo('a8');
+r = ch(['init', '--agent', '--test', 'npm test'], a8);
+check('--agent with no value exits 1 and writes nothing', r.code === 1 && sh('git status --porcelain', a8) === '', r.out + r.err);
+for (const bad of ['constructor', '__proto__', 'claude,']) {
+  r = ch(['init', '--agent', bad], a8);
+  check(`--agent ${bad} exits 1 and writes nothing`, r.code === 1 && sh('git status --porcelain', a8) === '', r.out + r.err);
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (!process.env.KEEP) fs.rmSync(tmp, { recursive: true, force: true }); else console.log(tmp);

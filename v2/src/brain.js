@@ -227,6 +227,37 @@ export function addApproval(root, command) {
   return true;
 }
 
+export function removeApprovals(root) {
+  const file = approvalsFile(root);
+  const all = readAllApprovals(root);
+  if (!file || !(repoKey(root) in all.repos)) return;
+  delete all.repos[repoKey(root)];
+  fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n');
+}
+
+// uninstall leaves a note here, outside the repo. A session that was open when it ran still has
+// its hooks loaded, but its state and maybe .codehere/ are gone: its finish check reads the note.
+export function markRemoved(root, removed = true) {
+  const file = approvalsFile(root);
+  const all = readAllApprovals(root);
+  const notes = all.removed && typeof all.removed === 'object' ? all.removed : {};
+  if (!file || (!removed && !(repoKey(root) in notes))) return;
+  if (removed) notes[repoKey(root)] = new Date().toISOString();
+  else delete notes[repoKey(root)];
+  all.removed = notes;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n');
+}
+
+// When uninstall ran for dir or a folder above it, else null.
+export function removedAt(dir) {
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    const at = readAllApprovals(d).removed?.[repoKey(d)];
+    if (typeof at === 'string') return at;
+    if (path.dirname(d) === d) return null;
+  }
+}
+
 // Control, format (bidi, zero-width), filler and variation characters escaped, so text from the repo cannot print a fake
 // line, move the cursor or hide part of a command.
 const ESCAPES = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };

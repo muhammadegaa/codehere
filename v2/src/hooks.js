@@ -1,5 +1,5 @@
-// Claude Code hook handlers. Every handler fails open: if anything goes wrong,
-// it exits 0 and the agent carries on as if Codehere were not installed.
+// Hook handlers for Claude Code and Codex CLI (--agent codex). Every handler fails open: if
+// anything goes wrong, it exits 0 and the agent carries on as if Codehere were not installed.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
   listDocs, git, isGitRepo, me, slug, today, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
+  removedAt,
 } from './brain.js';
 import {
   responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts,
@@ -34,14 +35,20 @@ function toAgent(message) {
 
 const quiet = () => process.exit(0);
 
-export async function runHook(event) {
+export async function runHook(event, agent) {
   const input = readStdin();
-  const root = findRoot(input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  if (!root) quiet();
+  const start = input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const root = findRoot(start);
+  if (!root) {
+    // uninstall ran while this session was open: its hooks still run, .codehere/ is gone
+    const at = event === 'stop' && removedAt(start);
+    if (at) emitJson({ systemMessage: removedLine(at) });
+    quiet();
+  }
   try {
     if (event === 'session-start') return sessionStart(root, input);
     if (event === 'prompt') return promptSubmit(root, input);
-    if (event === 'post-tool') return postTool(root, input);
+    if (event === 'post-tool') return postTool(root, input, agent === 'codex' ? 'codex' : 'claude');
     if (event === 'stop') return stop(root, input);
   } catch (err) {
     if (process.env.CODEHERE_DEBUG) console.error(err);
@@ -118,7 +125,7 @@ function briefFile(root, file) {
 
 // ---------- what changed in THIS session ----------
 
-const IGNORE = (f) => f.startsWith('.codehere/') || f.startsWith('.claude/');
+const IGNORE = (f) => f.startsWith('.codehere/') || f.startsWith('.claude/') || f.startsWith('.codex/');
 
 export function dirtySnapshot(root) {
   const files = statusFiles(root).filter((f) => !IGNORE(f));
@@ -146,10 +153,10 @@ function changedThisSession(root, s) {
   return [...changed];
 }
 
-// Files that decide what Codehere runs and tells every agent, and the agent's own hook
-// settings. Claude Code loads hooks at session start, so a hook removed mid-session
+// Files that decide what Codehere runs and tells every agent, and the agents' own hook
+// settings. Claude Code and Codex load hooks at session start, so a hook removed mid-session
 // still runs at this session's finish check and can report it.
-const PROTECTED = ['.codehere/config.json', '.codehere/rules.md', '.claude/settings.json', '.claude/settings.local.json'];
+const PROTECTED = ['.codehere/config.json', '.codehere/rules.md', '.claude/settings.json', '.claude/settings.local.json', '.codex/hooks.json', '.codex/config.toml'];
 
 function settingsSnapshot(root) {
   const snap = {};
@@ -161,6 +168,7 @@ function settingsSnapshot(root) {
     // In .claude/ only the hook and env settings count: Claude Code also saves permission
     // rules there when the developer picks "don't ask again". env can move HOME or
     // XDG_CONFIG_HOME, where approvals are kept. A missing file has none of them.
+    // Codex keeps what it saves in the user's own config, so .codex/ files count whole.
     if (f.startsWith('.claude/')) {
       try {
         const j = JSON.parse(text ?? '{}');
@@ -175,7 +183,8 @@ function settingsSnapshot(root) {
 function settingsChanged(root, s) {
   if (!s.settings) return []; // no snapshot from session start: cannot tell
   const now = settingsSnapshot(root);
-  return PROTECTED.filter((f) => now[f] !== s.settings[f]);
+  // a session that started before a file was protected has no hash for it
+  return PROTECTED.filter((f) => f in s.settings && now[f] !== s.settings[f]);
 }
 
 // ---------- PostToolUse (Bash): loop breaker + just-in-time team lessons ----------
@@ -291,7 +300,7 @@ function writeLesson(root, sig, proofCommand, changed) {
   return path.relative(root, file);
 }
 
-function postTool(root, input) {
+function postTool(root, input, agent) {
   if (input.tool_name && input.tool_name !== 'Bash') quiet();
   const command = (input.tool_input && input.tool_input.command) || '';
   if (readOnly(command)) quiet();
@@ -340,6 +349,14 @@ function postTool(root, input) {
         '`codehere help "<what you are stuck on>"` to send a ready-made help card to a teammate,',
         'or `codehere brief` to restart in a fresh session. Then wait for the user.'
       );
+    }
+    // Codex replaces the command's output with a block's text (or exit 2's), so the agent
+    // would lose the error. There it goes in as context next to the output.
+    if (agent === 'codex') {
+      emitJson({
+        ...(lesson ? { systemMessage: lessonLine(lesson) } : {}),
+        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: msg.join('\n') },
+      });
     }
     // with a lesson, JSON instead of exit 2, so the developer also gets its line
     if (lesson) emitJson({ decision: 'block', reason: msg.join('\n'), systemMessage: lessonLine(lesson) });
@@ -485,6 +502,8 @@ export function runResult(t) {
   return c && c.failed ? `${c.failed} failed` : `exit ${t.code}`;
 }
 
+const removedLine = (at) => `codehere ✕ codehere uninstall ran at ${new Date(at).toTimeString().slice(0, 5)} · this repo's checks are removed`;
+
 // message: the developer's lines, already escaped
 function block(reason, message) {
   emitJson(message ? { decision: 'block', reason, systemMessage: message } : { decision: 'block', reason });
@@ -500,7 +519,8 @@ function stop(root, input) {
   const base = commitId(s.startHead) || 'HEAD';
   const changed = changedThisSession(root, s);
   const settings = settingsChanged(root, s);
-  if (!changed.length && !settings.length) quiet(); // the agent changed nothing this session: stay silent
+  const removed = removedAt(root);
+  if (!changed.length && !settings.length && !removed) quiet(); // the agent changed nothing this session: stay silent
 
   // Lines for the developer. Each is escaped as a whole, so text from the repo cannot fake a
   // line, and text from the repo never carries a tick (noTick).
@@ -511,6 +531,7 @@ function stop(root, input) {
       if (a.at > (s.startedAt || '')) all.push(`codehere › approved on this machine during this session: ${noTick(a.command)}`);
     }
     if (settings.length) all.push(`codehere ✕ settings changed during this session · ${settings.join(' · ')}`);
+    if (removed) all.push(removedLine(removed));
     return all.map(printable).join('\n');
   }
   function report() {

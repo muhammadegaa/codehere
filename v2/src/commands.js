@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import {
   findRoot, paths, ensureDirs, readConfig, writeConfig, readState, writeState,
   readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
-  readApprovals, isApproved, addApproval, printable, commitId,
+  readApprovals, isApproved, addApproval, removeApprovals, markRemoved, printable, commitId,
 } from './brain.js';
 import { redact } from './signals.js';
 import { summarize } from './gemma.js';
@@ -19,6 +19,21 @@ const HOOK_EVENTS = {
   PostToolUseFailure: { cmd: 'codehere hook post-tool', matcher: 'Bash' },
   Stop: { cmd: 'codehere hook stop', timeout: 180 },
 };
+
+// Keep these strings stable: Codex asks every developer to trust a hook again when its definition changes.
+const CODEX_HOOK_EVENTS = {
+  SessionStart: { cmd: 'codehere hook session-start --agent codex' },
+  UserPromptSubmit: { cmd: 'codehere hook prompt --agent codex', timeout: 10 },
+  PostToolUse: { cmd: 'codehere hook post-tool --agent codex', matcher: 'Bash' },
+  Stop: { cmd: 'codehere hook stop --agent codex', timeout: 180 },
+};
+
+const AGENTS = {
+  claude: { name: 'Claude Code', file: '.claude/settings.json', events: HOOK_EVENTS },
+  codex: { name: 'Codex CLI', file: '.codex/hooks.json', events: CODEX_HOOK_EVENTS },
+};
+
+const ours = (h) => typeof h?.command === 'string' && h.command.startsWith('codehere hook ');
 
 function requireRoot() {
   const root = findRoot();
@@ -42,18 +57,18 @@ function detectTestCommand(root) {
   return null;
 }
 
-function mergeClaudeSettings(root) {
-  const dir = path.join(root, '.claude');
-  const file = path.join(dir, 'settings.json');
-  fs.mkdirSync(dir, { recursive: true });
+// Claude Code's .claude/settings.json and Codex's .codex/hooks.json share this shape.
+function mergeHooks(root, agent) {
+  const file = path.join(root, agent.file);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   let settings = {};
   try {
     settings = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {}
   settings.hooks = settings.hooks || {};
-  for (const [event, spec] of Object.entries(HOOK_EVENTS)) {
+  for (const [event, spec] of Object.entries(agent.events)) {
     const list = (settings.hooks[event] = settings.hooks[event] || []);
-    const already = list.some((g) => (g.hooks || []).some((h) => h.command === spec.cmd));
+    const already = list.some((g) => (g?.hooks || []).some((h) => h?.command === spec.cmd));
     if (already) continue;
     const hook = { type: 'command', command: spec.cmd };
     if (spec.timeout) hook.timeout = spec.timeout;
@@ -62,7 +77,55 @@ function mergeClaudeSettings(root) {
     list.push(group);
   }
   fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
-  return file;
+}
+
+// Takes Codehere's hooks out of the agent's settings file, keeping everything else.
+// A file left with nothing in it is removed, and its folder if that is then empty.
+function removeHooks(root, agent) {
+  const file = path.join(root, agent.file);
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return false;
+  }
+  const hooks = settings.hooks && typeof settings.hooks === 'object' ? settings.hooks : {};
+  let found = false;
+  for (const event of Object.keys(hooks)) {
+    if (!Array.isArray(hooks[event])) continue;
+    hooks[event] = hooks[event]
+      .filter((g) => g && typeof g === 'object')
+      .map((g) => {
+        const all = Array.isArray(g.hooks) ? g.hooks : [];
+        const kept = all.filter((h) => !ours(h));
+        if (kept.length !== all.length) found = true;
+        return { ...g, hooks: kept };
+      })
+      .filter((g) => g.hooks.length);
+    if (!hooks[event].length) delete hooks[event];
+  }
+  if (!found) return false;
+  if (!Object.keys(hooks).length) delete settings.hooks;
+  if (Object.keys(settings).length) {
+    fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
+  } else {
+    fs.rmSync(file);
+    try {
+      fs.rmdirSync(path.dirname(file));
+    } catch {} // not empty: something else lives there
+  }
+  return true;
+}
+
+function installedAgents(root) {
+  return Object.values(AGENTS).filter((a) => {
+    try {
+      const hooks = JSON.parse(fs.readFileSync(path.join(root, a.file), 'utf8')).hooks || {};
+      return Object.values(hooks).some((gs) => Array.isArray(gs) && gs.some((g) => Array.isArray(g?.hooks) && g.hooks.some(ours)));
+    } catch {
+      return false;
+    }
+  });
 }
 
 function addGitignore(root) {
@@ -76,11 +139,11 @@ function addGitignore(root) {
 
 // ---------- approving the test command (this machine only) ----------
 
-// Approving needs the developer's own terminal: a terminal on stdin and stdout,
+// Approving and uninstalling need the developer's own terminal: a terminal on stdin and stdout,
 // and no agent among the processes above this one. An agent's commands run under its process,
 // even in a terminal it opens (Codex can). Inside Codex's sandbox ps is not allowed, so the
 // parents cannot be read, which counts as under an agent. An agent that detaches its terminal
-// on purpose can still answer, so the finish check reports an approval.
+// on purpose can still answer, so the finish check reports an approval or an uninstall.
 const AGENT_PROCESSES = new Set(['claude', 'codex', 'copilot', 'opencode']);
 const PS = fs.existsSync('/bin/ps') ? '/bin/ps' : '/usr/bin/ps';
 function underAgent() {
@@ -137,7 +200,27 @@ export async function approve() {
 
 // ---------- init ----------
 
+const RULES_MD = '# Team rules\n\nOne rule per line, starting with "- ". Written by people, not by the agent.\nEvery agent session on this repo loads these.\n\n';
+const README_MD = [
+  '# .codehere — this team\'s brain',
+  '',
+  'Plain markdown, shared through git. Commit and push it like code.',
+  '',
+  '- `rules.md`: team rules every agent session loads',
+  '- `lessons/`: errors someone already solved; shown to the agent only when the same error appears',
+  '- `help/`: help cards; teammates see them with `codehere inbox`',
+  '- `briefs/`: restart briefs for fresh sessions',
+  '- `local/`: this machine only (git-ignored)',
+  '',
+].join('\n');
+
 export async function init(flags) {
+  const names = flags.agent === undefined ? ['claude'] : String(flags.agent === true ? '' : flags.agent).split(',').map((x) => x.trim().toLowerCase());
+  if (!names.every((n) => Object.hasOwn(AGENTS, n))) {
+    console.error(`Unknown agent "${printable(flags.agent === true ? '' : flags.agent)}". Use --agent claude, --agent codex or --agent claude,codex.`);
+    process.exit(1);
+  }
+  const agents = [...new Set(names)].map((n) => AGENTS[n]);
   const root = process.cwd();
   const p = ensureDirs(root);
   const cfg = readConfig(root);
@@ -145,37 +228,19 @@ export async function init(flags) {
   else if (!cfg.testCommand) cfg.testCommand = detectTestCommand(root);
   writeConfig(root, cfg);
 
-  if (!fs.existsSync(p.rules)) {
-    fs.writeFileSync(
-      p.rules,
-      '# Team rules\n\nOne rule per line, starting with "- ". Written by people, not by the agent.\nEvery agent session on this repo loads these.\n\n'
-    );
-  }
-  fs.writeFileSync(
-    path.join(p.base, 'README.md'),
-    [
-      '# .codehere — this team\'s brain',
-      '',
-      'Plain markdown, shared through git. Commit and push it like code.',
-      '',
-      '- `rules.md`: team rules every agent session loads',
-      '- `lessons/`: errors someone already solved; shown to the agent only when the same error appears',
-      '- `help/`: help cards; teammates see them with `codehere inbox`',
-      '- `briefs/`: restart briefs for fresh sessions',
-      '- `local/`: this machine only (git-ignored)',
-      '',
-    ].join('\n')
-  );
+  if (!fs.existsSync(p.rules)) fs.writeFileSync(p.rules, RULES_MD);
+  fs.writeFileSync(path.join(p.base, 'README.md'), README_MD);
   for (const d of [p.lessons, p.help, p.briefs]) {
     const keep = path.join(d, '.gitkeep');
     if (!fs.existsSync(keep)) fs.writeFileSync(keep, '');
   }
   addGitignore(root);
-  const settingsFile = mergeClaudeSettings(root);
+  for (const a of agents) mergeHooks(root, a);
+  markRemoved(root, false);
 
   console.log('Codehere is set up.');
   console.log(`- Team brain: ${path.relative(root, p.base)}/`);
-  console.log(`- Claude Code hooks: ${path.relative(root, settingsFile)}`);
+  for (const a of agents) console.log(`- ${a.name} hooks: ${a.file}`);
   console.log(`- Test check on "done": ${cfg.testCommand ? printable(cfg.testCommand) : 'none found (set one with: codehere init --test "npm test")'}`);
   console.log('');
   if (cfg.testCommand && !isApproved(root, cfg.testCommand)) {
@@ -183,8 +248,83 @@ export async function init(flags) {
     else console.log('The test command runs only after you approve it on this machine: codehere approve');
     console.log('');
   }
-  console.log('Next: commit .codehere/ and .claude/settings.json so your team gets it too.');
-  console.log('Then just use Claude Code as usual. Codehere stays quiet unless it helps.');
+  if (agents.includes(AGENTS.codex)) {
+    console.log("Codex runs a repo's hooks only after each developer trusts them. Open Codex here, trust the project if asked,");
+    console.log('then type /hooks and trust the four Codehere hooks. Until then Codex skips them, and `codex exec` does not warn.');
+    console.log('');
+  }
+  console.log(`Next: commit .codehere/ and ${agents.map((a) => a.file).join(' and ')} so your team gets it too.`);
+  console.log(`Then just use ${agents.map((a) => a.name).join(' or ')} as usual. Codehere stays quiet unless it helps.`);
+}
+
+// ---------- uninstall ----------
+
+function removeGitignoreLine(root) {
+  const file = path.join(root, '.gitignore');
+  if (!fs.existsSync(file)) return;
+  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  const kept = lines.filter((l) => l !== '.codehere/local/');
+  if (kept.length === lines.length) return;
+  if (kept.join('\n').trim()) fs.writeFileSync(file, kept.join('\n'));
+  else fs.rmSync(file);
+}
+
+function filesIn(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const f = path.join(dir, e.name);
+    return e.isDirectory() ? filesIn(f) : [f];
+  });
+}
+
+const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// Like approve, it needs the developer's own terminal, so the agent cannot switch Codehere off.
+// .codehere/ goes only when it holds nothing but what init wrote.
+export async function uninstall() {
+  const root = findRoot();
+  if (!root) {
+    console.error('No .codehere folder here. Nothing to remove.');
+    process.exit(1);
+  }
+  // findRoot walks up: from a folder with no .codehere/ it can reach the home folder
+  const home = fs.realpathSync(root) === fs.realpathSync(os.homedir());
+  if (home || !isGitRepo(root)) {
+    console.error(`The nearest .codehere/ is in ${printable(root)}, ${home ? 'your home folder' : 'which is not a git repo'}. Nothing removed.`);
+    process.exit(1);
+  }
+  if (!atTerminal()) {
+    console.error('codehere uninstall asks you to confirm in your own terminal, not through an agent. Run it there.');
+    process.exit(1);
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await rl.question(`Remove Codehere from ${printable(root)}? [y/N] `);
+  rl.close();
+  if (!/^y(es)?$/i.test(answer.trim())) return console.log('Nothing removed.');
+
+  for (const a of Object.values(AGENTS)) {
+    if (removeHooks(root, a)) console.log(`- Removed Codehere's hooks from ${a.file}`);
+  }
+  removeApprovals(root);
+  markRemoved(root);
+  const p = paths(root);
+  fs.rmSync(p.local, { recursive: true, force: true });
+  const readme = path.join(p.base, 'README.md');
+  const written = [p.config, p.rules, readme, ...[p.lessons, p.help, p.briefs].map((d) => path.join(d, '.gitkeep'))];
+  const rules = readRules(root).length;
+  const docs = [p.lessons, p.help, p.briefs].map((d) => listDocs(d).length);
+  const other = filesIn(p.base).filter((f) => !written.includes(f)).length - docs.reduce((a, b) => a + b, 0);
+  const edited = [[p.rules, RULES_MD], [readme, README_MD]].filter(([f, text]) => fs.existsSync(f) && fs.readFileSync(f, 'utf8') !== text).map(([f]) => path.basename(f));
+  const held = [[rules, 'rule'], [docs[0], 'lesson'], [docs[1], 'help card'], [docs[2], 'brief'], [other, 'other file']].filter(([n]) => n).map(([n, w]) => count(n, w));
+  if (!rules) held.push(...edited.map((f) => `an edited ${f}`));
+  else if (edited.includes('README.md')) held.push('an edited README.md');
+  if (!held.length) {
+    fs.rmSync(p.base, { recursive: true, force: true });
+    removeGitignoreLine(root); // kept otherwise: a session still open would write local/ again
+    console.log('- Removed .codehere/');
+  } else {
+    console.log(`- Kept .codehere/: it holds ${held.join(', ')}. Delete it yourself if the team no longer needs it.`);
+  }
+  console.log('Codehere is removed from this repo on this machine. Commit the changes so your team gets them too.');
 }
 
 // ---------- rules ----------
@@ -466,6 +606,7 @@ export function status() {
   const { state, s } = lastSession(root);
   const p = paths(root);
   console.log('Codehere status');
+  console.log(`- Agents: ${installedAgents(root).map((a) => a.name).join(', ') || 'none (codehere init --agent claude,codex)'}`);
   console.log(`- Team rules: ${readRules(root).length}`);
   console.log(`- Team lessons: ${listDocs(p.lessons).length}`);
   console.log(`- Open help requests: ${listDocs(p.help).filter((d) => d.meta.status === 'open').length}`);
