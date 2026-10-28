@@ -36,12 +36,31 @@ function ch(args, cwd, input) {
 }
 
 // A person at a terminal: `script` gives codehere a real one, and the answer is typed after the prompt.
+// It runs detached, as a developer's own terminal is: codehere refuses to be confirmed from a
+// terminal opened under an agent, and these tests may themselves run under one.
+let terminals = 0;
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 function atTerminal(args, cwd, answer) {
   const run = `node "${BIN}" ${args}`;
   const term = process.platform === 'darwin' ? `script -q /dev/null ${run}` : `script -qec '${run}' /dev/null`;
-  const r = spawnSync('bash', ['-c', `(sleep 0.8; printf '${answer}\\r'; sleep 0.5) | ${term}`], { cwd, encoding: 'utf8' });
-  return { code: r.status, out: r.stdout || '' };
+  const f = path.join(tmp, `terminal-${++terminals}`);
+  spawnSync('bash', ['-c', `( (sleep 0.8; printf '${answer}\\r'; sleep 0.5) | ${term} > "${f}.out" 2>&1; echo $? > "${f}.code" ) & exit 0`], { cwd, stdio: 'ignore' });
+  while (!(fs.existsSync(`${f}.code`) && fs.readFileSync(`${f}.code`, 'utf8').endsWith('\n'))) pause(50);
+  return { code: Number(fs.readFileSync(`${f}.code`, 'utf8')), out: fs.readFileSync(`${f}.out`, 'utf8') };
 }
+
+// A terminal opened by a command under an agent process. The agent here is a copy of node named
+// codex (a copied /bin/bash is killed on macOS); ps shows it as codex, as it shows Codex CLI.
+const agentBin = path.join(tmp, 'agent-bin');
+fs.mkdirSync(agentBin);
+fs.copyFileSync(process.execPath, path.join(agentBin, 'codex'), fs.constants.COPYFILE_FICLONE);
+const underAgent = (args, cwd, answer) => {
+  const run = `node "${BIN}" ${args}`;
+  const term = process.platform === 'darwin' ? `script -q /dev/null ${run}` : `script -qec '${run}' /dev/null`;
+  const shell = `(sleep 0.8; printf '${answer}\\r'; sleep 0.5) | ${term}`;
+  const x = spawnSync(path.join(agentBin, 'codex'), ['-e', `process.exit(require('child_process').spawnSync('bash', ['-c', ${JSON.stringify(shell)}], { stdio: 'inherit' }).status)`], { cwd, encoding: 'utf8' });
+  return { code: x.status, out: x.stdout || '' };
+};
 
 function user(dir, name) {
   sh(`git config user.name "${name}"`, dir);
@@ -350,6 +369,8 @@ r = ch(['approve'], budi);
 check('approve without a terminal: exit 1, nothing written', r.code === 1 && r.err.includes('terminal') && approvalsOf(budi).length === 0, r.out + r.err);
 r = atTerminal('approve', budi, 'n');
 check('approve at a terminal, answer "n": not approved', r.out.includes('Not approved') && approvalsOf(budi).length === 0, r.out);
+r = underAgent('approve', budi, 'y');
+check('approve from a terminal opened under an agent process is refused', r.code === 1 && /own terminal/.test(r.out) && approvalsOf(budi).length === 0, r.out);
 r = atTerminal('approve', budi, 'y');
 check('approve shows the command and who last changed it in git, "y" approves', r.out.includes('npm test --silent') && r.out.includes('Last changed in git by Ana') && approvalsOf(budi).includes('npm test --silent'), r.out);
 r = S('t1', budi);

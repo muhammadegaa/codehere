@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import readline from 'node:readline/promises';
+import { execFileSync } from 'node:child_process';
 import {
   findRoot, paths, ensureDirs, readConfig, writeConfig, readState, writeState,
   readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
@@ -75,9 +76,29 @@ function addGitignore(root) {
 
 // ---------- approving the test command (this machine only) ----------
 
-// Approval needs a terminal. An agent's shell tool has none, though an agent that fakes one
-// can answer, so an approval made during a session is reported at the finish check.
-const atTerminal = () => !!(process.stdin.isTTY && process.stdout.isTTY);
+// Approving needs the developer's own terminal: a terminal on stdin and stdout,
+// and no agent among the processes above this one. An agent's commands run under its process,
+// even in a terminal it opens (Codex can). Inside Codex's sandbox ps is not allowed, so the
+// parents cannot be read, which counts as under an agent. An agent that detaches its terminal
+// on purpose can still answer, so the finish check reports an approval.
+const AGENT_PROCESSES = new Set(['claude', 'codex', 'copilot', 'opencode']);
+const PS = fs.existsSync('/bin/ps') ? '/bin/ps' : '/usr/bin/ps';
+function underAgent() {
+  let pid = process.ppid;
+  for (let i = 0; i < 100 && pid > 1; i++) {
+    let line;
+    try {
+      line = execFileSync(PS, ['-o', 'ppid=,comm=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch {
+      return true;
+    }
+    const m = /^(\d+)\s+(.+)$/.exec(line);
+    if (!m || AGENT_PROCESSES.has(path.basename(m[2]).toLowerCase())) return true;
+    pid = Number(m[1]);
+  }
+  return pid > 1;
+}
+const atTerminal = () => !!(process.stdin.isTTY && process.stdout.isTTY) && !underAgent();
 
 async function askApproval(root, command) {
   const last = git(root, 'log -1 --format="%an on %ad (%h)" --date=short -- .codehere/config.json');
@@ -108,7 +129,7 @@ export async function approve() {
   if (!command) return console.log('No test command set. Set one: codehere init --test "npm test"');
   if (isApproved(root, command)) return console.log(`Already approved on this machine: ${printable(command)}`);
   if (!atTerminal()) {
-    console.error('codehere approve asks you to confirm at a terminal. Run it in your own terminal.');
+    console.error('codehere approve asks you to confirm in your own terminal, not through an agent. Run it there.');
     process.exit(1);
   }
   await askApproval(root, command);

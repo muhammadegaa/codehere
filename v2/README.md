@@ -117,6 +117,7 @@ npm test                    # end-to-end checks
 - Redaction catches common keys, tokens and emails. Always read a help card before sharing it.
 - The "done" check needs a test command. Without one, only the tampering check runs.
 - Approvals are per folder. Each git worktree or extra clone needs its own `codehere approve`.
+- `codehere approve` asks only in your own terminal. It refuses when Claude Code or another coding agent is among the processes above it, or when those processes cannot be read. An agent that detaches its terminal on purpose can still answer, so the finish check of a session that was open tells you when an approval happened.
 - Approving `npm test` approves that command, not the scripts behind it in `package.json`. And Claude Code runs any hook a teammate adds to the committed `.claude/settings.json`. Both are your repo's code, with the same trust as running it yourself.
 - When the agent changes `.codehere/config.json`, `.codehere/rules.md` or the hook and env settings in `.claude/settings*.json` during a session, the finish check tells you. It cannot tell you if the session ends without a finish check, for example when you close it mid-turn. An agent that sets out to fake your terminal or rewrite Codehere's local files can also get around this.
 - Only the test command needs approval. A teammate who sets `verifyOnStop` to `false` in `.codehere/config.json` turns the finish check off for everyone; `codehere status` shows it as off.
