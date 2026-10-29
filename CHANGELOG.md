@@ -1,6 +1,6 @@
 # Changelog
 
-> From 1.0.2 the package is `codehere check` only. Entries below describe the earlier product (orchestrator, dashboard, cost and audit features). That code is no longer in this package.
+> From 2.0.0 the package is the team brain in `v2/` ([v2/README.md](v2/README.md)). 1.0.2 and 1.0.3 are `codehere check` only, still on npm as `codehere@1`. Entries before 1.0.2 describe the earlier product (orchestrator, dashboard, cost and audit features). That code is no longer in this package.
 
 
 All notable changes to codehere are documented in this file.
@@ -8,6 +8,18 @@ All notable changes to codehere are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
 ---
+
+## [2.0.0] - unreleased (prepared 2026-10-29)
+
+A different tool under the same name: a team brain for Claude Code, Codex CLI and GitHub Copilot CLI, built in `v2/` and released as betas on `next` from 26 Oct (2.0.0-beta.1 to 2.0.0-beta.3).
+
+- Team rules load at session start. A teammate's lesson reaches the agent the first time a matching error appears.
+- After the same error 3 times, the agent is told to stop and find the root cause.
+- At "done", Codehere re-runs your tests and sends the agent back when they fail, at most 3 times. It runs the test command only after `codehere approve` on your machine.
+- `codehere init --agent claude,codex,copilot`, `codehere uninstall`, and rules, lessons, help cards and briefs shared through git.
+- Evidence for each build is in `v2/docs/evidence/`, and the runs on each real agent in `v2/docs/conformance/`.
+
+`codehere check` is not in 2.0: run `npx codehere@1 check`. The GitHub Action pins its own 1.x version.
 
 ## [1.0.3] - unreleased (prepared 2026-10-17)
 

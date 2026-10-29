@@ -1,0 +1,35 @@
+{
+  "name": "codehere",
+  "version": "2.0.0",
+  "description": "A git-native team brain for vibe coders. Silent fixes for AI coding agents: breaks doom loops, verifies 'done', blocks test tampering, and shares what your team learned.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/muhammadegaa/codehere.git",
+    "directory": "v2"
+  },
+  "homepage": "https://github.com/muhammadegaa/codehere/tree/v2-team-brain/v2#readme",
+  "type": "module",
+  "bin": {
+    "codehere": "bin/codehere.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node test/e2e.mjs"
+  },
+  "keywords": [
+    "claude-code",
+    "ai-agents",
+    "vibe-coding",
+    "hooks",
+    "team",
+    "memory"
+  ],
+  "license": "MIT"
+}

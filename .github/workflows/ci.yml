@@ -7,6 +7,7 @@ name: CI
 #   - Architecture gate: tsc, eslint, and the knip dead-code ratchet
 #   - Full vitest suite
 #   - The false-done eval: 22 recorded agent claims, graded by code
+#   - v2/ (the 2.0 package): its end-to-end suite
 #
 # Why '**' and not a branch allowlist: a branch you forgot to list is exactly the branch that needs the gate.
 
@@ -81,3 +82,25 @@ jobs:
 
       - name: False-done eval
         run: node eval/false-done.mjs
+
+  v2:
+    # v2/ is plain Node with no dependencies, so its end-to-end suite is the whole check.
+    name: v2 e2e (${{ matrix.os }} · node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ['20', '24']
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: End-to-end suite
+        run: npm test

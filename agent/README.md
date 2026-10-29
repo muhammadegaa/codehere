@@ -10,8 +10,10 @@
 ## Install
 
 ```
-npx codehere check
+npx codehere@1 check
 ```
+
+From 2.0, `codehere` on npm is the team brain in [v2/](https://github.com/muhammadegaa/codehere/blob/main/v2/README.md). `@1` keeps you on `codehere check`.
 
 ## The four commands
 

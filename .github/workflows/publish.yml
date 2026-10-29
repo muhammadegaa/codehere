@@ -17,7 +17,8 @@ name: Publish to npm
 #
 # Tag format: v<semver>. Pre-release tags (rc, beta, alpha) auto-publish under
 # the matching dist-tag (rc.1 → @rc, beta.1 → @beta, etc.) so they don't clobber
-# `@latest` for users on `npm install codehere`.
+# `@latest` for users on `npm install codehere`. Stable 1.x tags publish under
+# `@legacy`: from 2.0.0, `@latest` is the team brain in v2/, published by hand.
 #
 # Manual override (retry the publish for a tag already on the remote). Pass the tag
 # as the ref too, so the provenance names the commit that was built:
@@ -117,6 +118,11 @@ jobs:
             PRERELEASE_ID=$(echo "$VERSION" | sed -E 's/^[^-]+-([a-zA-Z]+).*/\1/')
             echo "tag=$PRERELEASE_ID" >> "$GITHUB_OUTPUT"
             echo "Publishing pre-release under dist-tag: $PRERELEASE_ID"
+          elif [[ "${VERSION%%.*}" == "1" ]]; then
+            # agent/ is 1.x. A 1.x release must not take @latest back from 2.x;
+            # `npx codehere@1` still finds it.
+            echo "tag=legacy" >> "$GITHUB_OUTPUT"
+            echo "Publishing 1.x under dist-tag: legacy"
           else
             echo "tag=latest" >> "$GITHUB_OUTPUT"
             echo "Publishing stable under dist-tag: latest"
