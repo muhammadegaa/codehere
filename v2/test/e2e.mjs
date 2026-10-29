@@ -277,6 +277,11 @@ check('grep for "error|fail" is read-only (quotes are not split)', readOnly('gre
 check('a test run hidden in a chain still counts', !readOnly('cd app\nnpm test') && !readOnly('echo $(npm test)') && !readOnly('echo "`npm test`"') && !readOnly('cd app && npm test') && !readOnly('ls && pytest'));
 r = ch(['-h'], ana);
 check('codehere -h prints usage', r.out.includes('codehere init'), r.out + r.err);
+const version = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+r = ch(['--version'], ana);
+check('codehere --version prints the version', r.out.trim() === `codehere ${version}`, r.out + r.err);
+r = ch(['-v'], ana);
+check('codehere -v prints the version', r.out.trim() === `codehere ${version}`, r.out + r.err);
 r = ch(['stauts'], ana);
 check('a typo prints one line to stderr, nothing to stdout', !r.out && r.err.includes('Unknown command'), r.out + r.err);
 

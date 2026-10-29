@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
 import { runHook } from '../src/hooks.js';
 import * as cmd from '../src/commands.js';
 
@@ -83,6 +84,9 @@ const run = async () => {
     case 'stats':
       return cmd.stats();
     default:
+      if (flags.version || command === '-v') {
+        return console.log(`codehere ${JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version}`);
+      }
       if (!command || command === '-h') return console.log(USAGE);
       // stderr only: a hook's stdout can land in the agent's context (e.g. a codehere 1.x
       // user-level hook such as `codehere scan-tool`). Exit 0 when a hook called us.
