@@ -9,7 +9,12 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ---
 
-## [2.0.0] - unreleased (prepared 2026-10-29)
+## [2.0.1] - unreleased (prepared 2026-10-29)
+
+- `codehere --version` and `codehere -v` print the version. In 2.0.0, `--version` printed the help text and `-v` was an unknown command.
+- The npm page's homepage link points at `main`. In 2.0.0 it pointed at the `v2-team-brain` branch, which goes away after the merge.
+
+## [2.0.0] - 2026-10-29
 
 A different tool under the same name: a team brain for Claude Code, Codex CLI and GitHub Copilot CLI, built in `v2/` and released as betas on `next` from 26 Oct (2.0.0-beta.1 to 2.0.0-beta.3).
 
