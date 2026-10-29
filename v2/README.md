@@ -82,7 +82,7 @@ Don't want to commit help cards? Copy the printed text into WhatsApp, Discord or
 | Restart-brief suggestion in long sessions | yes | no | no |
 | Before it works | nothing | each developer trusts the hooks in `/hooks` | each developer trusts the folder when Copilot asks |
 | MCP tools, instruction file | no | no | no |
-| Tested on | 2.1.311 with haiku: [result](docs/conformance/2026-10-27-claude-2.1.311-haiku.md) | 0.164.0 with a local model (Qwen 3.5 9B through Ollama): [result](docs/conformance/2026-10-27-codex-0.164.0-qwen3.5-9b-q4-K-M.md) | 1.0.105 with a local model (Qwen 3.5 9B through Ollama): [result](docs/conformance/2026-10-29-copilot-1.0.105-qwen3.5-9b-q4-K-M.md), and with only the Claude Code hooks installed: [result](docs/conformance/2026-10-29-copilot-1.0.105-qwen3.5-9b-q4-K-M-claude-hooks-only.md) |
+| Tested on | 2.1.311 with haiku: [result](docs/conformance/2026-10-27-claude-2.1.311-haiku.md) | 0.164.0 with a local model (Qwen 3.5 9B through Ollama): [result](docs/conformance/2026-10-27-codex-0.164.0-qwen3.5-9b-q4-K-M.md) | 1.0.105 with a local model (Qwen 3.5 9B through Ollama): [result](docs/conformance/2026-10-29-copilot-1.0.105-qwen3.5-9b-q4-K-M.md), with only the Claude Code hooks installed: [result](docs/conformance/2026-10-29-copilot-1.0.105-qwen3.5-9b-q4-K-M-claude-hooks-only.md), and with a GitHub-hosted model (`auto`, which picked gpt-6-luna): [result](docs/conformance/2026-10-29-copilot-1.0.105-auto.md) |
 
 The rows for rules, lessons and the finish check are checked on the real agent by `node scripts/conformance.mjs`. The other rows are checked by `npm test` on hook inputs recorded from each agent.
 

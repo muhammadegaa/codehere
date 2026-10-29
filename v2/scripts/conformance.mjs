@@ -136,9 +136,10 @@ function copilotLocalModel() {
 
 function runAgent(prompt) {
   const started = Date.now();
-  // --trust-folder answers Copilot's "do you trust this folder?" for this run only, as a developer would
+  // --trust-folder answers Copilot's "do you trust this folder?" for this run only, as a developer would.
+  // No built-in MCP servers: with a GitHub login, they would let the model call GitHub's API.
   const copilotArgs = [
-    '--trust-folder', '--no-ask-user', '--no-color', '--model', oss ? `local/${model}` : model,
+    '--trust-folder', '--no-ask-user', '--no-color', '--disable-builtin-mcps', '--model', oss ? `local/${model}` : model,
     '--log-dir', path.join(tmp, 'copilot-logs'), '--log-level', 'all',
     '--allow-tool', 'shell(npm test)', '--allow-tool', 'shell(npm test --silent)', '--allow-tool', 'write', '-p', prompt,
   ];
@@ -184,7 +185,8 @@ function readTranscript(file) {
     return {
       start: startCtx,
       context: [...startCtx, ...rows.filter((j) => j.type === 'tool.execution_complete').map((j) => text(j.data?.result?.content))],
-      sent: fs.readdirSync(logs).flatMap((l) => fs.readFileSync(path.join(logs, l), 'utf8').split('\n')).filter((l) => /^\s*"content": /.test(l)),
+      // each request is one log entry; the field holding the text differs by API ("content" or "text")
+      sent: fs.readdirSync(logs).flatMap((l) => fs.readFileSync(path.join(logs, l), 'utf8').split(/\n(?=\d{4}-\d\d-\d\dT)/)).filter((e) => e.split('\n', 1)[0].includes('Wire request:')),
       prompts: rows.filter((j) => j.type === 'user.message').map((j) => text(j.data?.content)),
       lines: null, // Copilot has no field for a line to the developer
     };
