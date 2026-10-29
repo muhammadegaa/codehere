@@ -28,12 +28,24 @@ const CODEX_HOOK_EVENTS = {
   Stop: { cmd: 'codehere hook stop --agent codex', timeout: 180 },
 };
 
+// Copilot's own format: camelCase events, hooks listed directly under each event, timeout as
+// timeoutSec. Its prompt output is dropped, so that hook only counts the turn.
+const COPILOT_HOOK_EVENTS = {
+  sessionStart: { cmd: 'codehere hook session-start --agent copilot' },
+  userPromptSubmitted: { cmd: 'codehere hook prompt --agent copilot', timeout: 10 },
+  postToolUse: { cmd: 'codehere hook post-tool --agent copilot', matcher: 'bash' },
+  agentStop: { cmd: 'codehere hook stop --agent copilot', timeout: 180 },
+};
+
 const AGENTS = {
   claude: { name: 'Claude Code', file: '.claude/settings.json', events: HOOK_EVENTS },
   codex: { name: 'Codex CLI', file: '.codex/hooks.json', events: CODEX_HOOK_EVENTS },
+  copilot: { name: 'Copilot CLI', file: '.github/hooks/codehere.json', events: COPILOT_HOOK_EVENTS, flat: true },
 };
 
 const ours = (h) => typeof h?.command === 'string' && h.command.startsWith('codehere hook ');
+// Claude Code and Codex wrap hooks in groups; Copilot lists each hook directly.
+const hooksOf = (g) => (Array.isArray(g?.hooks) ? g.hooks : [g]);
 
 function requireRoot() {
   const root = findRoot();
@@ -57,7 +69,6 @@ function detectTestCommand(root) {
   return null;
 }
 
-// Claude Code's .claude/settings.json and Codex's .codex/hooks.json share this shape.
 function mergeHooks(root, agent) {
   const file = path.join(root, agent.file);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -65,12 +76,19 @@ function mergeHooks(root, agent) {
   try {
     settings = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {}
+  if (agent.flat) settings = { version: 1, ...settings };
   settings.hooks = settings.hooks || {};
   for (const [event, spec] of Object.entries(agent.events)) {
     const list = (settings.hooks[event] = settings.hooks[event] || []);
-    const already = list.some((g) => (g?.hooks || []).some((h) => h?.command === spec.cmd));
+    const already = list.some((g) => hooksOf(g).some((h) => h?.command === spec.cmd));
     if (already) continue;
     const hook = { type: 'command', command: spec.cmd };
+    if (agent.flat) {
+      if (spec.matcher) hook.matcher = spec.matcher;
+      if (spec.timeout) hook.timeoutSec = spec.timeout;
+      list.push(hook);
+      continue;
+    }
     if (spec.timeout) hook.timeout = spec.timeout;
     const group = { hooks: [hook] };
     if (spec.matcher) group.matcher = spec.matcher;
@@ -80,7 +98,7 @@ function mergeHooks(root, agent) {
 }
 
 // Takes Codehere's hooks out of the agent's settings file, keeping everything else.
-// A file left with nothing in it is removed, and its folder if that is then empty.
+// A file left with nothing in it is removed, and its folders up to the repo if they are then empty.
 function removeHooks(root, agent) {
   const file = path.join(root, agent.file);
   let settings;
@@ -95,24 +113,27 @@ function removeHooks(root, agent) {
     if (!Array.isArray(hooks[event])) continue;
     hooks[event] = hooks[event]
       .filter((g) => g && typeof g === 'object')
-      .map((g) => {
-        const all = Array.isArray(g.hooks) ? g.hooks : [];
-        const kept = all.filter((h) => !ours(h));
-        if (kept.length !== all.length) found = true;
-        return { ...g, hooks: kept };
-      })
-      .filter((g) => g.hooks.length);
+      .flatMap((g) => {
+        if (!Array.isArray(g.hooks)) return ours(g) ? ((found = true), []) : [g];
+        const kept = g.hooks.filter((h) => !ours(h));
+        if (kept.length !== g.hooks.length) found = true;
+        return kept.length ? [{ ...g, hooks: kept }] : [];
+      });
     if (!hooks[event].length) delete hooks[event];
   }
   if (!found) return false;
   if (!Object.keys(hooks).length) delete settings.hooks;
-  if (Object.keys(settings).length) {
+  if (Object.keys(settings).some((k) => !(agent.flat && k === 'version'))) {
     fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
   } else {
     fs.rmSync(file);
-    try {
-      fs.rmdirSync(path.dirname(file));
-    } catch {} // not empty: something else lives there
+    for (let d = path.dirname(file); d !== root; d = path.dirname(d)) {
+      try {
+        fs.rmdirSync(d);
+      } catch {
+        break; // not empty: something else lives there
+      }
+    }
   }
   return true;
 }
@@ -121,7 +142,7 @@ function installedAgents(root) {
   return Object.values(AGENTS).filter((a) => {
     try {
       const hooks = JSON.parse(fs.readFileSync(path.join(root, a.file), 'utf8')).hooks || {};
-      return Object.values(hooks).some((gs) => Array.isArray(gs) && gs.some((g) => Array.isArray(g?.hooks) && g.hooks.some(ours)));
+      return Object.values(hooks).some((gs) => Array.isArray(gs) && gs.some((g) => hooksOf(g).some(ours)));
     } catch {
       return false;
     }
@@ -217,7 +238,7 @@ const README_MD = [
 export async function init(flags) {
   const names = flags.agent === undefined ? ['claude'] : String(flags.agent === true ? '' : flags.agent).split(',').map((x) => x.trim().toLowerCase());
   if (!names.every((n) => Object.hasOwn(AGENTS, n))) {
-    console.error(`Unknown agent "${printable(flags.agent === true ? '' : flags.agent)}". Use --agent claude, --agent codex or --agent claude,codex.`);
+    console.error(`Unknown agent "${printable(flags.agent === true ? '' : flags.agent)}". Use --agent with claude, codex or copilot, or several: --agent claude,codex,copilot.`);
     process.exit(1);
   }
   const agents = [...new Set(names)].map((n) => AGENTS[n]);
@@ -251,6 +272,10 @@ export async function init(flags) {
   if (agents.includes(AGENTS.codex)) {
     console.log("Codex runs a repo's hooks only after each developer trusts them. Open Codex here, trust the project if asked,");
     console.log('then type /hooks and trust the four Codehere hooks. Until then Codex skips them, and `codex exec` does not warn.');
+    console.log('');
+  }
+  if (agents.includes(AGENTS.copilot)) {
+    console.log("Copilot runs a repo's hooks only in a folder you trust. Answer yes when Copilot asks on its first start here.");
     console.log('');
   }
   console.log(`Next: commit .codehere/ and ${agents.map((a) => a.file).join(' and ')} so your team gets it too.`);

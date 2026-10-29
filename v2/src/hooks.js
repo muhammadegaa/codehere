@@ -1,5 +1,6 @@
-// Hook handlers for Claude Code and Codex CLI (--agent codex). Every handler fails open: if
-// anything goes wrong, it exits 0 and the agent carries on as if Codehere were not installed.
+// Hook handlers for Claude Code, Codex CLI (--agent codex) and Copilot CLI (--agent copilot).
+// Every handler fails open: if anything goes wrong, it exits 0 and the agent carries on as if
+// Codehere were not installed.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -35,10 +36,44 @@ function toAgent(message) {
 
 const quiet = () => process.exit(0);
 
+// Copilot's inputs: camelCase from its own hook file, snake_case from .claude/settings.json.
+// Map them to the names the handlers read. A failed command arrives as a successful tool
+// call; only its output shows the failure.
+function fromCopilot(i) {
+  const tool = i.toolName ?? i.tool_name;
+  return {
+    ...i,
+    session_id: i.sessionId ?? i.session_id,
+    tool_name: tool === 'bash' ? 'Bash' : tool,
+    tool_input: i.toolArgs ?? i.tool_input,
+    tool_response: i.toolResult?.textResultForLlm ?? i.tool_result?.text_result_for_llm,
+  };
+}
+
+const COPILOT_EVENT = { 'session-start': 'sessionStart', prompt: 'userPromptSubmitted', 'post-tool': 'postToolUse', stop: 'agentStop' };
+
+// Whether Copilot's own hook file runs Codehere for this event.
+function copilotFileRuns(root, event) {
+  try {
+    const hooks = JSON.parse(fs.readFileSync(path.join(root, '.github/hooks/codehere.json'), 'utf8')).hooks;
+    return (hooks?.[COPILOT_EVENT[event]] || []).some((h) => h?.command === `codehere hook ${event} --agent copilot`);
+  } catch {
+    return false;
+  }
+}
+
 export async function runHook(event, agent) {
-  const input = readStdin();
+  let input = readStdin();
   const start = input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const root = findRoot(start);
+  // Copilot also runs the hooks in .claude/settings.json, adding a `timestamp` Claude Code does
+  // not send. When Copilot's own file runs Codehere for this event, these stay quiet so nothing
+  // runs twice. Otherwise they are all Copilot has, and answer in its format.
+  if (agent !== 'copilot' && process.env.COPILOT_CLI && 'timestamp' in input) {
+    if (root && copilotFileRuns(root, event)) quiet();
+    agent = 'copilot';
+  }
+  if (agent === 'copilot') input = fromCopilot(input);
   if (!root) {
     // uninstall ran while this session was open: its hooks still run, .codehere/ is gone
     const at = event === 'stop' && removedAt(start);
@@ -46,9 +81,9 @@ export async function runHook(event, agent) {
     quiet();
   }
   try {
-    if (event === 'session-start') return sessionStart(root, input);
+    if (event === 'session-start') return sessionStart(root, input, agent);
     if (event === 'prompt') return promptSubmit(root, input);
-    if (event === 'post-tool') return postTool(root, input, agent === 'codex' ? 'codex' : 'claude');
+    if (event === 'post-tool') return postTool(root, input, agent === 'codex' || agent === 'copilot' ? agent : 'claude');
     if (event === 'stop') return stop(root, input);
   } catch (err) {
     if (process.env.CODEHERE_DEBUG) console.error(err);
@@ -58,7 +93,7 @@ export async function runHook(event, agent) {
 
 // ---------- SessionStart: load only human-confirmed context ----------
 
-function sessionStart(root, input) {
+function sessionStart(root, input, agent) {
   const state = readState(root);
   const s = session(state, input.session_id);
   s.transcript = input.transcript_path || s.transcript;
@@ -110,6 +145,8 @@ function sessionStart(root, input) {
   }
 
   writeState(root, state);
+  // Copilot reads only JSON here; Claude Code and Codex take the plain text
+  if (out.length && agent === 'copilot') emitJson({ additionalContext: out.join('\n') });
   if (out.length) process.stdout.write(out.join('\n') + '\n');
   quiet();
 }
@@ -125,7 +162,7 @@ function briefFile(root, file) {
 
 // ---------- what changed in THIS session ----------
 
-const IGNORE = (f) => f.startsWith('.codehere/') || f.startsWith('.claude/') || f.startsWith('.codex/');
+const IGNORE = (f) => ['.codehere/', '.claude/', '.codex/', '.github/copilot/', '.github/hooks/'].some((d) => f.startsWith(d));
 
 export function dirtySnapshot(root) {
   const files = statusFiles(root).filter((f) => !IGNORE(f));
@@ -155,21 +192,33 @@ function changedThisSession(root, s) {
 
 // Files that decide what Codehere runs and tells every agent, and the agents' own hook
 // settings. Claude Code and Codex load hooks at session start, so a hook removed mid-session
-// still runs at this session's finish check and can report it.
-const PROTECTED = ['.codehere/config.json', '.codehere/rules.md', '.claude/settings.json', '.claude/settings.local.json', '.codex/hooks.json', '.codex/config.toml'];
+// still runs at this session's finish check and can report it. Copilot runs every file in
+// .github/hooks/, so that folder counts as one.
+const PROTECTED = [
+  '.codehere/config.json', '.codehere/rules.md', '.claude/settings.json', '.claude/settings.local.json', '.codex/hooks.json', '.codex/config.toml',
+  '.github/hooks/', '.github/copilot/settings.json', '.github/copilot/settings.local.json',
+];
+
+function readProtected(root, f) {
+  if (!f.endsWith('/')) return fs.readFileSync(path.join(root, f), 'utf8');
+  const files = fs.readdirSync(path.join(root, f)).filter((n) => n.endsWith('.json')).sort();
+  if (!files.length) return null;
+  return files.map((n) => `${n}\0${fs.readFileSync(path.join(root, f, n), 'utf8')}`).join('\0');
+}
 
 function settingsSnapshot(root) {
   const snap = {};
   for (const f of PROTECTED) {
     let text = null;
     try {
-      text = fs.readFileSync(path.join(root, f), 'utf8');
+      text = readProtected(root, f);
     } catch {}
     // In .claude/ only the hook and env settings count: Claude Code also saves permission
     // rules there when the developer picks "don't ask again". env can move HOME or
     // XDG_CONFIG_HOME, where approvals are kept. A missing file has none of them.
     // Codex keeps what it saves in the user's own config, so .codex/ files count whole.
-    if (f.startsWith('.claude/')) {
+    // Copilot's settings files in .github/copilot/ count like .claude/; its hooks file is ours.
+    if (f.startsWith('.claude/') || f.startsWith('.github/copilot/')) {
       try {
         const j = JSON.parse(text ?? '{}');
         text = JSON.stringify([j.hooks ?? null, j.disableAllHooks ?? null, j.env ?? null]);
@@ -351,7 +400,9 @@ function postTool(root, input, agent) {
       );
     }
     // Codex replaces the command's output with a block's text (or exit 2's), so the agent
-    // would lose the error. There it goes in as context next to the output.
+    // would lose the error. There it goes in as context next to the output. Copilot shows
+    // exit 2 to the developer, not the agent, and takes context only in its own format.
+    if (agent === 'copilot') emitJson({ additionalContext: msg.join('\n') });
     if (agent === 'codex') {
       emitJson({
         ...(lesson ? { systemMessage: lessonLine(lesson) } : {}),
@@ -363,6 +414,7 @@ function postTool(root, input, agent) {
     toAgent(msg.join('\n') + '\n');
   }
 
+  if (lesson && agent === 'copilot') emitJson({ additionalContext: lessonText(root, lesson) });
   if (lesson) {
     emitJson({
       systemMessage: lessonLine(lesson),

@@ -25,7 +25,7 @@ const [command, ...rest] = pos;
 const USAGE = `codehere · a git-native team brain for vibe coders
 
 Setup
-  codehere init [--agent claude,codex] [--test "npm test"]
+  codehere init [--agent claude,codex,copilot] [--test "npm test"]
                                       set up .codehere/ and the agents' hooks (default: Claude Code)
   codehere approve                    let the finish check run the test command on this machine
   codehere uninstall                  remove Codehere's hooks, and .codehere/ if it holds no team content
@@ -48,7 +48,7 @@ When you're stuck
   codehere stats                      turns to green, loops stopped, session size
 
 Hooks (called by the agent, not by you)
-  codehere hook session-start | prompt | post-tool | stop [--agent codex]
+  codehere hook session-start | prompt | post-tool | stop [--agent codex|copilot]
 `;
 
 const run = async () => {

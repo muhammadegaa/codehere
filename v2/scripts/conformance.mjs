@@ -3,10 +3,11 @@
 //
 //   node scripts/conformance.mjs --agent claude --model haiku
 //   node scripts/conformance.mjs --agent codex --model qwen3.5:9b-q4_K_M --oss
+//   node scripts/conformance.mjs --agent copilot --model qwen3.5:9b-q4_K_M --oss [--bin <path to copilot>]
 //
 // Everything happens in a scratch folder: the repo, the approvals (XDG_CONFIG_HOME) and, for
-// Codex, its own CODEX_HOME, so the developer's real config is never read or changed. The
-// result goes to docs/conformance/<date>-<agent>-<version>.md.
+// Codex and Copilot, their own CODEX_HOME or COPILOT_HOME, so the developer's real config is
+// never read or changed. The result goes to docs/conformance/<date>-<agent>-<version>.md.
 //
 // L1  the team rules are in the model's context at the start
 // L2  after the tests fail, the teammate's lesson is in the model's context, once
@@ -25,8 +26,12 @@ const flag = (k) => (args.includes(`--${k}`) ? args[args.indexOf(`--${k}`) + 1] 
 const agent = flag('agent');
 const model = flag('model');
 const oss = args.includes('--oss');
-if (!['claude', 'codex'].includes(agent) || !model) {
-  console.error('Usage: node scripts/conformance.mjs --agent claude|codex --model <model> [--oss]');
+const copilotBin = flag('bin') || 'copilot';
+// Copilot also runs .claude/settings.json: --hooks claude installs only those, the case of a team
+// that never ran `init --agent copilot`; the default installs both, to check nothing runs twice.
+const claudeHooksOnly = agent === 'copilot' && flag('hooks') === 'claude';
+if (!['claude', 'codex', 'copilot'].includes(agent) || !model) {
+  console.error('Usage: node scripts/conformance.mjs --agent claude|codex|copilot --model <model> [--oss] [--bin <path>]');
   process.exit(1);
 }
 
@@ -43,6 +48,7 @@ const repo = path.join(tmp, 'shop');
 const env = { ...process.env, XDG_CONFIG_HOME: path.join(tmp, 'config'), PATH: `${path.join(tmp, 'bin')}:${process.env.PATH}` };
 delete env.ANTHROPIC_API_KEY; // claude -p uses the signed-in account
 if (agent === 'codex') env.CODEX_HOME = path.join(tmp, 'codex-home');
+if (agent === 'copilot') env.COPILOT_HOME = path.join(tmp, 'copilot-home');
 const sh = (cmd, cwd = repo) => execSync(cmd, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
 const write = (f, text) => {
   fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
@@ -52,14 +58,24 @@ const write = (f, text) => {
 // ---------- the repo: a failing test, a team rule, Ana's verified lesson ----------
 
 fs.mkdirSync(path.join(tmp, 'bin'));
-fs.writeFileSync(path.join(tmp, 'bin', 'codehere'), `#!/bin/sh\nexec node "${path.join(V2, 'bin', 'codehere.js')}" "$@"\n`, { mode: 0o755 });
+const calls = path.join(tmp, 'calls.tsv');
+// For Copilot, every hook call is logged with the size of what it printed: Copilot also runs the
+// Claude Code hooks, and those must print nothing. Other commands keep their terminal.
+const bin = path.join(V2, 'bin', 'codehere.js');
+fs.writeFileSync(
+  path.join(tmp, 'bin', 'codehere'),
+  agent === 'copilot'
+    ? `#!/bin/sh\n[ "$1" = hook ] || exec node "${bin}" "$@"\nout=$(node "${bin}" "$@"); code=$?\nprintf '%s\\t%s\\t%s\\n' "$*" "\${#out}" "$code" >> "${calls}"\nprintf '%s' "$out"\nexit $code\n`
+    : `#!/bin/sh\nexec node "${bin}" "$@"\n`,
+  { mode: 0o755 }
+);
 fs.mkdirSync(repo);
 sh('git init -q -b main && git config user.name Kai && git config user.email kai@example.com');
 write('package.json', JSON.stringify({ name: 'shop', type: 'module', scripts: { test: 'node --test' } }, null, 2) + '\n');
 write('src/price.js', 'export const parsePrice = (s) => Number(s);\n');
 write('test/price.test.js', "import test from 'node:test';\nimport assert from 'node:assert';\nimport { parsePrice } from '../src/price.js';\ntest('plain', () => assert.equal(parsePrice('12'), 12));\ntest('pound sign', () => assert.equal(parsePrice('£12'), 12));\n");
 sh('git add -A && git commit -qm shop');
-sh(`codehere init --agent ${agent}`);
+sh(`codehere init --agent ${agent !== 'copilot' ? agent : claudeHooksOnly ? 'claude' : 'claude,copilot'}`);
 // Approve as the developer would, from a terminal of their own: detached from this process, which
 // may run under an agent, and codehere refuses to be confirmed from under one.
 const approved = path.join(tmp, 'approved');
@@ -76,7 +92,7 @@ write(
 );
 sh('git add -A && git commit -qm "codehere, rule and lesson"');
 const start = sh('git rev-parse HEAD');
-if (!sh('codehere status').includes('approved on this machine')) throw new Error('setup: the test command is not approved');
+if (!sh('codehere status').includes('· approved on this machine')) throw new Error('setup: the test command is not approved');
 
 // ---------- the agent ----------
 
@@ -108,15 +124,35 @@ async function trustCodexHooks() {
   return again.result.data.flatMap((d) => d.hooks).filter((h) => h.source === 'project').map((h) => `${h.eventName} ${h.trustStatus}`);
 }
 
+// A local model for Copilot, in the scratch COPILOT_HOME only.
+function copilotLocalModel() {
+  fs.mkdirSync(env.COPILOT_HOME, { recursive: true });
+  const providers = {
+    providers: [{ name: 'local', type: 'openai', baseUrl: 'http://127.0.0.1:11434/v1', modelProvider: 'ollama' }],
+    models: [{ id: model, provider: 'local', maxPromptTokens: 24576, maxContextWindowTokens: 32768, maxOutputTokens: 4096, capabilities: { supports: { vision: false, toolCalls: true } } }],
+  };
+  fs.writeFileSync(path.join(env.COPILOT_HOME, 'providers.json'), JSON.stringify(providers, null, 2));
+}
+
 function runAgent(prompt) {
   const started = Date.now();
+  // --trust-folder answers Copilot's "do you trust this folder?" for this run only, as a developer would
+  const copilotArgs = [
+    '--trust-folder', '--no-ask-user', '--no-color', '--model', oss ? `local/${model}` : model,
+    '--log-dir', path.join(tmp, 'copilot-logs'), '--log-level', 'all',
+    '--allow-tool', 'shell(npm test)', '--allow-tool', 'shell(npm test --silent)', '--allow-tool', 'write', '-p', prompt,
+  ];
   const r =
     agent === 'claude'
       ? spawnSync('claude', ['-p', '--model', model, '--permission-mode', 'acceptEdits', '--allowedTools', 'Bash(npm test:*)', 'Bash(node --test:*)', '--output-format', 'json', prompt], { cwd: repo, env, encoding: 'utf8', timeout: 600000, input: '' })
-      : spawnSync('codex', ['exec', ...(oss ? ['--oss', '--local-provider', 'ollama'] : []), '-m', model, '-s', 'workspace-write', prompt], { cwd: repo, env, encoding: 'utf8', timeout: 900000, input: '' });
+      : agent === 'codex'
+        ? spawnSync('codex', ['exec', ...(oss ? ['--oss', '--local-provider', 'ollama'] : []), '-m', model, '-s', 'workspace-write', prompt], { cwd: repo, env, encoding: 'utf8', timeout: 900000, input: '' })
+        : spawnSync(copilotBin, copilotArgs, { cwd: repo, env, encoding: 'utf8', timeout: 900000, input: '' });
   const state = JSON.parse(fs.readFileSync(path.join(repo, '.codehere/local/state.json'), 'utf8'));
   const sid = state.lastSession;
-  return { sid, s: state.sessions[sid], seconds: Math.round((Date.now() - started) / 1000), exit: r.status, out: r.stdout || '', err: r.stderr || '' };
+  const s = state.sessions[sid];
+  if (agent === 'copilot') s.transcript = path.join(env.COPILOT_HOME, 'session-state', sid, 'events.jsonl');
+  return { sid, s, seconds: Math.round((Date.now() - started) / 1000), exit: r.status, out: r.stdout || '', err: r.stderr || '' };
 }
 
 // What the model was given, from the transcript the agent wrote.
@@ -140,6 +176,19 @@ function readTranscript(file) {
       lines: rows.filter((j) => j.type === 'attachment' && j.attachment.type === 'hook_system_message').map((j) => text(j.attachment.content)),
     };
   }
+  if (agent === 'copilot') {
+    // Copilot records a hook's output in hook.end, post-tool context inside the tool result, and a
+    // Stop block's reason as the next user message. What reached the model is in the debug log.
+    const startCtx = rows.filter((j) => j.type === 'hook.end' && j.data?.hookType === 'sessionStart').map((j) => text(j.data.output?.additionalContext));
+    const logs = path.join(tmp, 'copilot-logs');
+    return {
+      start: startCtx,
+      context: [...startCtx, ...rows.filter((j) => j.type === 'tool.execution_complete').map((j) => text(j.data?.result?.content))],
+      sent: fs.readdirSync(logs).flatMap((l) => fs.readFileSync(path.join(logs, l), 'utf8').split('\n')).filter((l) => /^\s*"content": /.test(l)),
+      prompts: rows.filter((j) => j.type === 'user.message').map((j) => text(j.data?.content)),
+      lines: null, // Copilot has no field for a line to the developer
+    };
+  }
   const items = rows.filter((j) => j.type === 'response_item');
   const firstCall = items.findIndex((j) => /_call$/.test(j.payload?.type || ''));
   const messages = items.map((j, i) => ({ i, type: j.payload?.type, role: j.payload?.role, text: text(j.payload?.content) })).filter((m) => m.type === 'message');
@@ -152,8 +201,9 @@ function readTranscript(file) {
   };
 }
 
-const version = (agent === 'claude' ? sh('claude --version', tmp) : sh('codex --version', tmp)).match(/\d+\.\d+\.\d+/)[0];
+const version = sh(`"${agent === 'copilot' ? copilotBin : agent}" --version`, tmp).match(/\d+\.\d+\.\d+/)[0];
 const trust = agent === 'codex' ? await trustCodexHooks() : null;
+if (agent === 'copilot' && oss) copilotLocalModel();
 const results = [];
 const verdict = (id, name, status, evidence) => results.push({ id, name, status, evidence });
 
@@ -183,18 +233,33 @@ verdict(
   !blocks ? 'Codehere sent nothing back (did the agent change src/price.js?)' : `Codehere sent the agent back ${blocks} time(s); ${sentBack} next prompt(s) hold the reason`
 );
 
+if (agent === 'copilot' && !claudeHooksOnly) {
+  const hookCalls = fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => l.split('\t')).filter(([a]) => a.startsWith('hook ')) : [];
+  const fromClaudeFile = hookCalls.filter(([a]) => !a.includes('--agent copilot'));
+  const own = hookCalls.filter(([a]) => a.includes('--agent copilot'));
+  verdict(
+    'L4',
+    "Nothing runs twice: Copilot also runs the Claude Code hooks, and they print nothing",
+    !fromClaudeFile.length || !own.length ? 'BLOCKED' : fromClaudeFile.every(([, size]) => size === '0') ? 'PASS' : 'FAIL',
+    `${own.length} call(s) from .github/hooks/codehere.json; ${fromClaudeFile.length} from .claude/settings.json, ${fromClaudeFile.filter(([, size]) => size !== '0').length} of them printed something`
+  );
+}
+
 // ---------- result file ----------
 
 const today = new Date().toISOString().slice(0, 10);
+// a --bin path can name the developer's home folder: keep only the file name
+const shownArgs = args.map((a, i) => (args[i - 1] === '--bin' ? `<path>/${path.basename(a)}` : a)).join(' ');
 const build = `${JSON.parse(fs.readFileSync(path.join(V2, 'package.json'), 'utf8')).version} at ${execSync('git rev-parse --short HEAD', { cwd: V2 }).toString().trim()}${execSync('git status --porcelain -- src bin', { cwd: V2 }).toString().trim() ? ' plus uncommitted changes' : ''}`;
-const name = agent === 'claude' ? 'Claude Code' : 'Codex CLI';
-const lines = (t) => (t.lines ? t.lines.map((l) => `\`${l}\``).join('<br>') || 'none' : 'not recorded by Codex');
+const name = { claude: 'Claude Code', codex: 'Codex CLI', copilot: 'Copilot CLI' }[agent];
+const lines = (t) => (t.lines ? t.lines.map((l) => `\`${l}\``).join('<br>') || 'none' : `not recorded by ${name}`);
 const md = [
   `# Conformance: ${name} ${version}, ${today}`,
   '',
-  `Codehere ${build}. Model: ${model}${oss ? ' through Ollama (`codex exec --oss`)' : ''}. Run with \`node scripts/conformance.mjs ${args.join(' ')}\`, in a scratch folder with its own approvals${agent === 'codex' ? ' and CODEX_HOME' : ''}.`,
+  `Codehere ${build}. Model: ${model}${oss ? (agent === 'codex' ? ' through Ollama (`codex exec --oss`)' : ' through Ollama, as a provider in the scratch providers.json') : ''}. Run with \`node scripts/conformance.mjs ${shownArgs}\`, in a scratch folder with its own approvals${agent === 'codex' ? ' and CODEX_HOME' : agent === 'copilot' ? ' and COPILOT_HOME' : ''}.`,
   ...(trust ? ['', `Codex hooks trusted in the scratch CODEX_HOME by writing their \`trusted_hash\` through Codex's app-server (\`hooks/list\`, \`config/batchWrite\`), not through the \`/hooks\` screen: ${trust.join(', ')}.`] : []),
   ...(agent === 'claude' ? ['', 'Claude Code ran with the user\'s own `~/.claude` settings and user-level hooks.'] : []),
+  ...(agent === 'copilot' ? ['', `Copilot ran with \`--trust-folder\` (trust for this run only) and could run only \`npm test\` and edit files. Hooks installed: ${claudeHooksOnly ? '`.claude/settings.json` only' : '`.claude/settings.json` and `.github/hooks/codehere.json`'}.`] : []),
   '',
   '| Check | Result | Evidence |',
   '|---|---|---|',
@@ -210,7 +275,7 @@ const md = [
 ].join('\n');
 const outDir = path.join(V2, 'docs', 'conformance');
 fs.mkdirSync(outDir, { recursive: true });
-const outFile = path.join(outDir, `${today}-${agent}-${version}-${model.replace(/[^a-z0-9.]+/gi, '-')}.md`);
+const outFile = path.join(outDir, `${today}-${agent}-${version}-${model.replace(/[^a-z0-9.]+/gi, '-')}${claudeHooksOnly ? '-claude-hooks-only' : ''}.md`);
 fs.writeFileSync(outFile, md);
 console.log(md);
 console.log(`Written: ${path.relative(V2, outFile)}\nScratch folder: ${tmp}`);

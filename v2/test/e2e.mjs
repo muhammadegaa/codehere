@@ -54,11 +54,12 @@ function atTerminal(args, cwd, answer, env = {}) {
 const agentBin = path.join(tmp, 'agent-bin');
 fs.mkdirSync(agentBin);
 fs.copyFileSync(process.execPath, path.join(agentBin, 'codex'), fs.constants.COPYFILE_FICLONE);
-const underAgent = (args, cwd, answer) => {
+const underAgent = (args, cwd, answer, name = 'codex') => {
   const run = `node "${BIN}" ${args}`;
   const term = process.platform === 'darwin' ? `script -q /dev/null ${run}` : `script -qec '${run}' /dev/null`;
   const shell = `(sleep 0.8; printf '${answer}\\r'; sleep 0.5) | ${term}`;
-  const x = spawnSync(path.join(agentBin, 'codex'), ['-e', `process.exit(require('child_process').spawnSync('bash', ['-c', ${JSON.stringify(shell)}], { stdio: 'inherit' }).status)`], { cwd, encoding: 'utf8' });
+  if (!fs.existsSync(path.join(agentBin, name))) fs.copyFileSync(process.execPath, path.join(agentBin, name), fs.constants.COPYFILE_FICLONE);
+  const x = spawnSync(path.join(agentBin, name), ['-e', `process.exit(require('child_process').spawnSync('bash', ['-c', ${JSON.stringify(shell)}], { stdio: 'inherit' }).status)`], { cwd, encoding: 'utf8' });
   return { code: x.status, out: x.stdout || '' };
 };
 
@@ -845,7 +846,7 @@ const cy = freshRepo('cy', { '.codex/hooks.json': JSON.stringify({ hooks: { Stop
 r = ch(['init', '--agent', 'claude,codex'], cy);
 check('--agent claude,codex installs both and keeps hooks that were there', commandsIn(path.join(cy, '.codex/hooks.json')).some((h) => h.command === 'other-tool stop') && commandsIn(path.join(cy, '.codex/hooks.json')).length === 5 && commandsIn(path.join(cy, '.claude/settings.json')).some((h) => h.command === 'codehere hook stop'), r.out);
 const cz = freshRepo('cz');
-r = ch(['init', '--agent', 'copilot'], cz);
+r = ch(['init', '--agent', 'aider'], cz);
 check('an unknown agent exits 1 and writes nothing', r.code === 1 && !fs.existsSync(path.join(cz, '.codehere')) && !fs.existsSync(path.join(cz, '.codex')) && sh('git status --porcelain', cz) === '', r.out + r.err);
 
 // The scenario of section 21, driven by inputs recorded from real sessions (test/fixtures/payloads)
@@ -1069,6 +1070,203 @@ for (const bad of ['constructor', '__proto__', 'claude,']) {
   r = ch(['init', '--agent', bad], a8);
   check(`--agent ${bad} exits 1 and writes nothing`, r.code === 1 && sh('git status --porcelain', a8) === '', r.out + r.err);
 }
+
+console.log('\n25. Copilot CLI: install, the same scenario, nothing runs twice, uninstall');
+// Copilot's own file lists each hook directly under a camelCase event, with timeoutSec
+const copilotHooks = (dir) => {
+  const f = path.join(dir, '.github/hooks/codehere.json');
+  if (!fs.existsSync(f)) return [];
+  return Object.entries(readJson(f).hooks || {}).flatMap(([e, hs]) => hs.map((h) => [e, h.matcher || null, h.command, h.timeoutSec || null]));
+};
+const cp1 = freshRepo('cp1');
+r = ch(['init', '--agent', 'copilot'], cp1);
+check(
+  'init --agent copilot writes the four Copilot hooks in its own format',
+  r.code === 0 &&
+    readJson(path.join(cp1, '.github/hooks/codehere.json')).version === 1 &&
+    JSON.stringify(copilotHooks(cp1)) ===
+      JSON.stringify([
+        ['sessionStart', null, 'codehere hook session-start --agent copilot', null],
+        ['userPromptSubmitted', null, 'codehere hook prompt --agent copilot', 10],
+        ['postToolUse', 'bash', 'codehere hook post-tool --agent copilot', null],
+        ['agentStop', null, 'codehere hook stop --agent copilot', 180],
+      ]) &&
+    !fs.existsSync(path.join(cp1, '.claude')),
+  r.out + JSON.stringify(copilotHooks(cp1))
+);
+check('init tells Copilot users to trust the folder', /folder you trust/.test(r.out), r.out);
+const cp1Before = fs.readFileSync(path.join(cp1, '.github/hooks/codehere.json'), 'utf8');
+ch(['init', '--agent', 'copilot'], cp1);
+check('init --agent copilot twice adds nothing', fs.readFileSync(path.join(cp1, '.github/hooks/codehere.json'), 'utf8') === cp1Before);
+const cp5 = freshRepo('cp5', { '.github/hooks/codehere.json': JSON.stringify({ version: 1, hooks: { agentStop: [{ type: 'command', command: 'other-tool stop' }] } }) });
+ch(['init', '--agent', 'copilot'], cp5);
+check('init --agent copilot keeps a hook already in the Copilot file', copilotHooks(cp5).length === 5 && copilotHooks(cp5)[0][2] === 'other-tool stop', JSON.stringify(copilotHooks(cp5)));
+const cp2 = freshRepo('cp2');
+r = ch(['init', '--agent', 'claude,codex,copilot'], cp2);
+check('--agent claude,codex,copilot installs all three', r.code === 0 && copilotHooks(cp2).length === 4 && commandsIn(path.join(cp2, '.codex/hooks.json')).length === 4 && commandsIn(path.join(cp2, '.claude/settings.json')).length === 5, r.out);
+
+// The scenario of section 23 on inputs recorded from Copilot CLI 1.0.105
+const copilotRec = fixture('copilot-cli-1.0.105.jsonl');
+const cop = (event, dir, sid, extra = {}) => ({ ...copilotRec.find((x) => x.format === 'camel' && x.event === event).input, cwd: dir, sessionId: sid, ...extra });
+const copClaudeFile = (event, dir, sid, extra = {}) => ({ ...copilotRec.find((x) => x.format === 'claude-file' && x.event === event).input, cwd: dir, session_id: sid, ...extra });
+const HC = (event, dir, input, agent, env = {}) => {
+  const x = spawnSync('node', [BIN, 'hook', event, ...(agent ? ['--agent', agent] : [])], { cwd: dir, input: JSON.stringify(input), encoding: 'utf8', env: { ...process.env, COPILOT_CLI: '', ...env } });
+  let j = {};
+  try {
+    j = x.stdout ? JSON.parse(x.stdout) : {};
+  } catch {}
+  return { code: x.status, out: x.stdout, err: x.stderr, j };
+};
+ch(['init', '--agent', 'copilot'], kai);
+sh('git add -A && git commit -qm "copilot too"', kai);
+// Copilot reports a failed command as a successful tool call; the exit code is on the last line
+const copilotFail = (sid) => cop('post-tool', kai, sid, { toolArgs: { command: 'npm test', description: 'Run the tests' }, toolResult: { resultType: 'success', textResultForLlm: `${priceText}\n<shellId: 0 completed with exit code 1>` } });
+r = HC('session-start', kai, cop('session-start', kai, 'p1'), 'copilot');
+check('Copilot, session start: the team rules go in as JSON additionalContext', r.code === 0 && (r.j.additionalContext || '').includes('- Prices are integer pence'), r.out);
+r = HC('post-tool', kai, copilotFail('p1'), 'copilot');
+check(
+  "Copilot, failed command: Ana's lesson as additionalContext, nothing blocked",
+  r.code === 0 && (r.j.additionalContext || '').startsWith('Codehere: a teammate solved a similar error before.') && !('decision' in r.j) && !('hookSpecificOutput' in r.j),
+  r.out
+);
+HC('post-tool', kai, copilotFail('p1'), 'copilot');
+r = HC('post-tool', kai, copilotFail('p1'), 'copilot');
+check(
+  'Copilot, third repeat: the loop breaker goes to the agent as additionalContext, never as exit 2 (Copilot shows that to the developer only)',
+  r.code === 0 && r.err === '' && !('decision' in r.j) && (r.j.additionalContext || '').includes('the same error has come back 3 times'),
+  `${r.code} ${r.out} ${r.err}`
+);
+r = HC('post-tool', kai, cop('post-tool', kai, 'p1', { toolArgs: { command: 'npm test' }, toolResult: { resultType: 'success', textResultForLlm: 'ok\n<shellId: 1 completed with exit code 0>' } }), 'copilot');
+check('Copilot, the same command passing clears the failure', r.code === 0 && r.out === '' && readJson(path.join(kai, '.codehere/local/state.json')).sessions.p1.lastFailure === null, r.out);
+r = HC('prompt', kai, cop('prompt', kai, 'p1', { prompt: 'still broken' }), 'copilot');
+check('Copilot, prompt: the turn is counted (Copilot drops any output)', r.code === 0 && readJson(path.join(kai, '.codehere/local/state.json')).sessions.p1.prompts === 1, r.out);
+
+HC('session-start', kai, cop('session-start', kai, 'p2'), 'copilot');
+fs.writeFileSync(path.join(kai, 'src/price.js'), 'export const parsePrice = (s) => Number(s);\n');
+const copilotStops = [];
+for (let i = 0; i < 4; i++) copilotStops.push(HC('stop', kai, cop('stop', kai, 'p2', { stop_hook_active: i > 0 }), 'copilot'));
+check(
+  'Copilot, finish check: sent back with the reason, 3 times at most',
+  copilotStops.filter((x) => x.j.decision === 'block').length === 3 && copilotStops[0].j.reason.startsWith('Codehere ran `npm test --silent` and it failed.') && !copilotStops[3].j.decision,
+  copilotStops.map((x) => x.out).join('\n')
+);
+sh('git checkout -q -- src/price.js', kai);
+HC('session-start', kai, cop('session-start', kai, 'p3'), 'copilot');
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HC('stop', kai, cop('stop', kai, 'p3'), 'copilot');
+check('Copilot, finish check: a pass does not send the agent back', r.code === 0 && !('decision' in r.j) && /^codehere ✓ npm test --silent · 2 passed/.test(r.j.systemMessage || ''), r.out);
+sh('git checkout -q -- src/price.js', kai);
+
+// Copilot also runs .claude/settings.json: those hooks stay quiet, so each action happens once
+const COPILOT = { COPILOT_CLI: '1' };
+r = HC('session-start', kai, copClaudeFile('session-start', kai, 'p4'), undefined, COPILOT);
+check('under Copilot, the Claude Code session-start hook says nothing', r.code === 0 && r.out === '', r.out);
+fs.writeFileSync(path.join(kai, 'src/price.js'), 'export const parsePrice = (s) => Number(s);\n');
+r = HC('post-tool', kai, copClaudeFile('post-tool', kai, 'p4', { tool_input: { command: 'npm test' }, tool_result: { result_type: 'success', text_result_for_llm: `${priceText}\n<shellId: 0 completed with exit code 1>` } }), undefined, COPILOT);
+r2 = HC('stop', kai, copClaudeFile('stop', kai, 'p4'), undefined, COPILOT);
+check('under Copilot, the Claude Code post-tool and stop hooks say nothing and send nothing back', r.out === '' && r.code === 0 && r2.out === '' && r2.code === 0, r.out + r2.out);
+check('under Copilot, the Claude Code hooks keep no session', !('p4' in readJson(path.join(kai, '.codehere/local/state.json')).sessions));
+sh('git checkout -q -- src/price.js', kai);
+r = HC('session-start', kai, copClaudeFile('session-start', kai, 'p5'));
+check('the same input outside Copilot is handled as before', r.out.includes('- Prices are integer pence'), r.out);
+r = HC('session-start', kai, recorded(claudeRec, 'session-start', kai, 'c5'), undefined, COPILOT);
+check('Claude Code started from a Copilot shell still works (its input has no timestamp)', r.out.includes('- Prices are integer pence'), r.out);
+
+// Without Copilot's own file, the Claude Code hooks are all Copilot runs: they answer in its format
+const kaiCopilotFile = path.join(kai, '.github/hooks/codehere.json');
+const kaiCopilotSaved = fs.readFileSync(kaiCopilotFile, 'utf8');
+fs.rmSync(kaiCopilotFile);
+r = HC('session-start', kai, copClaudeFile('session-start', kai, 'p8'), undefined, COPILOT);
+check('Claude Code hooks only, under Copilot: the team rules go in as JSON additionalContext, in this session', (r.j.additionalContext || '').includes('- Prices are integer pence') && 'p8' in readJson(path.join(kai, '.codehere/local/state.json')).sessions, r.out);
+fs.writeFileSync(path.join(kai, 'src/price.js'), 'export const parsePrice = (s) => Number(s);\n');
+r = HC('post-tool', kai, copClaudeFile('post-tool', kai, 'p8', { tool_input: { command: 'npm test' }, tool_result: { result_type: 'success', text_result_for_llm: `${priceText}\n<shellId: 0 completed with exit code 1>` } }), undefined, COPILOT);
+check("Claude Code hooks only, under Copilot: Ana's lesson as additionalContext", (r.j.additionalContext || '').startsWith('Codehere: a teammate solved a similar error before.'), r.out);
+r = HC('stop', kai, copClaudeFile('stop', kai, 'p8'), undefined, COPILOT);
+check('Claude Code hooks only, under Copilot: the finish check still sends the agent back', r.j.decision === 'block' && r.j.reason.startsWith('Codehere ran `npm test --silent` and it failed.'), r.out);
+sh('git checkout -q -- src/price.js', kai);
+// a Copilot file that no longer runs Codehere for an event does not silence that event
+const stripped = JSON.parse(kaiCopilotSaved);
+stripped.hooks.agentStop = [{ type: 'command', command: 'codehere hook stop' }];
+fs.writeFileSync(kaiCopilotFile, JSON.stringify(stripped));
+HC('session-start', kai, copClaudeFile('session-start', kai, 'p9'), undefined, COPILOT);
+fs.writeFileSync(path.join(kai, 'src/price.js'), 'export const parsePrice = (s) => Number(s);\n');
+r = HC('stop', kai, copClaudeFile('stop', kai, 'p9'), undefined, COPILOT);
+check('a Copilot file whose stop hook lost --agent copilot does not silence the finish check', r.j.decision === 'block', r.out);
+fs.writeFileSync(kaiCopilotFile, kaiCopilotSaved);
+sh('git checkout -q -- src/price.js', kai);
+
+// Copilot's settings are protected in every agent's session, and are not code changes
+const kaiCopilot = path.join(kai, '.github/hooks/codehere.json');
+const kaiCopilotText = fs.readFileSync(kaiCopilot, 'utf8');
+HC('session-start', kai, cop('session-start', kai, 'p6'), 'copilot');
+fs.writeFileSync(kaiCopilot, JSON.stringify({ version: 1, hooks: {} }));
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HC('stop', kai, cop('stop', kai, 'p6'), 'copilot');
+check('Copilot session: removing Codehere from its hooks file sends the agent back once', r.j.decision === 'block' && r.j.reason.includes('- .github/hooks/'), r.out);
+fs.writeFileSync(kaiCopilot, kaiCopilotText);
+sh('git checkout -q -- src/price.js', kai);
+HC('session-start', kai, cop('session-start', kai, 'p10'), 'copilot');
+fs.writeFileSync(path.join(kai, '.github/hooks/zz.json'), JSON.stringify({ version: 1, hooks: { agentStop: [{ type: 'command', command: 'echo {}' }] } }));
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HC('stop', kai, cop('stop', kai, 'p10'), 'copilot');
+check('Copilot session: a new hook file next to Codehere\'s is reported (Copilot runs them all)', r.j.decision === 'block' && r.j.reason.includes('- .github/hooks/'), r.out);
+fs.rmSync(path.join(kai, '.github/hooks/zz.json'));
+sh('git checkout -q -- src/price.js', kai);
+HC('session-start', kai, cop('session-start', kai, 'p11'), 'copilot');
+fs.mkdirSync(path.join(kai, '.github/copilot'), { recursive: true });
+fs.writeFileSync(path.join(kai, '.github/copilot/settings.local.json'), JSON.stringify({ model: 'some-model' }));
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HC('stop', kai, cop('stop', kai, 'p11'), 'copilot');
+check('a setting other than hooks in .github/copilot/settings.local.json is not reported', !r.j.decision && !(r.j.systemMessage || '').includes('settings changed'), r.out);
+fs.rmSync(path.join(kai, '.github/copilot'), { recursive: true });
+sh('git checkout -q -- src/price.js', kai);
+// .github/hooks/ is hook settings, not code: it is not among the files a short prompt is told about
+HC('session-start', kai, recorded(claudeRec, 'session-start', kai, 'c6'));
+fs.writeFileSync(path.join(kai, 'src/price.js'), 'export const parsePrice = (s) => Number(s);\n');
+fs.writeFileSync(kaiCopilot, kaiCopilotText.replace('"version": 1', '"version": 1 '));
+HX('post-tool', kai, claudeFail('c6'));
+r = HX('prompt', kai, recorded(claudeRec, 'prompt', kai, 'c6', { prompt: 'still broken' }));
+check('files changed in .github/hooks/ are not listed as code changes', (r.j.hookSpecificOutput?.additionalContext || '').includes('- Files changed this session: src/price.js') && !(r.j.hookSpecificOutput?.additionalContext || '').includes('.github'), r.out);
+fs.writeFileSync(kaiCopilot, kaiCopilotText);
+sh('git checkout -q -- src/price.js', kai);
+HC('session-start', kai, recorded(codexRec, 'session-start', kai, 'x6'), 'codex');
+fs.mkdirSync(path.join(kai, '.github/copilot'), { recursive: true });
+fs.writeFileSync(path.join(kai, '.github/copilot/settings.json'), JSON.stringify({ disableAllHooks: true }));
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HX('stop', kai, recorded(codexRec, 'stop', kai, 'x6'), 'codex');
+check("Codex session: switching off Copilot's hooks is reported too", r.j.decision === 'block' && r.j.reason.includes('- .github/copilot/settings.json'), r.out);
+fs.rmSync(path.join(kai, '.github/copilot'), { recursive: true });
+sh('git checkout -q -- src/price.js', kai);
+HC('session-start', kai, cop('session-start', kai, 'p7'), 'copilot');
+fs.mkdirSync(path.join(kai, '.github/copilot'), { recursive: true });
+fs.writeFileSync(path.join(kai, '.github/copilot/notes.md'), 'scratch\n');
+r = HC('stop', kai, cop('stop', kai, 'p7'), 'copilot');
+check('a file under .github/copilot/ is not a code change: nothing to check, nothing said', r.out === '' && r.code === 0, r.out);
+fs.rmSync(path.join(kai, '.github/copilot'), { recursive: true });
+
+r = ch(['status'], kai);
+check('status lists Copilot CLI', r.out.includes('- Agents: Claude Code, Codex CLI, Copilot CLI'), r.out);
+
+const cp6 = freshRepo('cp6', { 'package.json': JSON.stringify({ name: 'cp6', scripts: { test: 'node -e 0' } }) });
+ch(['init', '--agent', 'copilot'], cp6);
+r = underAgent('approve', cp6, 'y', 'copilot');
+check('approve from a terminal opened under a process named copilot is refused', r.code === 1 && /own terminal/.test(r.out) && !ch(['status'], cp6).out.includes('· approved on this machine'), r.out);
+
+// uninstall
+const cp3 = freshRepo('cp3', { '.github/workflows/ci.yml': 'on: push\n' });
+ch(['init', '--agent', 'copilot'], cp3);
+r = atTerminal('uninstall', cp3, 'y');
+check('uninstall removes the Copilot hooks file and its empty folder, and keeps the rest of .github/', r.code === 0 && !fs.existsSync(path.join(cp3, '.github/hooks')) && fs.existsSync(path.join(cp3, '.github/workflows/ci.yml')) && sh('git status --porcelain --ignored', cp3) === '', r.out + sh('git status --porcelain --ignored', cp3));
+const cp4 = freshRepo('cp4');
+ch(['init', '--agent', 'copilot'], cp4);
+const cp4hooks = readJson(path.join(cp4, '.github/hooks/codehere.json'));
+cp4hooks.hooks.agentStop.push({ type: 'command', command: 'other-tool stop' });
+fs.writeFileSync(path.join(cp4, '.github/hooks/codehere.json'), JSON.stringify(cp4hooks));
+atTerminal('uninstall', cp4, 'y');
+check('uninstall keeps a hook someone else added to the Copilot file', JSON.stringify(copilotHooks(cp4)) === JSON.stringify([['agentStop', null, 'other-tool stop', null]]));
+ch(['init', '--agent', 'claude,codex,copilot'], cp2);
+atTerminal('uninstall', cp2, 'y');
+check('init for all three agents, then uninstall: no .github/ left and git status is clean', !fs.existsSync(path.join(cp2, '.github')) && sh('git status --porcelain --ignored', cp2) === '', sh('git status --porcelain --ignored', cp2));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (!process.env.KEEP) fs.rmSync(tmp, { recursive: true, force: true }); else console.log(tmp);
