@@ -21,7 +21,7 @@ Codehere is built to remove work, not add it. You keep using Claude Code, Codex 
 ## Install (2 minutes)
 
 ```bash
-npm install -g codehere@next   # the 2.0 beta; codehere@latest is still 1.x
+npm install -g codehere
 cd your-project
 codehere init --agent claude,codex,copilot   # finds your test command, adds the hooks, asks you to approve the command
 git add .codehere .claude/settings.json .codex/hooks.json .github/hooks/codehere.json .gitignore
@@ -30,7 +30,7 @@ git commit -m "Add Codehere" && git push
 
 Name only the agents your team uses, such as `--agent claude` or `--agent codex,copilot`; with no `--agent`, `init` sets up Claude Code. The hooks go in `.claude/settings.json`, `.codex/hooks.json` and `.github/hooks/codehere.json`.
 
-Each teammate installs the CLI once (`npm install -g codehere@next`) and runs `codehere approve` once in the repo. Until they do, their agent tells them at session start that the test check is off. The hooks and the brain arrive through git.
+Each teammate installs the CLI once (`npm install -g codehere`) and runs `codehere approve` once in the repo. Until they do, their agent tells them at session start that the test check is off. The hooks and the brain arrive through git.
 
 Codex runs a repo's hooks only after each developer trusts them. Open Codex in the repo, trust the project if asked, then type `/hooks` and trust the four Codehere hooks. Do it once per clone, and again after an update that changes the hooks. Until then Codex skips them, and `codex exec` does not warn.
 
@@ -137,7 +137,7 @@ node demo/demo.mjs --step   # press Enter between scenes (good for a live talk)
 npm test                    # end-to-end checks
 ```
 
-## Known limits (2.0 beta)
+## Known limits
 
 - Claude Code, Codex CLI and Copilot CLI. OpenCode is next. Copilot in VS Code reads the same hook files but has not been checked, and Copilot's cloud agent is not supported. See [Which agents](#which-agents) for what works on each.
 - Lessons match by error text. Very generic errors can bring up a lesson that doesn't fit, which is why the agent gets it as reference, not as an instruction.

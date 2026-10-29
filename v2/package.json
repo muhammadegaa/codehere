@@ -1,6 +1,6 @@
 {
   "name": "codehere",
-  "version": "2.0.0-beta.3",
+  "version": "2.0.0",
   "description": "A git-native team brain for vibe coders. Silent fixes for AI coding agents: breaks doom loops, verifies 'done', blocks test tampering, and shares what your team learned.",
   "repository": {
     "type": "git",
