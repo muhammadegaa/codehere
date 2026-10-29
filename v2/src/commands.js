@@ -170,14 +170,16 @@ const PS = fs.existsSync('/bin/ps') ? '/bin/ps' : '/usr/bin/ps';
 function underAgent() {
   let pid = process.ppid;
   for (let i = 0; i < 100 && pid > 1; i++) {
-    let line;
+    let line, args;
     try {
       line = execFileSync(PS, ['-o', 'ppid=,comm=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      args = execFileSync(PS, ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     } catch {
       return true;
     }
     const m = /^(\d+)\s+(.+)$/.exec(line);
-    if (!m || AGENT_PROCESSES.has(path.basename(m[2]).toLowerCase())) return true;
+    // on Linux, comm can be a thread name and not the program (seen with Node 24), so argv[0] counts too
+    if (!m || [m[2], args.split(/\s/, 1)[0]].some((n) => AGENT_PROCESSES.has(path.basename(n).toLowerCase()))) return true;
     pid = Number(m[1]);
   }
   return pid > 1;

@@ -54,12 +54,16 @@ function atTerminal(args, cwd, answer, env = {}) {
 const agentBin = path.join(tmp, 'agent-bin');
 fs.mkdirSync(agentBin);
 fs.copyFileSync(process.execPath, path.join(agentBin, 'codex'), fs.constants.COPYFILE_FICLONE);
-const underAgent = (args, cwd, answer, name = 'codex') => {
+// argv0: the agent's name only in argv[0], as ps on Linux shows a Node process's thread name as its comm
+const underAgent = (args, cwd, answer, name = 'codex', argv0 = false) => {
   const run = `node "${BIN}" ${args}`;
   const term = process.platform === 'darwin' ? `script -q /dev/null ${run}` : `script -qec '${run}' /dev/null`;
   const shell = `(sleep 0.8; printf '${answer}\\r'; sleep 0.5) | ${term}`;
   if (!fs.existsSync(path.join(agentBin, name))) fs.copyFileSync(process.execPath, path.join(agentBin, name), fs.constants.COPYFILE_FICLONE);
-  const x = spawnSync(path.join(agentBin, name), ['-e', `process.exit(require('child_process').spawnSync('bash', ['-c', ${JSON.stringify(shell)}], { stdio: 'inherit' }).status)`], { cwd, encoding: 'utf8' });
+  const code = `process.exit(require('child_process').spawnSync('bash', ['-c', ${JSON.stringify(shell)}], { stdio: 'inherit' }).status)`;
+  const x = argv0
+    ? spawnSync('bash', ['-c', `exec -a ${name} "$1" -e "$2"`, 'bash', process.execPath, code], { cwd, encoding: 'utf8' })
+    : spawnSync(path.join(agentBin, name), ['-e', code], { cwd, encoding: 'utf8' });
   return { code: x.status, out: x.stdout || '' };
 };
 
@@ -372,6 +376,8 @@ r = atTerminal('approve', budi, 'n');
 check('approve at a terminal, answer "n": not approved', r.out.includes('Not approved') && approvalsOf(budi).length === 0, r.out);
 r = underAgent('approve', budi, 'y');
 check('approve from a terminal opened under an agent process is refused', r.code === 1 && /own terminal/.test(r.out) && approvalsOf(budi).length === 0, r.out);
+r = underAgent('approve', budi, 'y', 'codex', true);
+check('approve under a process started as codex (argv[0] only) is refused', r.code === 1 && /own terminal/.test(r.out) && approvalsOf(budi).length === 0, r.out);
 r = atTerminal('approve', budi, 'y');
 check('approve shows the command and who last changed it in git, "y" approves', r.out.includes('npm test --silent') && r.out.includes('Last changed in git by Ana') && approvalsOf(budi).includes('npm test --silent'), r.out);
 r = S('t1', budi);
