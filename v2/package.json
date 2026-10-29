@@ -1,13 +1,13 @@
 {
   "name": "codehere",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "A git-native team brain for vibe coders. Silent fixes for AI coding agents: breaks doom loops, verifies 'done', blocks test tampering, and shares what your team learned.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/muhammadegaa/codehere.git",
     "directory": "v2"
   },
-  "homepage": "https://github.com/muhammadegaa/codehere/tree/v2-team-brain/v2#readme",
+  "homepage": "https://github.com/muhammadegaa/codehere/tree/main/v2#readme",
   "type": "module",
   "bin": {
     "codehere": "bin/codehere.js"
