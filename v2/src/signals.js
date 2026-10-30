@@ -57,7 +57,7 @@ export function failingTest(text) {
   const t = stripAnsi(text);
   const m =
     t.match(/^\s*(?:✖|×|✗|not ok \d+ -)\s+(?!failing tests)(.+?)(?:\s+\(?\d[\d.]*\s?m?s\)?)?\s*$/m) ||
-    t.match(/^\s*●\s+(.+?)\s*$/m) ||
+    t.match(/^\s*●\s+(?!Console\s*$)(.+?)\s*$/m) ||
     t.match(/^FAILED\s+(\S+)/m) ||
     t.match(/^--- FAIL:\s+(\S+)/m);
   return m ? m[1].trim().slice(0, 120) : null;

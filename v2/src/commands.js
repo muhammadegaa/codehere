@@ -440,7 +440,10 @@ function repeatedErrors(s) {
   return Object.entries(s.errors || {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
-    .map(([sig, n]) => ({ sig, n, raw: (s.rawErrors || {})[sig] || [] }));
+    .map(([sig, n]) => {
+      const test = s.tests && s.tests[sig];
+      return { sig, n, raw: (s.rawErrors || {})[sig] || [], test: typeof test === 'string' ? test : '' };
+    });
 }
 
 function gitSummary(root, base) {
@@ -552,7 +555,7 @@ export async function help(question, flags) {
   fs.writeFileSync(
     file,
     renderDoc(
-      { id, author: me(root), date: today(), status: 'open', signature: errs[0] ? errs[0].sig : '' },
+      { id, author: me(root), date: today(), status: 'open', signature: errs[0] ? errs[0].sig : '', ...(errs[0]?.test ? { test: redact(errs[0].test).slice(0, 120) } : {}) },
       text
     )
   );
@@ -614,7 +617,7 @@ export function reply(id, text, flags) {
     fs.writeFileSync(
       lessonFile,
       renderDoc(
-        { title: q, signature: meta.signature || q, author: who, date: today(), from: `help/${d.id}` },
+        { title: q, signature: meta.signature || q, ...(meta.test ? { test: meta.test } : {}), author: who, date: today(), from: `help/${d.id}` },
         `## Fix\n- ${text}\n`
       )
     );

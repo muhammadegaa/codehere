@@ -140,7 +140,7 @@ npm test                    # end-to-end checks
 ## Known limits
 
 - Claude Code, Codex CLI and Copilot CLI. OpenCode is next. Copilot in VS Code reads the same hook files but has not been checked, and Copilot's cloud agent is not supported. See [Which agents](#which-agents) for what works on each.
-- Lessons match by error text. Very generic errors can bring up a lesson that doesn't fit, which is why the agent gets it as reference, not as an instruction.
+- Lessons match by error text. When both the failure and the lesson name a failing test, the names must be the same, so a lesson for a failed `assert.equal` reaches only a failing test with the same name. Two tests with the same name in different files or suites still share lessons. A generic error outside a test can bring up a lesson that doesn't fit, which is why the agent gets it as reference, not as an instruction.
 - Redaction catches common keys, tokens and emails. Always read a help card before sharing it.
 - The "done" check needs a test command. Without one, only the tampering check runs.
 - Approvals are per folder. Each git worktree or extra clone needs its own `codehere approve`.
