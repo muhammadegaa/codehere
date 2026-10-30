@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ---
 
-## [2.0.3] - unreleased (prepared 2026-10-30)
+## [2.0.3] - 2026-10-30
 
 From an outside test run of 2.0.2 against the R1a requirements (30 Oct).
 
