@@ -133,6 +133,25 @@ const TAMPER_ADDED = [
   { re: /expect\([^)]*\)\.(toBe|toEqual)\(\s*(true|1)\s*\)\s*;?\s*\/\/\s*(todo|temp|hack)/i, why: 'an assertion was replaced with a placeholder' },
 ];
 
+// Only in test files: elsewhere `{ skip: true }` or `assert.equal(1, 1)` can be ordinary code.
+const LITERAL = String.raw`(\d+(?:\.\d+)?|true|false|null|'[^']*'|"[^"]*")`;
+const TAMPER_ADDED_IN_TESTS = [
+  // test('name', { skip: true }, ...): the name cannot run past its closing quote, so the options are this test's
+  { re: /(?<![.\w])(it|test|describe|suite)\s*\(\s*(['"`])(?:(?!\2)[^\\]|\\.)*\2\s*,\s*\{[^}]*\b(skip|todo)\s*:\s*(true\b|['"`])/, why: 'a test was skipped ({ skip: true })' },
+  // fit/fdescribe only in jest's form, starting a statement with a quoted name then a callback:
+  // `fit(` alone is a common function name
+  { re: /(?<![.\w])(it|test|describe|context|suite)\.only\s*\(|^[+-]\s*(fit|fdescribe)\s*\(\s*(['"`])(?:(?!\3)[^\\]|\\.)*\3\s*,\s*(async\s+)?(\(|function\b|\w+\s*=>)/, why: 'other tests were turned off (.only)' },
+  { re: /\bassert(\.ok)?\(\s*true\s*\)|^\+\s*assert\s+True\s*$/, why: 'an assertion that cannot fail was added' },
+  { re: new RegExp(String.raw`\bassert\.\w+\(\s*${LITERAL}\s*,\s*\1\s*\)`), why: 'an assertion that cannot fail was added' },
+  { re: new RegExp(String.raw`\bexpect\(\s*${LITERAL}\s*\)\.(toBe|toEqual|toStrictEqual)\(\s*\1\s*\)`), why: 'an assertion that cannot fail was added' },
+];
+// assert(...), assert.equal(...), expect(...), self.assertEqual(...), and pytest's bare `assert x`;
+// not expect.objectContaining(...) and the other matchers inside one assertion
+const ASSERT = /\b(expect\s*\(|assert[\w.]*\s*\()|^[+-]\s*assert\s/;
+// package.json's test script made to pass whatever the tests do: `|| true`, `|| :`, `|| echo`, `; exit 0`
+const ALWAYS_PASSES = /"test"\s*:\s*"[^"]*(\|\|\s*(true|:|exit\s+0|echo\b[^"&|;]*)|;\s*(true|exit\s+0))\s*"/;
+const COMMENT = /^[+-]\s*(\/\/|#|\/\*|\*)\s*/;
+
 export function tamperFindings(nameStatus, diff) {
   const found = [];
   for (const line of nameStatus.split('\n')) {
@@ -142,17 +161,32 @@ export function tamperFindings(nameStatus, diff) {
   let current = '';
   let removedAsserts = 0;
   let addedAsserts = 0;
+  let removed = new Set(); // this file's removed assertions, to spot one coming back as a comment
+  let hadFallback = false; // the test script already ended in `|| true` before this session
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ ')) {
       current = line.replace(/^\+\+\+ (b\/)?/, '');
+      removed = new Set();
+      hadFallback = false;
       continue;
     }
     if (line.startsWith('--- ')) continue;
+    const inTest = TEST_FILE.test(current);
+    const probe = line.slice(0, 10000); // the patterns can take quadratic time on a long line
+    if (/(^|\/)package\.json$/.test(current) && ALWAYS_PASSES.test(probe)) {
+      if (line.startsWith('-')) hadFallback = true;
+      else if (!hadFallback) found.push(`the test script was changed to always exit 0 in ${current}`);
+    }
     if (line.startsWith('+')) {
-      for (const t of TAMPER_ADDED) if (t.re.test(line)) found.push(`${t.why} in ${current}`);
-      if (TEST_FILE.test(current) && /\b(expect|assert)\w*\s*\(/.test(line)) addedAsserts++;
-    } else if (line.startsWith('-')) {
-      if (TEST_FILE.test(current) && /\b(expect|assert)\w*\s*\(/.test(line)) removedAsserts++;
+      for (const t of TAMPER_ADDED) if (t.re.test(probe)) found.push(`${t.why} in ${current}`);
+      if (!inTest) continue;
+      for (const t of TAMPER_ADDED_IN_TESTS) if (t.re.test(probe)) found.push(`${t.why} in ${current}`);
+      if (COMMENT.test(line)) {
+        if (removed.has(line.replace(COMMENT, '').trim())) found.push(`an assertion was commented out in ${current}`);
+      } else if (ASSERT.test(line)) addedAsserts++;
+    } else if (line.startsWith('-') && inTest && !COMMENT.test(line) && ASSERT.test(line)) {
+      removedAsserts++;
+      removed.add(line.slice(1).trim());
     }
   }
   if (removedAsserts - addedAsserts >= 2) {
@@ -192,6 +226,7 @@ const num = (s, re) => {
   const m = s.match(re);
   return m ? Number(m[1]) : null;
 };
+const after = (t, line) => t.slice(t.indexOf(line) + line.length);
 const counts = (passed, failed) => (passed == null && failed == null ? null : { passed: passed || 0, failed: failed || 0 });
 const SUMMARIES = [
   // node --test, spec and TAP reporters: "ℹ tests 3", "ℹ pass 2", "ℹ fail 1"
@@ -203,15 +238,19 @@ const SUMMARIES = [
     re: /^[=\s]*(?:\d+ \w+(?:, )?)+ in [\d.]+s\b.*$/gm,
     read: (t, line) => counts(num(line, /(\d+) passed/), (num(line, /(\d+) failed/) || 0) + (num(line, /(\d+) errors?/) || 0)),
   },
-  // mocha "46 passing" and "2 failing"
-  { re: /^\s*\d+ passing\b.*$/gm, read: (t) => counts(num(t, /^\s*(\d+) passing\b/m), num(t, /^\s*(\d+) failing\b/m)) },
-  // python unittest "Ran 5 tests in 0.001s", then "OK" or "FAILED (failures=2, errors=1)"
+  // mocha "46 passing", then "2 pending" and "2 failing" on the next lines (a log line elsewhere is not the count)
+  {
+    re: /^\s*\d+ passing\b.*$/gm,
+    read: (t, line) => counts(num(line, /(\d+) passing/), num(after(t, line).split('\n').slice(1, 3).join('\n'), /^\s*(\d+) failing\b/m)),
+  },
+  // python unittest "Ran 5 tests in 0.001s", then the status line: "OK" or "FAILED (failures=2, errors=1)"
   {
     re: /^Ran \d+ tests? in [\d.]+s$/gm,
-    read: (t) => {
-      if (/expected failures|unexpected successes/.test(t)) return null; // neither passed nor failed
-      const failed = (num(t, /failures=(\d+)/) || 0) + (num(t, /errors=(\d+)/) || 0);
-      return counts(num(t, /^Ran (\d+) tests?/m) - failed - (num(t, /skipped=(\d+)/) || 0), failed);
+    read: (t, line) => {
+      const status = (after(t, line).trimStart().match(/^(OK|FAILED)\b.*/) || [''])[0];
+      if (!status || /expected failures|unexpected successes/.test(status)) return null; // neither passed nor failed
+      const failed = (num(status, /failures=(\d+)/) || 0) + (num(status, /errors=(\d+)/) || 0);
+      return counts(num(line, /^Ran (\d+)/) - failed - (num(status, /skipped=(\d+)/) || 0), failed);
     },
   },
   // cargo "test result: ok. 4 passed; 0 failed", one line per test binary

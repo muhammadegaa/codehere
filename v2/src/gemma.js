@@ -4,7 +4,7 @@
 
 const url = () => {
   const host = process.env.OLLAMA_HOST || '127.0.0.1:11434';
-  return /^https?:\/\//.test(host) ? host : `http://${host}`; // Ollama allows OLLAMA_HOST without a scheme
+  return /^https?:\/\//i.test(host) ? host : `http://${host}`; // Ollama allows OLLAMA_HOST without a scheme
 };
 
 async function post(path, body, ms) {
@@ -36,10 +36,24 @@ export function pickModel(installed, wanted) {
   return null;
 }
 
-// Returns { text, model } or null.
+// Text goes only to a model on this machine. Ollama forwards a cloud model (`gpt-oss:120b-cloud`,
+// `glm-4.6:cloud`) to its own servers, and OLLAMA_HOST can name another machine.
+const LOCAL_HOST = /^(localhost\.?|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1?\])$/i;
+const isCloud = (name) => /[:-]cloud$/i.test(name || '');
+
+// Returns { text, model }, { error } when Codehere refuses to send the text, or null.
 export async function summarize(prompt, wanted = 'gemma4:e4b') {
+  let host = '';
+  try {
+    host = new URL(url()).hostname;
+  } catch {}
+  if (!LOCAL_HOST.test(host)) return { error: `(OLLAMA_HOST is ${process.env.OLLAMA_HOST}, which is not a loopback address. Codehere sends text only to a local model; using the plain text.)` };
+  if (isCloud(wanted)) return { error: `(${wanted} is an Ollama cloud model. Codehere sends text only to a local model; using the plain text.)` };
   const tags = await post('/api/tags', null, 3000);
-  const model = tags ? pickModel((tags.models || []).map((m) => m.name), wanted) : null;
+  const all = (tags && tags.models) || [];
+  const local = all.filter((m) => !isCloud(m.name) && !m.remote_host);
+  const model = pickModel(local.map((m) => m.name), wanted);
+  if (!model && local.length < all.length) return { error: '(No local Gemma model, and Ollama cloud models are not used. Codehere sends text only to a local model; using the plain text.)' };
   if (!model) return null;
   // Thinking off: a summary does not need it, and it is several times slower.
   const data = await post('/api/generate', { model, prompt, stream: false, think: false, options: { temperature: 0.2 } }, 60000);
