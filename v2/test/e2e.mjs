@@ -346,6 +346,7 @@ check('short repair prompts count (en + id)', ['still broken', 'fix it', 'still 
 check('thanks, confirmations, questions and pasted errors do not', !['thanks!', 'yes', 'ya', 'ok', 'ok continue', 'it works now, thanks', 'nice work', 'mantap, sudah bisa', 'why?', 'no, use postgres instead', 'great, now print the receipt', 'TypeError: x is not a function', 'expected 20 but got 10', 'fix src/cart.js'].some(lowInfoPrompt));
 check('questions and small edits are not vague features', !['how do I add auth to this app?', 'why did you create a new api route here?', 'make sure the dashboard still loads after the change', 'make the login button blue instead of grey'].some(vagueFeature));
 check('vague feature (en + id)', vagueFeature('Buatkan aplikasi kasir untuk warung dengan laporan bulanan') && vagueFeature('Add a discount code feature to the checkout page'));
+check('vague feature, colloquial Indonesian (-in forms)', ['tambahin fitur dashboard untuk pesanan dengan grafik', 'buatin aplikasi kasir untuk warung dengan laporan bulanan', 'tolong bikinin website toko online buat jualan kue'].every((p) => vagueFeature(p)));
 check('a feature that says how to check it is not vague (en + id)', !vagueFeature('Buatkan fitur login, harus menolak password salah') && !vagueFeature('Build a login page; it should return 401 for a wrong password'));
 
 console.log('\n18. only an approved test command runs; settings changed mid-session are reported');

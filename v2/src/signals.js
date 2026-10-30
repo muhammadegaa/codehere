@@ -82,7 +82,7 @@ export function lowInfoPrompt(p) {
 }
 
 const BUILD_START =
-  /^\s*(please\s+|tolong\s+|can you\s+|could you\s+)?(build|create|make|add|implement|develop|design|set up|setup|buat|buatkan|bikin|bikinin|tambah|tambahkan|bangun)\b/i;
+  /^\s*(please\s+|tolong\s+|can you\s+|could you\s+)?(build|create|make|add|implement|develop|design|set up|setup|buat|buatkan|buatin|bikin|bikinin|tambah|tambahkan|tambahin|bangun)\b/i;
 const BIG = /\b(app|application|feature|system|platform|website|site|dashboard|service|bot|game|aplikasi|fitur|sistem|situs|web)\b/i;
 const SMALL = /\b(make sure|pastikan|instead|still|again|fix|bug|error|rename|change|ubah|ganti|refactor|button|color|colour|font|style)\b/i;
 const CHECKABLE =
