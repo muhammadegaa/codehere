@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ---
 
+## [2.0.2] - unreleased (prepared 2026-10-30)
+
+- A team lesson for a failed `assert.equal` reaches only a failing test with the same name. In 2.0.1, lessons matched on the first error line alone, which every failed `assert.equal` in `node --test` shares, so one lesson reached nearly every failing test. Lessons and help cards now record the failing test's name; lessons without one match as before.
+- "tambahin" and "buatin" count as a request to build something, so the agent asks "How will you know it works?" first, as it already did for "tambahkan" and "bikinin".
+
 ## [2.0.1] - 2026-10-29
 
 - `codehere --version` and `codehere -v` print the version. In 2.0.0, `--version` printed the help text and `-v` was an unknown command.

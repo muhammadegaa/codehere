@@ -7,7 +7,7 @@ import { spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readOnly, runResult } from '../src/hooks.js';
 import { pickModel } from '../src/gemma.js';
-import { lowInfoPrompt, vagueFeature, testCounts } from '../src/signals.js';
+import { lowInfoPrompt, vagueFeature, testCounts, signature, failingTest } from '../src/signals.js';
 import { printable } from '../src/brain.js';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'codehere.js');
@@ -346,6 +346,7 @@ check('short repair prompts count (en + id)', ['still broken', 'fix it', 'still 
 check('thanks, confirmations, questions and pasted errors do not', !['thanks!', 'yes', 'ya', 'ok', 'ok continue', 'it works now, thanks', 'nice work', 'mantap, sudah bisa', 'why?', 'no, use postgres instead', 'great, now print the receipt', 'TypeError: x is not a function', 'expected 20 but got 10', 'fix src/cart.js'].some(lowInfoPrompt));
 check('questions and small edits are not vague features', !['how do I add auth to this app?', 'why did you create a new api route here?', 'make sure the dashboard still loads after the change', 'make the login button blue instead of grey'].some(vagueFeature));
 check('vague feature (en + id)', vagueFeature('Buatkan aplikasi kasir untuk warung dengan laporan bulanan') && vagueFeature('Add a discount code feature to the checkout page'));
+check('vague feature, colloquial Indonesian (-in forms)', ['tambahin fitur dashboard untuk pesanan dengan grafik', 'buatin aplikasi kasir untuk warung dengan laporan bulanan', 'tolong bikinin website toko online buat jualan kue'].every((p) => vagueFeature(p)));
 check('a feature that says how to check it is not vague (en + id)', !vagueFeature('Buatkan fitur login, harus menolak password salah') && !vagueFeature('Build a login page; it should return 401 for a wrong password'));
 
 console.log('\n18. only an approved test command runs; settings changed mid-session are reported');
@@ -1280,6 +1281,83 @@ check('uninstall keeps a hook someone else added to the Copilot file', JSON.stri
 ch(['init', '--agent', 'claude,codex,copilot'], cp2);
 atTerminal('uninstall', cp2, 'y');
 check('init for all three agents, then uninstall: no .github/ left and git status is clean', !fs.existsSync(path.join(cp2, '.github')) && sh('git status --porcelain --ignored', cp2) === '', sh('git status --porcelain --ignored', cp2));
+
+console.log('\n26. a lesson for a generic error fits only the test it was solved in');
+// Every failed assert.equal in node --test starts with the same line, so the first error line
+// alone sent one team lesson to nearly every failing test (use case 12.3, 30 Oct).
+const tess = path.join(tmp, 'tess');
+fs.mkdirSync(tess);
+sh('git init -q', tess);
+user(tess, 'Tess');
+sh('git commit -q --allow-empty -m init', tess);
+ch(['init'], tess);
+const nodeTestFail = (name, got, want) => ({ tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: { stdout: `✖ ${name} (0.4ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n  ${got} !== ${want}\n\n      at TestContext.<anonymous> (file:///x/test/cart.test.js:6:42)\nℹ tests 2\nℹ pass 1\nℹ fail 1` } });
+const cartFail = nodeTestFail('total uses quantity', 350, 600);
+const shipFail = nodeTestFail('shipping is free over 5000 cents', 0, 700);
+const generic = signature(cartFail.tool_response.stdout);
+check('the two failures share one first error line and name different tests', generic === signature(shipFail.tool_response.stdout) && failingTest(cartFail.tool_response.stdout) === 'total uses quantity' && failingTest(shipFail.tool_response.stdout) === 'shipping is free over 5000 cents', generic);
+fs.writeFileSync(path.join(tess, '.codehere/lessons/cart.md'), `---\ntitle: Cart total ignores quantity\nsignature: ${generic}\ntest: total uses quantity\nauthor: Ana\ndate: 2026-10-30\n---\n## Fix\n- Fix: use price * qty\n`);
+const ctxOf = (x) => x.j.hookSpecificOutput?.additionalContext || '';
+H('session-start', tess, { session_id: 't1', hook_event_name: 'SessionStart', source: 'startup' });
+r = H('post-tool', tess, { session_id: 't1', hook_event_name: 'PostToolUse', ...shipFail });
+check('a different failing test does not get the cart lesson', !ctxOf(r).includes('Cart total ignores quantity') && !(r.j.systemMessage || '').includes('lesson'), r.out);
+const st26 = () => JSON.parse(fs.readFileSync(path.join(tess, '.codehere/local/state.json'), 'utf8')).sessions;
+check('… and the hook did run: it counted the failure and its test', st26().t1.errors[generic] === 1 && st26().t1.tests[generic] === 'shipping is free over 5000 cents', JSON.stringify(st26().t1));
+r = H('post-tool', tess, { session_id: 't1', hook_event_name: 'PostToolUse', ...cartFail });
+check('the same failing test does', ctxOf(r).includes('Lesson   Cart total ignores quantity'), r.out);
+fs.writeFileSync(path.join(tess, '.codehere/lessons/cart.md'), `---\ntitle: Cart total ignores quantity\nsignature: ${generic}\nauthor: Ana\ndate: 2026-10-30\n---\n## Fix\n- Fix: use price * qty\n`);
+r = H('post-tool', tess, { session_id: 't2', hook_event_name: 'PostToolUse', ...shipFail });
+check('a lesson that names no test matches by error text, as before', ctxOf(r).includes('Lesson   Cart total ignores quantity'), r.out);
+fs.rmSync(path.join(tess, '.codehere/lessons/cart.md'));
+
+// the test name travels: help card, then the lesson made from the answer
+H('post-tool', tess, { session_id: 't3', hook_event_name: 'PostToolUse', ...cartFail });
+r = ch(['help', 'Cart total ignores quantity'], tess);
+const card = fs.readdirSync(path.join(tess, '.codehere/help')).find((x) => x.endsWith('.md'));
+check('the help card records the failing test', !!card && /\ntest: total uses quantity\n/.test(fs.readFileSync(path.join(tess, '.codehere/help', card), 'utf8')), r.out + r.err);
+ch(['reply', card.replace(/\.md$/, ''), 'use price * qty', '--solved'], tess);
+check('the lesson made from the answer keeps it', lessonDocs(tess).some((d) => d.meta.test === 'total uses quantity'), JSON.stringify(lessonDocs(tess).map((d) => d.meta)));
+for (const d of lessonDocs(tess)) fs.rmSync(d.file);
+
+// and a lesson the agent saves after solving a repeated error records it too
+H('session-start', tess, { session_id: 't4', hook_event_name: 'SessionStart', source: 'startup' });
+H('post-tool', tess, { session_id: 't4', hook_event_name: 'PostToolUse', ...cartFail });
+H('post-tool', tess, { session_id: 't4', hook_event_name: 'PostToolUse', ...cartFail });
+fs.writeFileSync(path.join(tess, 'cart.js'), 'export const total = (items) => items.reduce((s, i) => s + i.price * i.qty, 0);\n');
+r = H('stop', tess, { session_id: 't4', hook_event_name: 'Stop', stop_hook_active: false });
+check('an agent-saved lesson records the failing test', lessonDocs(tess).some((d) => d.meta.test === 'total uses quantity' && d.meta.signature === generic), r.out + JSON.stringify(lessonDocs(tess).map((d) => d.meta)));
+
+// review of the change above: names must be the same test, not a similar one
+for (const d of lessonDocs(tess)) fs.rmSync(d.file);
+sh('git add -A && git commit -qm t4', tess);
+fs.writeFileSync(path.join(tess, '.codehere/lessons/cart.md'), `---\ntitle: Cart total ignores quantity\nsignature: ${generic}\ntest: total uses quantity\nauthor: Ana\ndate: 2026-10-30\n---\n## Fix\n- Fix: use price * qty\n`);
+r = H('post-tool', tess, { session_id: 't5', hook_event_name: 'PostToolUse', ...nodeTestFail('total uses price', 1, 2) });
+check('a sibling test with a similar name does not get the lesson', !ctxOf(r).includes('Cart total ignores quantity'), r.out);
+r = H('post-tool', tess, { session_id: 't6', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'node cart.test.js' }, tool_response: { stderr: 'AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n350 !== 600\n    at cart.test.js:6:42' } });
+check('a failure that names no test still gets a lesson that names one', ctxOf(r).includes('Lesson   Cart total ignores quantity'), r.out);
+fs.rmSync(path.join(tess, '.codehere/lessons/cart.md'));
+H('session-start', tess, { session_id: 't7', hook_event_name: 'SessionStart', source: 'startup' });
+H('post-tool', tess, { session_id: 't7', hook_event_name: 'PostToolUse', ...cartFail });
+H('post-tool', tess, { session_id: 't7', hook_event_name: 'PostToolUse', ...cartFail });
+H('post-tool', tess, { session_id: 't7', hook_event_name: 'PostToolUse', ...shipFail });
+fs.appendFileSync(path.join(tess, 'cart.js'), '// t7\n');
+H('stop', tess, { session_id: 't7', hook_event_name: 'Stop', stop_hook_active: false });
+check('two different tests failed on that line: the saved lesson names no test', lessonDocs(tess).length === 1 && !('test' in lessonDocs(tess)[0].meta), JSON.stringify(lessonDocs(tess).map((d) => d.meta)));
+check('jest: "● Console" (logs) is not the failing test', failingTest('  ● Console\n\n    console.log\n      hi\n\n  ● cart › total uses quantity\n\n    expect(received).toBe(expected)') === 'cart › total uses quantity');
+H('post-tool', tess, { session_id: 't8', hook_event_name: 'PostToolUse', ...nodeTestFail('invites ana@corp.example to the team', 1, 2) });
+r = ch(['help', 'Invite fails'], tess);
+const card8 = fs.readdirSync(path.join(tess, '.codehere/help')).filter((x) => x.endsWith('.md')).map((x) => fs.readFileSync(path.join(tess, '.codehere/help', x), 'utf8')).find((t) => t.includes('Invite fails')) || '';
+check('the test name in a help card is redacted too', /\ntest: invites \[redacted\]/.test(card8) && !card8.includes('ana@corp.example'), card8.slice(0, 400));
+const st9b = JSON.parse(fs.readFileSync(path.join(tess, '.codehere/local/state.json'), 'utf8'));
+st9b.sessions.t9 = { errors: { [generic]: 1 }, rawErrors: {}, shownLessons: [], stopBlocks: 0, tests: 'abc' };
+st9b.sessions.t10 = { errors: { [generic]: 2 }, rawErrors: {}, shownLessons: [], stopBlocks: 0, tests: { [generic]: { x: 1 } } };
+fs.writeFileSync(path.join(tess, '.codehere/local/state.json'), JSON.stringify(st9b));
+r = H('post-tool', tess, { session_id: 't9', hook_event_name: 'PostToolUse', ...cartFail }, { CODEHERE_DEBUG: '1' });
+check('a state file whose tests field is not an object: the failure is still counted', r.code === 0 && !r.err && st26().t9.errors[generic] === 2, r.err);
+for (const d of lessonDocs(tess)) fs.rmSync(d.file);
+fs.appendFileSync(path.join(tess, 'cart.js'), '// t10\n');
+H('stop', tess, { session_id: 't10', hook_event_name: 'Stop', stop_hook_active: false });
+check('a test name in the state file that is not text is not written into a lesson', lessonDocs(tess).every((d) => !('test' in d.meta)), JSON.stringify(lessonDocs(tess).map((d) => d.meta)));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (!process.env.KEEP) fs.rmSync(tmp, { recursive: true, force: true }); else console.log(tmp);

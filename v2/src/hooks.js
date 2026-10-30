@@ -11,7 +11,7 @@ import {
   removedAt,
 } from './brain.js';
 import {
-  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts,
+  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact,
 } from './signals.js';
 
 function readStdin() {
@@ -251,10 +251,12 @@ export function readOnly(command) {
   return bare.split(/&&|\|\||\|&|[;|\n]/).every((part) => !part.trim() || READ_ONLY.test(part));
 }
 
-function matchLesson(root, sig, shown) {
+function matchLesson(root, sig, shown, test) {
   let best = null;
   for (const doc of listDocs(paths(root).lessons)) {
     if (shown.includes(doc.id) || doc.body.includes('- Fix: <one line>')) continue; // not filled in yet
+    // Every failed assert.equal shares one first line, so when both name the failing test, it must be the same test.
+    if (test && doc.meta.test && doc.meta.test !== test) continue;
     const score = Math.max(
       similarity(sig, doc.meta.signature || ''),
       similarity(sig, doc.meta.title || '') * 0.8
@@ -328,13 +330,13 @@ function lessonLine(doc) {
 }
 
 // Codehere writes the proof fields itself; the agent fills in the title, cause and fix.
-function writeLesson(root, sig, proofCommand, changed) {
+function writeLesson(root, sig, proofCommand, changed, test) {
   const dir = paths(root).lessons;
   fs.mkdirSync(dir, { recursive: true });
   const name = `${today()}-${slug(sig, 30)}`;
   let file = path.join(dir, `${name}.md`);
   for (let i = 2; fs.existsSync(file); i++) file = path.join(dir, `${name}-${i}.md`);
-  const meta = { title: PLACEHOLDERS[0], signature: sig, author: me(root), date: today(), state: proofCommand ? 'verified' : 'unverified' };
+  const meta = { title: PLACEHOLDERS[0], signature: sig, ...(test ? { test: redact(test).slice(0, 120) } : {}), author: me(root), date: today(), state: proofCommand ? 'verified' : 'unverified' };
   if (proofCommand) {
     Object.assign(meta, {
       proof_command: proofCommand,
@@ -371,10 +373,14 @@ function postTool(root, input, agent) {
   const s = session(state, input.session_id);
   s.errors[sig] = (s.errors[sig] || 0) + 1;
   s.rawErrors[sig] = errorLines(text, 8);
-  s.lastFailure = { sig, command, test: failingTest(text), lines: errorLines(text, 3), prompt: s.prompts || 0 };
+  const test = failingTest(text);
+  // A lesson names the failing test only if every failure on this line was that test.
+  const tests = s.tests && typeof s.tests === 'object' ? s.tests : {};
+  s.tests = { ...tests, [sig]: Object.hasOwn(tests, sig) && tests[sig] !== test ? '' : test || '' };
+  s.lastFailure = { sig, command, test, lines: errorLines(text, 3), prompt: s.prompts || 0 };
   const count = s.errors[sig];
 
-  const lesson = matchLesson(root, sig, s.shownLessons);
+  const lesson = matchLesson(root, sig, s.shownLessons, test);
   if (lesson) s.shownLessons.push(lesson.id);
   writeState(root, state);
 
@@ -685,7 +691,8 @@ function stop(root, input) {
   if (solved.length && !s.lessonAsked) {
     s.lessonAsked = true;
     const [sig] = solved.sort((a, b) => b[1] - a[1])[0];
-    const file = writeLesson(root, sig, proven ? cfg.testCommand : null, changed);
+    const named = s.tests && s.tests[sig];
+    const file = writeLesson(root, sig, proven ? cfg.testCommand : null, changed, typeof named === 'string' ? named : '');
     if (mayBlock) {
       s.stopBlocks++;
       writeState(root, state);

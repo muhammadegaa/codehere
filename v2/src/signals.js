@@ -57,7 +57,7 @@ export function failingTest(text) {
   const t = stripAnsi(text);
   const m =
     t.match(/^\s*(?:✖|×|✗|not ok \d+ -)\s+(?!failing tests)(.+?)(?:\s+\(?\d[\d.]*\s?m?s\)?)?\s*$/m) ||
-    t.match(/^\s*●\s+(.+?)\s*$/m) ||
+    t.match(/^\s*●\s+(?!Console\s*$)(.+?)\s*$/m) ||
     t.match(/^FAILED\s+(\S+)/m) ||
     t.match(/^--- FAIL:\s+(\S+)/m);
   return m ? m[1].trim().slice(0, 120) : null;
@@ -82,7 +82,7 @@ export function lowInfoPrompt(p) {
 }
 
 const BUILD_START =
-  /^\s*(please\s+|tolong\s+|can you\s+|could you\s+)?(build|create|make|add|implement|develop|design|set up|setup|buat|buatkan|bikin|bikinin|tambah|tambahkan|bangun)\b/i;
+  /^\s*(please\s+|tolong\s+|can you\s+|could you\s+)?(build|create|make|add|implement|develop|design|set up|setup|buat|buatkan|buatin|bikin|bikinin|tambah|tambahkan|tambahin|bangun)\b/i;
 const BIG = /\b(app|application|feature|system|platform|website|site|dashboard|service|bot|game|aplikasi|fitur|sistem|situs|web)\b/i;
 const SMALL = /\b(make sure|pastikan|instead|still|again|fix|bug|error|rename|change|ubah|ganti|refactor|button|color|colour|font|style)\b/i;
 const CHECKABLE =
