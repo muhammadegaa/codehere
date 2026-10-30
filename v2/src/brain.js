@@ -323,8 +323,8 @@ export function gitHashes(root, files) {
 
 // A tick is Codehere's mark for a run it made on this machine (DESIGN.md §1). Text from the
 // repo or from a teammate never brings its own.
-export function noTick(text) {
-  return String(text).replace(/[✓✔☑✅]/g, '?');
+export function noTick(text, mark = '?') {
+  return String(text).replace(/[✓✔☑✅√🗸🗹]/gu, mark);
 }
 
 // A commit id read back from state.json, or null. The state file can arrive through git,

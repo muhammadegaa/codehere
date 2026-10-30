@@ -496,8 +496,8 @@ export async function brief(flags) {
       `Rewrite this into one clear, complete instruction for a coding agent. Keep every requirement and constraint. Plain English, max 120 words.\n\n${text}`,
       cfg.gemmaModel
     );
-    if (summary) text = text.replace('## Goal', `## In one paragraph (written by ${summary.model} on this machine; an opinion, check it)\n${summary.text}\n\n## Goal`);
-    else console.error('(Gemma not reachable through Ollama; using the plain brief.)');
+    if (summary?.text) text = text.replace('## Goal', `## In one paragraph (written by ${summary.model} on this machine; an opinion, check it)\n${summary.text}\n\n## Goal`);
+    else console.error(summary?.error || '(Gemma not reachable through Ollama; using the plain brief.)');
   }
 
   const file = path.join(paths(root).briefs, `${stamp()}.md`);
@@ -546,8 +546,8 @@ export async function help(question, flags) {
       `Summarise this help request for a busy teammate in 2 sentences: what is wrong and what you need from them.\n\n${text}`,
       cfg.gemmaModel
     );
-    if (summary) text = `## In short (written by ${summary.model} on this machine; an opinion, check it)\n${summary.text}\n\n${text}`;
-    else console.error('(Gemma not reachable through Ollama; using the plain help card.)');
+    if (summary?.text) text = `## In short (written by ${summary.model} on this machine; an opinion, check it)\n${summary.text}\n\n${text}`;
+    else console.error(summary?.error || '(Gemma not reachable through Ollama; using the plain help card.)');
   }
 
   const id = `${stamp()}-${slug(ask, 30)}`;

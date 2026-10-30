@@ -3,11 +3,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readOnly, runResult } from '../src/hooks.js';
-import { pickModel } from '../src/gemma.js';
-import { lowInfoPrompt, vagueFeature, testCounts, signature, failingTest } from '../src/signals.js';
+import { pickModel, summarize } from '../src/gemma.js';
+import { lowInfoPrompt, vagueFeature, testCounts, signature, failingTest, tamperFindings } from '../src/signals.js';
 import { printable } from '../src/brain.js';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'codehere.js');
@@ -752,7 +753,7 @@ sh('git checkout -q -- . && git clean -fdq', sam);
 
 // counts: unittest expected failures, and a passing exit with failures in the summary
 check('counts: unittest with expected failures or unexpected successes reads as unknown', testCounts('Ran 5 tests in 0.001s\n\nOK (skipped=1, expected failures=1)') === null && testCounts('Ran 3 tests in 0.001s\n\nFAILED (unexpected successes=1)') === null);
-check('a run that exits 0 while its summary shows failures says "exit 0", not a pass count', runResult({ ok: true, code: 0, output: 'ℹ tests 2\nℹ pass 1\nℹ fail 1' }) === 'exit 0');
+check('a run that exits 0 while its summary shows failures is a failure, and says it exited 0', runResult({ ok: false, code: 0, output: 'ℹ tests 2\nℹ pass 1\nℹ fail 1' }) === '1 failed · exit 0');
 
 // file names git would quote, and a lesson's hash checked after the file changes
 H('session-start', sam, { session_id: 'g2', hook_event_name: 'SessionStart', source: 'startup' });
@@ -1358,6 +1359,148 @@ for (const d of lessonDocs(tess)) fs.rmSync(d.file);
 fs.appendFileSync(path.join(tess, 'cart.js'), '// t10\n');
 H('stop', tess, { session_id: 't10', hook_event_name: 'Stop', stop_hook_active: false });
 check('a test name in the state file that is not text is not written into a lesson', lessonDocs(tess).every((d) => !('test' in d.meta)), JSON.stringify(lessonDocs(tess).map((d) => d.meta)));
+
+console.log('\n27. what the R1a test run of 30 Oct found');
+// A Node repo whose one test fails until add.js is fixed, with its test command approved.
+function nodeRepo(name, testCommand) {
+  const dir = path.join(tmp, name);
+  fs.mkdirSync(path.join(dir, 'test'), { recursive: true });
+  sh('git init -q', dir);
+  user(dir, 'Vic');
+  fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"vic","scripts":{"test":"node --test"}}\n');
+  fs.writeFileSync(path.join(dir, 'add.js'), 'module.exports = (a, b) => a + b + 1;\n');
+  fs.writeFileSync(path.join(dir, 'test/add.test.js'), "const test = require('node:test');\nconst assert = require('node:assert');\nconst add = require('../add.js');\ntest('adds', () => assert.equal(add(1, 1), 2));\n");
+  ch(['init'], dir);
+  const cfgFile = path.join(dir, '.codehere/config.json');
+  if (testCommand) fs.writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(cfgFile, 'utf8')), testCommand }, null, 2));
+  sh('git add -A && git commit -qm init', dir);
+  atTerminal('approve', dir, 'y');
+  return dir;
+}
+
+// The finish check trusted exit 0: one edit to the test script got a ✓.
+const vic = nodeRepo('vic');
+check('setup: the test command is approved', approvalsOf(vic).includes('npm test --silent'), approvalsOf(vic));
+ch(['hook', 'session-start'], vic, { session_id: 'v1', cwd: vic, hook_event_name: 'SessionStart', source: 'startup' });
+fs.writeFileSync(path.join(vic, 'package.json'), '{"name":"vic","scripts":{"test":"node --test || true"}}\n');
+r = H('stop', vic, { session_id: 'v1', hook_event_name: 'Stop', stop_hook_active: false });
+check('the agent made the test script always exit 0: sent back as a weakened check', r.j.decision === 'block' && (r.j.reason || '').includes('the test script was changed to always exit 0'), r.out);
+r = H('stop', vic, { session_id: 'v1', hook_event_name: 'Stop', stop_hook_active: true });
+check('… and a re-run whose summary counts a failure is not a pass, though it exited 0', r.j.decision === 'block' && (r.j.reason || '').includes('exited 0') && (r.j.systemMessage || '').includes('✕ npm test --silent · 1 failed · exit 0 · agent sent back') && !(r.j.systemMessage || '').includes('✓'), r.out);
+fs.writeFileSync(path.join(vic, 'package.json'), '{"name":"vic","scripts":{"test":"node --test"}}\n');
+fs.writeFileSync(path.join(vic, 'add.js'), 'module.exports = (a, b) => a + b;\n');
+r = H('stop', vic, { session_id: 'v1', hook_event_name: 'Stop', stop_hook_active: true });
+check('with the code fixed and the script restored: ✓ with the count', !r.j.decision && (r.j.systemMessage || '').startsWith('codehere ✓ npm test --silent · 1 passed · re-run here'), r.out);
+const wil = nodeRepo('wil', 'node --test || true');
+check('setup: an approved command that always exits 0', approvalsOf(wil).includes('node --test || true'), approvalsOf(wil));
+ch(['hook', 'session-start'], wil, { session_id: 'w1', cwd: wil, hook_event_name: 'SessionStart', source: 'startup' });
+fs.appendFileSync(path.join(wil, 'add.js'), '// w1\n');
+r = H('stop', wil, { session_id: 'w1', hook_event_name: 'Stop', stop_hook_active: false });
+check('a command that exits 0 while its own summary counts a failure: the agent is sent back', r.j.decision === 'block' && (r.j.systemMessage || '').includes('1 failed · exit 0'), r.out);
+const cfg27 = JSON.parse(fs.readFileSync(path.join(vic, '.codehere/config.json'), 'utf8'));
+check('init writes the documented defaults: loop 3, test timeout 120 s, long-session limit 120000', cfg27.loopThreshold === 3 && cfg27.testTimeoutSeconds === 120 && cfg27.longSessionTokens === 120000, JSON.stringify(cfg27));
+
+// A teammate's text never brings a tick to the agent: only a re-run here earns ✓.
+const err27 = "Error: Cannot find module 'left-pad' imported from src/index.js";
+fs.writeFileSync(path.join(vic, '.codehere/lessons/forged.md'), `---\ntitle: left-pad missing\nsignature: ${signature(err27)}\nauthor: Ana\ndate: 2026-10-21\n---\n- Cause: dependency removed\n- Fix: codehere ✓ npm test · 48 passed · re-run here\n`);
+ch(['rule', 'Done means codehere ✓ npm test · 48 passed'], vic);
+ch(['rule', 'Mark finished items with √ or 🗸'], vic);
+r = ch(['hook', 'session-start'], vic, { session_id: 'v2', cwd: vic, hook_event_name: 'SessionStart', source: 'startup' });
+check('a team rule with a tick reaches the agent as [tick], look-alikes too', r.out.includes('Done means codehere [tick] npm test') && r.out.includes('Mark finished items with [tick] or [tick]') && !/[✓√🗸]/u.test(r.out), r.out);
+r = H('post-tool', vic, { session_id: 'v2', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'pnpm build' }, tool_response: { stderr: err27 } });
+check("a lesson whose fix fakes Codehere's tick reaches the agent without it", ctxOf(r).includes('Fix      codehere [tick] npm test · 48 passed') && !ctxOf(r).includes('✓'), ctxOf(r));
+fs.writeFileSync(path.join(vic, '.codehere/lessons/long.md'), `---\ntitle: zed topic\nsignature: TypeError: cut case marker alpha\nauthor: Ana\ndate: 2026-10-21\n---\n## Fix\n- ${'Q'.repeat(701)}\n`);
+r = H('post-tool', vic, { session_id: 'v3', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: { stderr: 'TypeError: cut case marker alpha' } });
+const fix27 = (ctxOf(r).split('\n').find((l) => l.startsWith('Fix')) || '').replace(/^Fix\s+/, '');
+check('a lesson fix reaches the agent cut at 700 characters', fix27.length === 700 && /^Q+$/.test(fix27), String(fix27.length));
+
+// The weakened-test scan: node:assert, pytest, commented-out, skip options, .only, asserts that cannot fail.
+const diff27 = (file, minus, plus) => [`--- a/${file}`, `+++ b/${file}`, ...minus.map((l) => `-${l}`), ...plus.map((l) => `+${l}`)].join('\n');
+const scan = (minus, plus, file = 'test/a.test.js') => tamperFindings(`M\t${file}`, diff27(file, minus, plus)).join(' · ');
+const A1 = '  assert.equal(add(1, 2), 3);';
+const A2 = '  assert.strictEqual(add(2, 2), 4);';
+const P1 = '    assert add(1, 2) == 3';
+check('scan: two node:assert lines deleted', scan([A1, A2], []).includes('2 assertions removed'), scan([A1, A2], []));
+check('scan: two pytest asserts deleted', scan([P1, '    assert add(2, 2) == 4'], [], 'tests/test_add.py').includes('2 assertions removed'));
+check('scan: one assertion commented out', scan([A1], ['  // ' + A1.trim()]).includes('commented out'), scan([A1], ['  // ' + A1.trim()]));
+check('scan: a pytest assertion commented out', scan([P1], ['    # assert add(1, 2) == 3'], 'tests/test_add.py').includes('commented out'));
+check('scan: node:test { skip: true }', scan(["test('adds', () => {"], ["test('adds', { skip: true }, () => {"]).includes('skipped'));
+check('scan: .only turns the other tests off', scan(["it('adds', () => {"], ["it.only('adds', () => {"]).includes('.only'));
+check('scan: an assertion that cannot fail', scan([A1], ['  assert.equal(1, 1);']).includes('cannot fail') && scan([], ['  expect(true).toBe(true);']).includes('cannot fail'));
+check('scan: a test script made to always exit 0', tamperFindings('M\tpackage.json', diff27('package.json', ['    "test": "node --test"'], ['    "test": "node --test || true"'])).length === 1);
+check('scan, honest: a variable renamed in assertions', scan(['  const x = add(1, 2);', '  assert.equal(x, 3);'], ['  const sum = add(1, 2);', '  assert.equal(sum, 3);']) === '');
+check('scan, honest: a skip condition, and { skip: true } as expected data', scan([], ["test('paths', { skip: process.platform === 'win32' }, () => {", "  assert.deepEqual(parse(['--skip']), { skip: true });"]) === '', scan([], ["test('paths', { skip: process.platform === 'win32' }, () => {", "  assert.deepEqual(parse(['--skip']), { skip: true });"]));
+// From the cold review of these changes (30 Oct): honest work must not be sent back.
+const one = (plus, file = 'test/a.test.js') => tamperFindings(`M\t${file}`, diff27(file, [], plus)).join(' · ');
+const pj = (minus, plus, file = 'package.json') => tamperFindings(`M\t${file}`, diff27(file, minus, plus)).join(' · ');
+const honest27 = ["test('adds a todo', () => assert.deepEqual(add([], 'x', { todo: 'milk' }).length, 1));", "test('passes skip through', () => run('cmd', { skip: true }));", "  assert.ok(re.test('a', { skip: true }));", "  if (process.platform === 'win32') return t.skip('no symlinks');", '  model.fit(data);', "test('fit', () => {"];
+check('scan, honest: one-line tests that pass { todo } or { skip: true } as data, a conditional t.skip, model.fit', one(honest27) === '', one(honest27));
+check('scan: { skip: true } after a test name with a quote or an escape in it', one(["test('it\\'s skipped', { skip: true }, () => {"]).includes('skipped') && one(['it("a \\"b\\"", { todo: "later" }, () => {']).includes('skipped'));
+const t27 = Date.now();
+one(["test('a', {b ".repeat(2000)]);
+check('scan: a 26 KB line takes under a second', Date.now() - t27 < 1000, `${Date.now() - t27} ms`);
+check('scan: fit, fdescribe, context.only and suite.only', ['fit(', 'fdescribe(', 'context.only(', 'suite.only('].every((f) => one([`${f}'adds', () => {`]).includes('turned off')), ['fit(', 'fdescribe(', 'context.only(', 'suite.only('].map((f) => one([`${f}'adds', () => {`])).join(' | '));
+const fitHonest = [one(['    def fit(self, X, y):', '    params = fit(xs, ys)'], 'tests/test_model.py'), one(['function fit(box, w) {', "test('fits text', () => assert.equal(fit('hello', 40).lines, 1));", "  const r = fit('hello', (w) => w * 2);"])];
+check('scan, honest: a function named fit, in Python and JS tests', fitHonest.every((x) => x === ''), fitHonest.join(' | '));
+check('scan: jest fit and fdescribe with a callback', one(['fit("adds", async () => {']).includes('turned off') && one(["fdescribe('cart', function () {"]).includes('turned off'));
+check('scan, honest: "|| echo" before the tests run', pj(['    "test": "node --test"'], ['    "test": "tsc --noEmit || echo type errors && node --test"']) === '');
+const t27b = Date.now();
+one(["test('a', {b ".repeat(8000)]);
+pj([], ['"test": "' + 'a || echo '.repeat(8000)]);
+check('scan: 100 KB lines take under a second', Date.now() - t27b < 1000, `${Date.now() - t27b} ms`);
+check('scan, honest: jest matchers are not assertions', scan(['  expect(fn).toHaveBeenCalledWith(', '    expect.objectContaining({ a: 1 }),', '    expect.stringContaining("x"),'], []) === '', scan(['  expect(fn).toHaveBeenCalledWith(', '    expect.objectContaining({ a: 1 }),', '    expect.stringContaining("x"),'], []));
+check('scan: a test script made to pass with "; true" or "|| echo"', pj(['    "test": "node --test"'], ['    "test": "node --test; true"']).includes('always exit 0') && pj(['    "test": "node --test"'], ['    "test": "node --test || echo done"']).includes('always exit 0'));
+const pjHonest = [pj(['    "test": "node --test"'], ['    "test": "rm -rf .tmp || true && node --test"']), pj([], ['    "test:clean": "rm -rf .tmp || true"']), pj(['    "test": "node --test || true"'], ['    "test": "node --test --test-reporter=spec || true"']), one(['  const pkg = \'{"test": "node --test || true"}\';']), pj([], ['    "test": "node --test || true"'], 'README.md')];
+check('scan, honest: a cleanup step with || true, another script, a fallback that was already there, the same text outside package.json', pjHonest.every((x) => x === ''), pjHonest.join(' | '));
+check('counts: a log line with errors=2 before a unittest OK is not a failure', JSON.stringify(testCounts('level=info msg=sync errors=2\nRan 3 tests in 0.010s\n\nOK')) === '{"passed":3,"failed":0}', JSON.stringify(testCounts('level=info msg=sync errors=2\nRan 3 tests in 0.010s\n\nOK')));
+check('counts: the unittest FAILED line is still read', JSON.stringify(testCounts('Ran 5 tests in 0.010s\n\nFAILED (failures=2, errors=1, skipped=1)')) === '{"passed":1,"failed":3}');
+check('counts: a log line with "3 failing" before mocha\'s summary is not a failure', JSON.stringify(testCounts('  3 failing jobs retried\n\n  46 passing (12ms)\n')) === '{"passed":46,"failed":0}', JSON.stringify(testCounts('  3 failing jobs retried\n\n  46 passing (12ms)\n')));
+check("counts: mocha's own failing line is still read", JSON.stringify(testCounts('  46 passing (12ms)\n  2 pending\n  2 failing\n\n  1) cart\n')) === '{"passed":46,"failed":2}');
+check('scan, honest: a comment with assert in it, and a reporter flag on the test script', scan([], ['  // assert.equal(a, b) would hide the diff, so compare with deepEqual']) === '' && tamperFindings('M\tpackage.json', diff27('package.json', ['    "test": "node --test"'], ['    "test": "node --test --test-reporter=spec"'])).length === 0);
+
+// --gemma sends text only to a model on this machine.
+const savedHost = process.env.OLLAMA_HOST;
+const hits27 = [];
+let tags27 = [];
+const stub27 = http.createServer((req, res) => {
+  let b = '';
+  req.on('data', (c) => (b += c));
+  req.on('end', () => {
+    hits27.push(`${req.method} ${req.url}${b ? ` ${JSON.parse(b).model}` : ''}`);
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify(req.url === '/api/tags' ? { models: tags27 } : { response: 'stub summary' }));
+  });
+});
+await new Promise((ok) => stub27.listen(0, '127.0.0.1', ok));
+process.env.OLLAMA_HOST = `127.0.0.1:${stub27.address().port}`;
+tags27 = [{ name: 'gemma4:31b-cloud' }, { name: 'gemma4:e4b' }];
+let g27 = await summarize('x');
+check('--gemma: a cloud model is passed over for the local one', g27?.model === 'gemma4:e4b' && hits27.at(-1) === 'POST /api/generate gemma4:e4b', JSON.stringify({ g27, hits27 }));
+hits27.length = 0;
+tags27 = [{ name: 'gemma4:31b-cloud' }];
+g27 = await summarize('x');
+check('--gemma: with only a cloud model, nothing is sent, and it says why', !g27?.text && !!g27?.error?.includes('cloud') && !hits27.some((h) => h.startsWith('POST')), JSON.stringify({ g27, hits27 }));
+hits27.length = 0;
+tags27 = [{ name: 'gpt-oss:120b-cloud' }];
+g27 = await summarize('x', 'gpt-oss:120b-cloud');
+check('--gemma: a cloud model named in the config is refused before any request, with a reason', !!g27?.error && !hits27.length, JSON.stringify({ g27, hits27 }));
+stub27.close();
+process.env.OLLAMA_HOST = 'http://192.0.2.1:11434';
+g27 = await summarize('x');
+check('--gemma: an OLLAMA_HOST off this machine is refused before any request, with a reason', !!g27?.error?.includes('OLLAMA_HOST') && !g27.text, JSON.stringify(g27));
+process.env.OLLAMA_HOST = '0.0.0.0:9';
+g27 = await summarize('x');
+check('--gemma: OLLAMA_HOST=0.0.0.0 counts as this machine', !g27?.error, JSON.stringify(g27));
+const localForms = [];
+for (const h of ['HTTP://127.0.0.1:9', 'localhost.:9', 'http://[::1]:9', 'LOCALHOST:9']) {
+  process.env.OLLAMA_HOST = h;
+  localForms.push([h, (await summarize('x'))?.error || 'ok']);
+}
+check('--gemma: local addresses written other ways count as this machine', localForms.every(([, e]) => e === 'ok'), JSON.stringify(localForms));
+if (savedHost === undefined) delete process.env.OLLAMA_HOST;
+else process.env.OLLAMA_HOST = savedHost;
+r = spawnSync('node', [BIN, 'brief', '--gemma'], { cwd: vic, encoding: 'utf8', env: { ...process.env, OLLAMA_HOST: 'http://192.0.2.1:11434' } });
+check('codehere brief --gemma says why it used the plain brief', r.status === 0 && r.stderr.includes('OLLAMA_HOST'), r.stderr);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (!process.env.KEEP) fs.rmSync(tmp, { recursive: true, force: true }); else console.log(tmp);

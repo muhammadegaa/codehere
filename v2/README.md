@@ -65,7 +65,7 @@ codehere ✕ npm test · 2 failed · agent sent back · 1 of 3
 codehere ✓ npm test · 48 passed · re-run here · 6.2 s
 ```
 
-✓ marks only a test run Codehere just made on your machine. A teammate's "verified" is plain text: it was true on their machine, and anyone with push access can edit a lesson file. The agent is told whether the files the fix changed have changed since.
+✓ marks only a test run Codehere just made on your machine. A run whose own summary counts a failed test is a failure, even when the command exits 0. A teammate's "verified" is plain text: it was true on their machine, and anyone with push access can edit a lesson file. A tick written into a rule or a lesson reaches the agent as `[tick]`. The agent is told whether the files the fix changed have changed since.
 
 Don't want to commit help cards? Copy the printed text into WhatsApp, Discord or Slack instead.
 
@@ -126,7 +126,7 @@ Everything is plain markdown, so you can read, edit, review and delete it like a
 - **It only reacts to this session's work.** Changes you had before the session are ignored. If the agent changed nothing, Codehere does nothing.
 - **It never traps the agent.** At most 3 "not done yet" messages per session, then it lets go.
 - **It fails open.** If anything breaks, the hook exits quietly and the agent carries on.
-- **Small model, small job.** Gemma 4 (via Ollama) is optional and only writes summaries for briefs and help cards, which you read before using. Turn it on with `--gemma`.
+- **Small model, small job.** Gemma 4 (via Ollama) is optional and only writes summaries for briefs and help cards, which you read before using. Turn it on with `--gemma`. The text goes only to a model on this machine: Codehere refuses an `OLLAMA_HOST` on another machine and Ollama cloud models, and uses the plain text instead.
 - **Only human-confirmed context at session start.** Rules are written by people. Lessons appear only when a matching error shows up, because auto-generated context files can make agents worse.
 
 ## Try the demo (no Claude account needed)
@@ -140,7 +140,7 @@ npm test                    # end-to-end checks
 ## Known limits
 
 - Claude Code, Codex CLI and Copilot CLI. OpenCode is next. Copilot in VS Code reads the same hook files but has not been checked, and Copilot's cloud agent is not supported. See [Which agents](#which-agents) for what works on each.
-- Lessons match by error text. When both the failure and the lesson name a failing test, the names must be the same, so a lesson for a failed `assert.equal` reaches only a failing test with the same name. Two tests with the same name in different files or suites still share lessons. A generic error outside a test can bring up a lesson that doesn't fit, which is why the agent gets it as reference, not as an instruction.
+- Lessons match by error text: at least 0.45 of the words in the two error lines must be shared (words in both, divided by words in either). When both the failure and the lesson name a failing test, the names must be the same, so a lesson for a failed `assert.equal` reaches only a failing test with the same name. Two tests with the same name in different files or suites still share lessons. A generic error outside a test can bring up a lesson that doesn't fit, which is why the agent gets it as reference, not as an instruction.
 - Redaction catches common keys, tokens and emails. Always read a help card before sharing it.
 - The "done" check needs a test command. Without one, only the tampering check runs.
 - Approvals are per folder. Each git worktree or extra clone needs its own `codehere approve`.
@@ -153,6 +153,6 @@ npm test                    # end-to-end checks
 - Only the test command needs approval. A teammate who sets `verifyOnStop` to `false` in `.codehere/config.json` turns the finish check off for everyone; `codehere status` shows it as off.
 - Sharing is through git. There is no server, so teammates see updates after `git pull`.
 - Prompt checks are plain word lists (English and Indonesian). They can miss a short prompt in another language.
-- The weakened-test scan catches skipped tests, deleted test files and removed assertions. It does not yet catch an edited expected value; see `docs/overlap-with-check.md`.
+- The weakened-test scan catches skipped and focused tests (`.skip`, `xit`, `{ skip: true }`, `.only`, `fit`), deleted test files, an assertion commented out with `//` or `#`, assertions that cannot fail (`assert.equal(1, 1)`), at least two more assertion lines removed than added, and a `package.json` test script changed to always pass (`|| true`). It does not catch one removed assertion, assertions wrapped in `/* */`, options spread over several lines, an edited expected value, or a `return` above an assertion; see `docs/overlap-with-check.md`.
 
 MIT licensed.

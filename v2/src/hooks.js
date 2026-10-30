@@ -145,9 +145,11 @@ function sessionStart(root, input, agent) {
   }
 
   writeState(root, state);
+  // Rules, briefs and help cards come from the repo: none of it may show the agent Codehere's tick.
+  const text = noTick(out.join('\n'), '[tick]'); // "[tick]" keeps the meaning of a spec that asks for one
   // Copilot reads only JSON here; Claude Code and Codex take the plain text
-  if (out.length && agent === 'copilot') emitJson({ additionalContext: out.join('\n') });
-  if (out.length) process.stdout.write(out.join('\n') + '\n');
+  if (out.length && agent === 'copilot') emitJson({ additionalContext: text });
+  if (out.length) process.stdout.write(text + '\n');
   quiet();
 }
 
@@ -320,7 +322,7 @@ function lessonText(root, doc) {
       : 'Proof    none recorded.'
   );
   out.push('Check whether it fits before trying something new.');
-  return out.join('\n');
+  return noTick(out.join('\n'), '[tick]'); // a teammate's text cannot show the agent Codehere's tick
 }
 
 function lessonLine(doc) {
@@ -549,15 +551,17 @@ function runTests(root, cfg) {
   });
   const output = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
   const timedOut = r.error && r.error.code === 'ETIMEDOUT';
-  return { ok: r.status === 0 && !timedOut, output, timedOut, code: r.status, seconds: (Date.now() - started) / 1000 };
+  // The runner's own count of failures wins over exit 0: `|| true` on a test script is one edit.
+  const c = testCounts(output);
+  return { ok: r.status === 0 && !timedOut && !(c && c.failed), output, timedOut, code: r.status, seconds: (Date.now() - started) / 1000 };
 }
 
 // "48 passed" or "2 failed" when the runner's summary can be read, else the exit code
 export function runResult(t) {
   if (t.timedOut) return 'timed out';
   const c = testCounts(t.output);
-  if (t.ok) return c && !c.failed ? `${c.passed} passed` : 'exit 0'; // a summary with failures but exit 0: say only what is sure
-  return c && c.failed ? `${c.failed} failed` : `exit ${t.code}`;
+  if (t.ok) return c && !c.failed ? `${c.passed} passed` : 'exit 0'; // no summary to read: say only the exit code
+  return c && c.failed ? `${c.failed} failed${t.code === 0 ? ' · exit 0' : ''}` : `exit ${t.code}`;
 }
 
 const removedLine = (at) => `codehere ✕ codehere uninstall ran at ${new Date(at).toTimeString().slice(0, 5)} · this repo's checks are removed`;
@@ -665,6 +669,7 @@ function stop(root, input) {
       block(
         [
           `Codehere ran \`${cmd}\` and it ${t.timedOut ? 'timed out' : 'failed'}. The task is not done yet.`,
+          ...(t.code === 0 && !t.timedOut ? ['Its own summary counts failed tests, though the command exited 0.'] : []),
           'Last lines of output:',
           tail,
           'Fix the cause, then finish. Do not change or skip tests to make them pass.',

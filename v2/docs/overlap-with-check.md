@@ -19,6 +19,8 @@ Fixture: a small Node repo (`node --test`) with one failing test. Each row appli
 
 `check` catches 6 of 8, v2 catches 2 of 8. Neither catches an edited expected value. That is the cheat the x10 experiment found most often after a blocked test edit; only re-running the tests from before the session (the shadow run, not in 1.0.3) catches it.
 
+Update, 2026-10-30 (2.0.3): v2's scan also catches `{ skip: true }`, an assertion replaced with `assert.equal(1, 1)`, a commented-out assertion and `.only`, so 6 of 8. It still misses `return;` above the assertion and the edited expected value. Measured with the diffs in `v2/test/e2e.mjs` section 27, not with the script above. Before 2.0.3, v2 also never counted a removed `assert.equal(...)` or a pytest `assert`, because its pattern needed a bracket straight after the word.
+
 ## Other differences
 
 | | 1.0.3 `check` | v2 Stop hook |
@@ -26,7 +28,7 @@ Fixture: a small Node repo (`node --test`) with one failing test. Each row appli
 | Scope | diff against `HEAD` or `--base` | only files changed in this session (baseline taken at SessionStart) |
 | Test command | Node, Go, Rust, pytest, vitest/jest, `node --test`, override | the command saved by `init` (npm test today) |
 | All tests skipped | not a pass (`noTests`) | counted as a pass |
-| Extra rules | trivial, commented-out, unreachable, `.only`/`fit` | deleted test file, net assertions removed, `@ts-nocheck`, `--no-verify` |
+| Extra rules | trivial, commented-out, unreachable, `.only`/`fit` | deleted test file, net assertions removed, `@ts-nocheck`, `--no-verify`; from 2.0.3 also trivial, commented-out (`//`, `#`), `.only`/`fit`, and a `package.json` test script that always exits 0 |
 | Runtime | TypeScript build with dependencies | plain Node, no dependencies |
 | Output | verdict, findings, receipt (JSON) | a message to the agent |
 

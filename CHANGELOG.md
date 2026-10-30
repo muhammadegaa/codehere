@@ -9,7 +9,16 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ---
 
-## [2.0.2] - unreleased (prepared 2026-10-30)
+## [2.0.3] - unreleased (prepared 2026-10-30)
+
+From an outside test run of 2.0.2 against the R1a requirements (30 Oct).
+
+- A test run whose own summary counts a failure is a failure, even when the command exits 0. In 2.0.2 an agent could add `|| true` to the test script and get a ✓. That edit to `package.json` is now also reported as a weakened check. Unittest and mocha counts are read only from their summary lines, so a log line such as `errors=2` is not counted.
+- The weakened-test scan counts removed `assert.equal(...)`-style and pytest `assert` lines; 2.0.2 counted only `assert(...)`, `assertEqual(...)` and `expect(...)`. It also catches an assertion commented out with `//` or `#`, `{ skip: true }`, `.only` and `fit`, and an assertion that cannot fail such as `assert.equal(1, 1)`.
+- A tick in a team rule, lesson or brief reaches the agent as `[tick]`. In 2.0.2 a lesson could show the agent a line that looked like Codehere's own ✓.
+- `--gemma` sends text only to a model on this machine. It refuses an `OLLAMA_HOST` on another machine and Ollama cloud models, and says why. In 2.0.2 it used both, and still labelled the text "written on this machine".
+
+## [2.0.2] - 2026-10-30
 
 - A team lesson for a failed `assert.equal` reaches only a failing test with the same name. In 2.0.1, lessons matched on the first error line alone, which every failed `assert.equal` in `node --test` shares, so one lesson reached nearly every failing test. Lessons and help cards now record the failing test's name; lessons without one match as before.
 - "tambahin" and "buatin" count as a request to build something, so the agent asks "How will you know it works?" first, as it already did for "tambahkan" and "bikinin".
