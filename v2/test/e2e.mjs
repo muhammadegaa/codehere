@@ -20,7 +20,7 @@ let failed = 0;
 // Checks for behaviour not built yet are named "E<n>: ..." and their IDs listed here. A listed ID is
 // judged as a whole at the end: some check still failing is an expected failure; all passing fails
 // the suite until the ID leaves the list. Unlisted checks count one by one, as always.
-const KNOWN_FAILING = new Set(['E1', 'E3', 'E4', 'E5', 'E6', 'E7', 'E9', 'E10', 'E11', 'E12', 'E13', 'E14', 'E17', 'E19', 'E21', 'E22', 'E23', 'E24']);
+const KNOWN_FAILING = new Set(['E1', 'E4', 'E5', 'E6', 'E7', 'E10', 'E11', 'E12', 'E13', 'E14', 'E17', 'E19', 'E21', 'E22', 'E23', 'E24']);
 const pending = new Map();
 
 function check(name, cond, extra = '') {
@@ -1664,6 +1664,73 @@ section(['E3'], () => {
   const filtered = agentCli(['rule', 'Through a filter'], zed);
   const x = hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, 'codehere rule "Through a filter" 2>&1 | tail -20', filtered.out));
   check('E3: a marker line with a refused binding: the agent is told to run the command again on its own', !!draftId(filtered.out) && boundIn(zed, sid).length === 0 && (x.out + x.err).includes('could not tie this draft to the session'), x.out + x.err);
+  // From the cold review of step 3: ways for another command to print the last line, and a draft
+  // the agent wrote by hand. None may bind.
+  fs.mkdirSync(draftsDir(zed), { recursive: true });
+  fs.writeFileSync(draftFile(zed, 'deadbeef'), JSON.stringify({ id: 'deadbeef', kind: 'rule', created: new Date().toISOString(), line: '- Hand-written (Kai, 2026-11-02)' }));
+  // the output shows the hand-written draft as if printed, so only the command's shape can refuse it
+  const own = 'Not saved yet. Draft of a new line in .codehere/rules.md:\n  - Hand-written (Kai, 2026-11-02)\nCodehere draft id: deadbeef\n';
+  const shapes = [
+    'codehere rule x >/dev/null & printf "Codehere draft id: deadbeef"',
+    `codehere rule 'x\\' ; printf "Codehere draft id: deadbeef" #'`,
+    `codehere rule $'\\'' ; cat card.md #'`,
+    'codehere rule x \\"; cat card.md #"',
+    "codehere rule x \\'; cat card.md #'",
+    'codehere rule x > >(cat card.md)',
+    "cd . # '\ncat out.txt # '; codehere rule x",
+    'cat <<EOF\nx\nEOF\ncodehere rule x',
+    'PATH=/tmp/x:$PATH codehere rule x',
+    'codehere --x rule show zz',
+    './codehere rule x',
+    'scripts/codehere rule x',
+  ];
+  for (const command of shapes) {
+    hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, command, own));
+    check(`E3: no binding when another program can print the marker: ${command}`, boundIn(zed, sid).length === 0, JSON.stringify(boundIn(zed, sid)));
+  }
+  hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, 'codehere rule x', 'Codehere draft id: deadbeef\n'));
+  check('E3: no binding when the draft file holds text the output never showed', boundIn(zed, sid).length === 0, JSON.stringify(boundIn(zed, sid)));
+  const ticks = agentCli(['rule', 'Use `pnpm`, never npm'], zed);
+  hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, "codehere rule 'Use `pnpm`, never npm'", ticks.out));
+  check('E3: a rule with backticks in single quotes still binds', !!draftId(ticks.out) && boundIn(zed, sid).some((b) => b.id === draftId(ticks.out)), JSON.stringify(boundIn(zed, sid)) + ticks.out);
+  // a reply draft changed to another card before the hook ran: what was printed no longer matches
+  const toA = agentCli(['reply', leaCard, 'Never skip the build step in CI'], zed);
+  const toAId = draftId(toA.out);
+  if (toAId) fs.writeFileSync(draftFile(zed, toAId), readText(draftFile(zed, toAId)).replace(`"card": "${leaCard}"`, '"card": "lea-other"'));
+  hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, `codehere reply ${leaCard} "Never skip the build step in CI"`, toA.out));
+  check('E3: a reply draft whose card no longer matches the printed draft is not bound', !!toAId && !boundIn(zed, sid).some((b) => b.id === toAId), JSON.stringify(boundIn(zed, sid)));
+  for (const form of ['npx -y codehere rule "Use pnpm"', 'npx codehere@latest rule "Use pnpm"', 'codehere --gemma help "stuck"', 'cd /tmp && codehere rule "Use pnpm"', 'cd /tmp && \\\n  codehere rule "Use pnpm"']) {
+    const made = agentCli(['rule', 'Use pnpm'], zed);
+    hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, form, made.out));
+    check(`E3: an ordinary way to run codehere still binds: ${form}`, !!draftId(made.out) && boundIn(zed, sid).some((b) => b.id === draftId(made.out)), JSON.stringify(boundIn(zed, sid)));
+  }
+  fs.writeFileSync(path.join(draftsDir(zed), 'ABCDEF12.json'), JSON.stringify({ id: 'abcdef12', kind: 'rule', created: new Date().toISOString(), line: '- From a teammate (Lea, 2026-11-02)' }));
+  sh('git add -f .codehere/local/drafts/ABCDEF12.json && git commit -qm planted', zed);
+  hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, 'codehere rule "z"', 'Codehere draft id: abcdef12\n'));
+  check('E3: a committed draft whose name differs only in case is not bound', !boundIn(zed, sid).some((b) => b.id === 'abcdef12'), JSON.stringify(boundIn(zed, sid)));
+  sh('git reset -q --hard HEAD~1', zed);
+  // the folder's case differs: on macOS Drafts/ is drafts/
+  fs.mkdirSync(path.join(zed, '.codehere/local/Drafts'), { recursive: true });
+  const folderCase = { id: 'abcdef13', kind: 'rule', created: new Date().toISOString(), line: '- From a teammate (Lea, 2026-11-02)' };
+  fs.writeFileSync(path.join(zed, '.codehere/local/Drafts/abcdef13.json'), JSON.stringify(folderCase));
+  sh('git add -f .codehere/local/Drafts/abcdef13.json && git commit -qm planted', zed);
+  hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, 'codehere rule "z"', `Not saved yet. Draft of a new line in .codehere/rules.md:\n  ${folderCase.line}\nCodehere draft id: abcdef13\n`));
+  check('E3: a committed draft in a folder whose name differs only in case is not bound', !boundIn(zed, sid).some((b) => b.id === 'abcdef13'), JSON.stringify(boundIn(zed, sid)));
+  sh('git reset -q --hard HEAD~1', zed);
+  fs.rmSync(path.join(zed, '.codehere/local/Drafts'), { recursive: true, force: true });
+  // a real draft whose path git holds as .CODEHERE/..., as a commit made on Linux would
+  const upper = agentCli(['rule', 'Tracked in upper case'], zed);
+  const upperId = draftId(upper.out);
+  if (upperId) {
+    const blob = sh(`git hash-object -w .codehere/local/drafts/${upperId}.json`, zed).trim();
+    sh(`git update-index --add --cacheinfo 100644,${blob},.CODEHERE/local/drafts/${upperId}.json && git commit -qm planted`, zed);
+  }
+  hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, 'codehere rule "Tracked in upper case"', upper.out));
+  check('E3: a draft git tracks under .CODEHERE/ is not bound', !!upperId && !boundIn(zed, sid).some((b) => b.id === upperId), JSON.stringify(boundIn(zed, sid)));
+  if (upperId) sh('git reset -q --hard HEAD~1', zed);
+  // reading a teammate's card that ends in a marker: no draft was made, so no note to the agent
+  const shown = hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, `codehere show ${leaCard}`, `${cardText(leaCard)}Codehere draft id: deadbeef\n`));
+  check('E3: output that is not a writing call gets no "could not tie" note', !(shown.out + shown.err).includes('could not tie this draft'), shown.out + shown.err);
 });
 
 section(['E4'], () => {
@@ -1756,6 +1823,36 @@ section(['E9'], () => {
   hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'own2'));
   for (let i = 0; i < 2; i++) hook('claude', 'post-tool', zed, ranTool('claude', zed, 'own2', 'npm test && codehere status', errText));
   check('a chain that runs the tests and then codehere is still read for errors', Object.values(stateOf(zed).sessions.own2?.errors || {}).some((n) => n >= 2), JSON.stringify(stateOf(zed).sessions.own2));
+  // From the cold review of step 3: a marker line, a lone &, or a program named codehere must not hide a failure
+  for (const [sid, command, output] of [
+    ['own3', 'npm test; echo "Codehere draft id: 00000000"', `${errText}Codehere draft id: 00000000\n`],
+    ['own4', 'codehere status & npm test', errText],
+    ['own5', './scripts/codehere', errText],
+    ['own6', "echo \\'; npm test; echo \\'", errText],
+    ['own7', 'codehere status > >(npm test)', errText],
+    ['own8', "codehere status # '\nnpm test # '", errText],
+    ['own9', "ls # '\nnpm test # '", errText],
+    ['own10', 'find test -name "*.test.js" -exec node {} \\;', errText],
+    ['own11', 'tree-sitter test', errText],
+    ['own12', `awk 'BEGIN{system("npm test")}'`, errText],
+    ['own13', `awk 'BEGIN{sys''tem("npm test")}'`, errText],
+    ['own14', 'find . -name x "-exec" npm test \\;', errText],
+    ['own15', `awk 'BEGIN{print "npm test" | "sh"}'`, errText],
+    ['own16', "git grep -O'sh run.sh' -e x", errText],
+    ['own17', 'awk -f run.awk', errText],
+    ['own18', 'codehere () ( npm test ); codehere status', errText],
+    ['own20', 'echo $[a["\\$(npm test >&2)"]]', errText],
+    ['own21', 'sed -n "s/x/npm test/ep" f', errText],
+    ['own22', 'awk --file evil.awk f', errText],
+  ]) {
+    hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, sid));
+    for (let i = 0; i < 2; i++) hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, command, output));
+    check(`a failure is still counted in: ${command}`, Object.values(stateOf(zed).sessions[sid]?.errors || {}).some((n) => n >= 2), JSON.stringify(stateOf(zed).sessions[sid]));
+  }
+  // words in a codehere argument are not a command: Codehere's own output stays uncounted
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'own19'));
+  for (let i = 0; i < 3; i++) hook('claude', 'post-tool', zed, ranTool('claude', zed, 'own19', 'codehere help "os.system() returns 256; find -exec fails"', errText));
+  check('E9: a codehere argument that mentions system() or -exec is still Codehere output, not counted', Object.keys(stateOf(zed).sessions.own19?.errors || {}).length === 0, JSON.stringify(stateOf(zed).sessions.own19));
 });
 
 // Kai's second repo: a test that fails on a pound sign until src/price.js is fixed

@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
   listDocs, git, isGitRepo, me, slug, today, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
-  removedAt, expireDrafts,
+  removedAt, expireDrafts, draftFile,
 } from './brain.js';
 import {
   responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact,
@@ -34,7 +34,9 @@ function toAgent(message) {
   process.exit(2);
 }
 
-const quiet = () => process.exit(0);
+// A note for the agent that goes out only when the hook has nothing else to say.
+let quietNote = null;
+const quiet = () => (quietNote ? emitJson(quietNote) : process.exit(0));
 
 // Copilot's inputs: camelCase from its own hook file, snake_case from .claude/settings.json.
 // Map them to the names the handlers read. A failed command arrives as a successful tool
@@ -246,13 +248,155 @@ function settingsChanged(root, s) {
 // `cd x && cat a; ls b` is read-only only if every part is. Quoted text is
 // emptied first so `grep "error|fail"` stays one part, and a part that runs
 // another command ($(...), backticks, <(...)) is never read-only.
-const READ_ONLY = /^\s*(cd|pwd|echo|cat|head|tail|less|more|grep|rg|ag|sed\s+-n|awk|ls|find|tree|wc|git\s+(diff|show|log|blame|grep|status))\b/;
-export function readOnly(command) {
-  const runsSomething = /\$\(|`|<\(/;
-  if (runsSomething.test(command)) return false;
-  const bare = command.replace(/(["'])(?:\\.|(?!\1)[^\\])*\1/g, "''");
-  return bare.split(/&&|\|\||\|&|[;|\n]/).every((part) => !part.trim() || READ_ONLY.test(part));
+const READ_ONLY = /^\s*(cd|pwd|echo|cat|head|tail|less|more|grep|rg|ag|sed\s+-n|awk|ls|find|tree|wc|git\s+(diff|show|log|blame|grep|status))(\s|$)/;
+// Read-only commands that can still run another: awk's system(), a pipe or a file of awk code;
+// find's -exec; git grep -O; rg --pre; GNU sed's e command. Read on the part with its quote marks
+// removed, so quoting cannot hide them, and only on read-only parts, so a codehere argument that
+// mentions system() is still Codehere's own output.
+function runsInside(plain) {
+  if (/^\s*awk(\s|$)/.test(plain)) return /system\s*\(|\||\s-[fEil]|\s--(file|exec|include|load)|@include|@load/.test(plain);
+  if (/^\s*find(\s|$)/.test(plain)) return /\s-(exec|execdir|ok|okdir|delete)(\s|$)/.test(plain);
+  if (/^\s*git\s+grep(\s|$)/.test(plain)) return /\s(-O|--open-files-in-pager)/.test(plain);
+  if (/^\s*rg(\s|$)/.test(plain)) return /\s--pre(\s|=|$)/.test(plain);
+  // GNU sed's e command, or e among the flags after s/.../.../
+  if (/^\s*sed(\s|$)/.test(plain)) return /(^|[\s;{}0-9/$])e(\s|;|$)|\/[a-zA-Z0-9]*e[a-zA-Z0-9]*(\s|;|$)/.test(plain.replace(/^\s*sed\s+-n/, ''));
+  return false;
 }
+const readOnlyPart = (p) => READ_ONLY.test(p.bare) && !runsInside(p.plain);
+
+// The parts of a shell command, each as { bare, plain }: bare has quoted text emptied (to see the
+// command), plain has only the quote marks removed (to see what it runs). Quotes and backslashes are
+// read as the shell reads them: nothing quoted or escaped separates parts, and single quotes hold
+// plain text. null when a part runs another command or the command cannot be split for sure: $( and
+// backticks (also inside double quotes); <( >( $'...' ( ) a comment or a here-doc outside quotes;
+// an unclosed quote. A lone & separates parts, but not in 2>&1 or &>file.
+function commandParts(command) {
+  const parts = [];
+  let bare = '';
+  let plain = '';
+  let quote = null;
+  const cut = () => {
+    if (bare.trim()) parts.push({ bare, plain });
+    bare = plain = '';
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    const next = command[i + 1];
+    const prev = command[i - 1];
+    if (quote === "'") {
+      if (c === "'") (quote = null), (bare += "''");
+      else plain += c;
+      continue;
+    }
+    if (c === '\\') {
+      i++; // the next character is literal; a backslash-newline is removed, as the shell does
+      if (next !== '\n' && next !== undefined) (bare += quote ? '' : '_'), (plain += next);
+      continue;
+    }
+    if (c === '`' || (c === '$' && (next === '(' || next === '['))) return null; // $[ ] arithmetic expands its text again
+    if (quote === '"') {
+      if (c === '"') (quote = null), (bare += "''");
+      else plain += c;
+      continue;
+    }
+    if (c === '(' || c === ')' || (c === '$' && next === "'") || (c === '<' && next === '<')) return null;
+    if (c === '#' && (i === 0 || /[\s;&|]/.test(prev))) return null;
+    if (c === "'" || c === '"') {
+      quote = c;
+      continue;
+    }
+    if (c === ';' || c === '\n') {
+      cut();
+      continue;
+    }
+    if (c === '|') {
+      if (next === '|' || next === '&') i++;
+      cut();
+      continue;
+    }
+    if (c === '&' && next === '&') {
+      i++;
+      cut();
+      continue;
+    }
+    if (c === '&' && prev !== '<' && prev !== '>' && next !== '>') {
+      cut();
+      continue;
+    }
+    bare += c;
+    plain += c;
+  }
+  if (quote) return null;
+  cut();
+  return parts;
+}
+export function readOnly(command) {
+  return !!commandParts(command)?.every(readOnlyPart);
+}
+
+// Codehere's own commands print error text by design (status, help cards, briefs), so their output
+// is not read for errors. A chain that also runs something else still is.
+// codehere on the PATH, through npx (with -y and a version), or the project's own copy, with flags
+// before the subcommand (only the CLI's on/off flags: a flag that takes a value would swallow the
+// subcommand). Not any program named codehere, and no VAR=value in front: PATH= could
+// point to another codehere.
+const CALL = String.raw`^\s*(npx\s+((-y|--yes)\s+)*codehere(@[\w.^~-]+)?|((\.\/)?node_modules\/\.bin\/)?codehere)(\s+--(gemma|all|solved))*`;
+const CODEHERE = new RegExp(`${CALL}(\\s|$)`);
+const ownOrReadOnly = (command) => !!commandParts(command)?.every((p) => CODEHERE.test(p.bare) || readOnlyPart(p));
+
+// ---------- drafts: tie the draft a writing command printed to this session ----------
+
+const WRITING = new RegExp(`${CALL}\\s+(rules?|lessons?|help|reply)(\\s|$)`);
+const MARKER = /^Codehere draft id: ([0-9a-f]{8})$/;
+
+// 'bound', 'refused' (a draft was printed but cannot be tied to the session), or null (no draft).
+// Only the writing call itself may print the last line: it must come last, after nothing but cd.
+// A draft git tracks came through git (a teammate force-added it), so it is never bound.
+function bindDraft(root, input, command, text) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (/^<shellId: .*>$/.test(lines.at(-1) || '')) lines.pop(); // Copilot's own last line
+  const m = MARKER.exec(lines.at(-1) || '');
+  if (!m) return null;
+  const parts = commandParts(command);
+  // only a writing call makes a draft: other output that ends in a marker is not Codehere's to explain
+  const wrote = parts ? parts.some((p) => WRITING.test(p.bare)) : /(^|[\s;&|])codehere\s+(rules?|lessons?|help|reply)(\s|$)/.test(command);
+  if (!wrote) return null;
+  const file = draftFile(root, m[1]);
+  const callOk = !!parts?.length && WRITING.test(parts.at(-1).bare) && parts.slice(0, -1).every((p) => /^\s*cd(\s|$)/.test(p.bare));
+  // by exact name, and git's list compared without case: on macOS ABCDEF12.json opens as abcdef12.json
+  const exact = !!file && fs.existsSync(path.dirname(file)) && fs.readdirSync(path.dirname(file)).includes(`${m[1]}.json`);
+  const rel = path.relative(root, file || '').toLowerCase();
+  const tracked = git(root, ['ls-files', '-z']).split('\0').some((x) => x.toLowerCase() === rel); // .CODEHERE/... too
+  if (!callOk || !exact || tracked) return 'refused';
+  const content = fs.readFileSync(file);
+  let rec = null;
+  try {
+    rec = JSON.parse(content);
+  } catch {}
+  // the file must still say what the person was shown: every line of it was in the output
+  if (!rec || !shownIn(rec, text)) return 'refused';
+  const kind = rec.kind;
+  const state = readState(root);
+  if (!input.session_id) return 'refused';
+  const s = session(state, input.session_id);
+  s.drafts = [...(s.drafts || []), { id: m[1], kind, hash: crypto.createHash('sha256').update(content).digest('hex') }];
+  writeState(root, state);
+  return 'bound';
+}
+
+// The lines the CLI printed for this record (commands.js draft()), each indented by two spaces.
+function shownIn(rec, text) {
+  const doc = (x) => (x && typeof x === 'object' ? renderDoc(x.meta || {}, String(x.body ?? x.text ?? '')).split('\n') : []);
+  const lines = rec.kind === 'rule' ? [rec.line] : rec.kind === 'lesson' ? doc(rec) : rec.kind === 'help' ? doc({ meta: rec.meta, text: rec.text }) : rec.kind === 'reply' ? [rec.line, ...doc(rec.lesson)] : [];
+  const shown = lines.map((l) => String(l ?? '')).filter((l) => l.trim());
+  // whole printed lines, and for a reply the card it is for
+  const out = new Set(text.split('\n').map((l) => l.replace(/\r$/, '')));
+  const card = rec.kind !== 'reply' || out.has(printable(`Not saved yet. Draft of a reply to help card ${rec.card}:`));
+  return card && shown.length > 0 && shown.every((l) => out.has(`  ${printable(l)}`));
+}
+
+const NOT_BOUND = 'Codehere could not tie this draft to the session, so a yes will not save it. Run the codehere command again on its own, with nothing before it but cd and nothing after it.';
+const noteFor = (agent, event, message) => (agent === 'copilot' ? { additionalContext: message } : { hookSpecificOutput: { hookEventName: event, additionalContext: message } });
 
 function matchLesson(root, sig, shown, test) {
   let best = null;
@@ -357,8 +501,10 @@ function writeLesson(root, sig, proofCommand, changed, test) {
 function postTool(root, input, agent) {
   if (input.tool_name && input.tool_name !== 'Bash') quiet();
   const command = (input.tool_input && input.tool_input.command) || '';
-  if (readOnly(command)) quiet();
   const text = responseText(input.tool_response) + '\n' + (input.error || '');
+  // a refused draft never stops the error count: the note waits for a hook that has nothing else to say
+  if (bindDraft(root, input, command, text) === 'refused') quietNote = noteFor(agent, input.hook_event_name || 'PostToolUse', NOT_BOUND);
+  if (ownOrReadOnly(command)) quiet();
   const sig = signature(text);
   if (!sig) {
     // the command that failed last now runs clean: that failure is over
