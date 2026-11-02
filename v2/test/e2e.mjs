@@ -2346,6 +2346,83 @@ section(['S5'], () => {
   check('codehere init refuses a linked .gitignore instead of hanging', !gi.error && gi.status !== 0, `${gi.error} ${gi.status} ${gi.stderr}`);
 });
 
+section(['S6'], () => {
+  // A committed link must not send a write outside the repo. Each case: a fresh repo with the link
+  // committed, an outside target, and the command that would write through it.
+  const outside = path.join(tmp, 'outside-writes');
+  fs.mkdirSync(outside);
+  const repoWith = (name, link, target) => {
+    const dir = path.join(tmp, `wl-${name}`);
+    fs.mkdirSync(dir);
+    sh('git init -q -b main', dir);
+    user(dir, 'Kai');
+    fs.mkdirSync(path.dirname(path.join(dir, link)), { recursive: true });
+    fs.symlinkSync(target, path.join(dir, link));
+    return dir;
+  };
+  const victim = path.join(outside, 'victim.txt');
+  fs.writeFileSync(victim, 'precious user file');
+  let dir = repoWith('readme', '.codehere/README.md', victim);
+  let x = spawnSync('node', [BIN, 'init'], { cwd: dir, input: '', encoding: 'utf8', timeout: 10000 });
+  check('init refuses a committed link at .codehere/README.md and leaves its target alone', x.status === 1 && readText(victim) === 'precious user file', `${x.status} ${x.stderr}`);
+  dir = repoWith('gitignore', '.gitignore', path.join(outside, 'created-by-init'));
+  x = spawnSync('node', [BIN, 'init'], { cwd: dir, input: '', encoding: 'utf8', timeout: 10000 });
+  check('init refuses a dangling linked .gitignore and creates nothing outside the repo, nor .codehere/', x.status === 1 && !fs.existsSync(path.join(outside, 'created-by-init')) && !fs.existsSync(path.join(dir, '.codehere')), `${x.status} ${x.stderr}`);
+  const claudeDir = path.join(outside, 'claudedir');
+  fs.mkdirSync(claudeDir);
+  dir = repoWith('claude', '.claude', claudeDir);
+  x = spawnSync('node', [BIN, 'init'], { cwd: dir, input: '', encoding: 'utf8', timeout: 10000 });
+  check('init refuses a linked .claude/ folder and writes nothing into it', x.status === 1 && fs.readdirSync(claudeDir).length === 0, `${x.status} ${x.stderr}`);
+  dir = repoWith('gitkeep', '.codehere/lessons/.gitkeep', path.join(outside, 'victim-gitkeep'));
+  x = spawnSync('node', [BIN, 'init'], { cwd: dir, input: '', encoding: 'utf8', timeout: 10000 });
+  check('init refuses a dangling linked .gitkeep before writing anything', x.status === 1 && !fs.existsSync(path.join(outside, 'victim-gitkeep')) && !fs.existsSync(path.join(dir, '.codehere/config.json')), `${x.status} ${x.stderr}`);
+  // a target of the wrong kind, or settings init cannot add to: refused before anything is written
+  const plainRepo = (name, setup) => {
+    const d = path.join(tmp, `wk-${name}`);
+    fs.mkdirSync(d);
+    sh('git init -q -b main', d);
+    setup(d);
+    return d;
+  };
+  const wrongKinds = [
+    ['settings-folder', (d) => fs.mkdirSync(path.join(d, '.claude/settings.json'), { recursive: true })],
+    ['settings-null', (d) => (fs.mkdirSync(path.join(d, '.claude')), fs.writeFileSync(path.join(d, '.claude/settings.json'), 'null'))],
+    ['settings-array', (d) => (fs.mkdirSync(path.join(d, '.claude')), fs.writeFileSync(path.join(d, '.claude/settings.json'), '[]'))],
+    ['settings-hooks-object', (d) => (fs.mkdirSync(path.join(d, '.claude')), fs.writeFileSync(path.join(d, '.claude/settings.json'), '{"hooks":{"Stop":{}}}'))],
+    ['gitignore-folder', (d) => fs.mkdirSync(path.join(d, '.gitignore'))],
+  ];
+  for (const [name, setup] of wrongKinds) {
+    const d = plainRepo(name, setup);
+    const r2 = spawnSync('node', [BIN, 'init'], { cwd: d, input: '', encoding: 'utf8', timeout: 10000 });
+    check(`init refuses ${name} before writing anything`, r2.status === 1 && !fs.existsSync(path.join(d, '.codehere')), `${r2.status} ${r2.stderr}`);
+  }
+  // settings shapes 2.0.3 accepted still work: a null hooks, a null event, an event Codehere does not use
+  for (const [name, text] of [['hooks-null', '{"hooks":null}'], ['stop-null', '{"hooks":{"Stop":null}}'], ['other-event', '{"hooks":{"Notification":{}}}']]) {
+    const d = plainRepo(`ok-${name}`, (dd) => (fs.mkdirSync(path.join(dd, '.claude')), fs.writeFileSync(path.join(dd, '.claude/settings.json'), text)));
+    const r3 = spawnSync('node', [BIN, 'init'], { cwd: d, input: '', encoding: 'utf8', timeout: 10000 });
+    check(`init still sets up with settings ${name}`, r3.status === 0 && readText(path.join(d, '.claude/settings.json')).includes('codehere hook stop'), `${r3.status} ${r3.stderr}`);
+  }
+  const awayBase = path.join(outside, 'away-codehere');
+  fs.mkdirSync(path.join(awayBase, 'local'), { recursive: true });
+  fs.writeFileSync(path.join(awayBase, 'local', 'precious.txt'), 'keep me');
+  dir = repoWith('uninstall', '.codehere', awayBase);
+  x = atTerminal('uninstall', dir, 'y');
+  check('uninstall with .codehere a committed link deletes nothing where it points', fs.existsSync(path.join(awayBase, 'local', 'precious.txt')), x.out);
+  fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'codehere hook stop' }] }] } }));
+  sh('mkdir -p .codehere', dir);
+  x = spawnSync('node', [BIN, 'status'], { cwd: dir, input: '', encoding: 'utf8', timeout: 10000 });
+  check('status does not count hooks under a linked .claude/ folder as installed', !x.error && !(x.stdout || '').includes('Claude Code'), x.stdout);
+  resetRepo(zed);
+  const briefsAway = path.join(outside, 'briefs');
+  fs.mkdirSync(briefsAway);
+  fs.rmSync(path.join(zed, '.codehere/briefs'), { recursive: true, force: true });
+  fs.symlinkSync(briefsAway, path.join(zed, '.codehere/briefs'));
+  agentCli(['brief'], zed);
+  check('brief writes nothing through a linked briefs/ folder', fs.readdirSync(briefsAway).length === 0, fs.readdirSync(briefsAway).join(', '));
+  fs.unlinkSync(path.join(zed, '.codehere/briefs'));
+  resetRepo(zed);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

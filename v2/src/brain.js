@@ -31,10 +31,11 @@ export function paths(root) {
   };
 }
 
+// No folder is made through a committed link (init refuses one outright).
 export function ensureDirs(root) {
   const p = paths(root);
   for (const d of [p.base, p.lessons, p.help, p.briefs, p.local]) {
-    fs.mkdirSync(d, { recursive: true });
+    if (ownPath(root, d)) fs.mkdirSync(d, { recursive: true });
   }
   return p;
 }
@@ -85,7 +86,7 @@ export function readConfig(root) {
 }
 
 export function writeConfig(root, cfg) {
-  fs.writeFileSync(paths(root).config, JSON.stringify(cfg, null, 2) + '\n');
+  writePlain(root, paths(root).config, JSON.stringify(cfg, null, 2) + '\n');
 }
 
 // ---------- local session state ----------
@@ -402,7 +403,7 @@ export function me(root) {
 
 // True when no part of p below root is a symlink, so a write to p lands at p. A teammate can
 // commit a symlink anywhere in .codehere/, dangling or not; git writes it on pull.
-function ownPath(root, p) {
+export function ownPath(root, p) {
   let at = path.resolve(root);
   for (const part of path.relative(at, path.resolve(p)).split(path.sep)) {
     if (!part || part === '..') return false;
@@ -414,6 +415,25 @@ function ownPath(root, p) {
     }
   }
   return true;
+}
+
+// A write into the repo that a committed symlink cannot redirect: no link on the path (the final
+// name refused without a race by O_NOFOLLOW). mode 'w' replaces, 'a' appends.
+const linkedError = (root, file) => Object.assign(new Error(`${path.relative(root, file)} is a link or under one, so Codehere will not write it.`), { code: 'ENOTPLAIN' });
+export function writePlain(root, file, data, mode = 'w') {
+  if (!ownPath(root, file)) throw linkedError(root, file);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const { O_WRONLY, O_CREAT, O_TRUNC, O_APPEND, O_NOFOLLOW } = fs.constants;
+  const fd = fs.openSync(file, O_WRONLY | O_CREAT | O_NOFOLLOW | (mode === 'a' ? O_APPEND : O_TRUNC), 0o666); // the umask applies, as with writeFileSync
+  try {
+    fs.writeFileSync(fd, data);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+export function removePlain(root, file) {
+  if (!ownPath(root, file)) throw linkedError(root, file);
+  fs.rmSync(file, { force: true });
 }
 
 // A new file, never over an existing one or through a link: name.md, then name-2.md, ...

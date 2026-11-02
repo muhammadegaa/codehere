@@ -7,7 +7,7 @@ import {
   findRoot, paths, ensureDirs, readConfig, writeConfig, readState, writeState,
   readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
   readApprovals, isApproved, addApproval, removeApprovals, markRemoved, printable, commitId,
-  saveRecord, writeDraft, readPlain,
+  saveRecord, writeDraft, readPlain, writePlain, removePlain, ownPath,
 } from './brain.js';
 import { redact } from './signals.js';
 import { summarize } from './gemma.js';
@@ -70,9 +70,23 @@ function detectTestCommand(root) {
   return null;
 }
 
+// A settings file init can add its hooks to: a JSON object whose hooks, if any, are an object in
+// which the events Codehere adds to are lists (or missing). One that is not valid JSON is replaced,
+// as before.
+function addableSettings(file, agent) {
+  let s;
+  try {
+    s = JSON.parse(readPlain(file));
+  } catch {
+    return true;
+  }
+  const isObject = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+  const listOrNone = (x) => x == null || Array.isArray(x);
+  return isObject(s) && (s.hooks == null || (isObject(s.hooks) && Object.keys(agent.events).every((e) => listOrNone(s.hooks[e]))));
+}
+
 function mergeHooks(root, agent) {
   const file = path.join(root, agent.file);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
   let settings = {};
   try {
     settings = JSON.parse(readPlain(file));
@@ -98,13 +112,14 @@ function mergeHooks(root, agent) {
     if (spec.matcher) group.matcher = spec.matcher;
     list.push(group);
   }
-  fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
+  writePlain(root, file, JSON.stringify(settings, null, 2) + '\n');
 }
 
 // Takes Codehere's hooks out of the agent's settings file, keeping everything else.
 // A file left with nothing in it is removed, and its folders up to the repo if they are then empty.
 function removeHooks(root, agent) {
   const file = path.join(root, agent.file);
+  if (!ownPath(root, file)) return false; // under a committed link: not ours to rewrite or delete
   let settings;
   try {
     settings = JSON.parse(readPlain(file));
@@ -128,9 +143,9 @@ function removeHooks(root, agent) {
   if (!found) return false;
   if (!Object.keys(hooks).length) delete settings.hooks;
   if (Object.keys(settings).some((k) => !(agent.flat && k === 'version'))) {
-    fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
+    writePlain(root, file, JSON.stringify(settings, null, 2) + '\n');
   } else {
-    fs.rmSync(file);
+    removePlain(root, file);
     for (let d = path.dirname(file); d !== root; d = path.dirname(d)) {
       try {
         fs.rmdirSync(d);
@@ -144,6 +159,7 @@ function removeHooks(root, agent) {
 
 function installedAgents(root) {
   return Object.values(AGENTS).filter((a) => {
+    if (!ownPath(root, path.join(root, a.file))) return false; // under a committed link: not this repo's
     try {
       const hooks = JSON.parse(readPlain(path.join(root, a.file))).hooks || {};
       return Object.values(hooks).some((gs) => Array.isArray(gs) && gs.some((g) => hooksOf(g).some(ours)));
@@ -158,7 +174,7 @@ function addGitignore(root) {
   const line = '.codehere/local/';
   const cur = fs.existsSync(file) ? readPlain(file) : ''; // a link is refused, not written through
   if (!cur.split('\n').includes(line)) {
-    fs.writeFileSync(file, cur + (cur && !cur.endsWith('\n') ? '\n' : '') + line + '\n');
+    writePlain(root, file, cur + (cur && !cur.endsWith('\n') ? '\n' : '') + line + '\n');
   }
 }
 
@@ -283,17 +299,44 @@ export async function init(flags) {
   }
   const agents = [...new Set(names)].map((n) => AGENTS[n]);
   const root = process.cwd();
+  // Everything init writes, checked before anything is written: a committed link anywhere on these
+  // paths would send a write outside the repo.
+  const pp = paths(root);
+  const targets = [pp.base, pp.config, pp.rules, path.join(pp.base, 'README.md'), pp.lessons, pp.help, pp.briefs, pp.local, ...[pp.lessons, pp.help, pp.briefs].map((d) => path.join(d, '.gitkeep')), path.join(root, '.gitignore'), ...agents.map((a) => path.join(root, a.file))];
+  const linked = targets.find((f) => !ownPath(root, f));
+  if (linked) {
+    console.error(`Codehere: ${path.relative(root, linked)} is a link or under one (a teammate may have committed it). Nothing was written. Remove the link and run codehere init again.`);
+    process.exit(1);
+  }
+  // ...and each is what init expects (a folder, a plain file, settings it can add hooks to), or
+  // init would stop halfway with part of the setup written.
+  const folders = new Set([pp.base, pp.lessons, pp.help, pp.briefs, pp.local]);
+  const kindOf = (f) => {
+    try {
+      const st = fs.lstatSync(f);
+      return st.isDirectory() ? 'folder' : st.isFile() ? 'file' : 'other';
+    } catch {
+      return null;
+    }
+  };
+  const wrong = targets.find((f) => kindOf(f) && kindOf(f) !== (folders.has(f) ? 'folder' : 'file'));
+  const unaddable = agents.map((a) => [path.join(root, a.file), a]).find(([f, a]) => kindOf(f) === 'file' && !addableSettings(f, a))?.[0];
+  if (wrong || unaddable) {
+    const f = wrong || unaddable;
+    console.error(`Codehere: ${path.relative(root, f)} is not ${wrong ? `a ${folders.has(f) ? 'folder' : 'plain file'}` : 'a settings object Codehere can add its hooks to'}. Nothing was written.`);
+    process.exit(1);
+  }
   const p = ensureDirs(root);
   const cfg = readConfig(root);
   if (flags.test) cfg.testCommand = flags.test;
   else if (!cfg.testCommand) cfg.testCommand = detectTestCommand(root);
   writeConfig(root, cfg);
 
-  if (!fs.existsSync(p.rules)) fs.writeFileSync(p.rules, RULES_MD);
-  fs.writeFileSync(path.join(p.base, 'README.md'), README_MD);
+  if (!fs.existsSync(p.rules)) writePlain(root, p.rules, RULES_MD);
+  writePlain(root, path.join(p.base, 'README.md'), README_MD);
   for (const d of [p.lessons, p.help, p.briefs]) {
     const keep = path.join(d, '.gitkeep');
-    if (!fs.existsSync(keep)) fs.writeFileSync(keep, '');
+    if (!fs.existsSync(keep)) writePlain(root, keep, '');
   }
   addGitignore(root);
   for (const a of agents) mergeHooks(root, a);
@@ -335,8 +378,8 @@ function removeGitignoreLine(root) {
   const lines = text.split('\n');
   const kept = lines.filter((l) => l !== '.codehere/local/');
   if (kept.length === lines.length) return;
-  if (kept.join('\n').trim()) fs.writeFileSync(file, kept.join('\n'));
-  else fs.rmSync(file);
+  if (kept.join('\n').trim()) writePlain(root, file, kept.join('\n'));
+  else removePlain(root, file);
 }
 
 function filesIn(dir) {
@@ -377,7 +420,16 @@ export async function uninstall() {
   removeApprovals(root);
   markRemoved(root);
   const p = paths(root);
-  fs.rmSync(p.local, { recursive: true, force: true });
+  if (!ownPath(root, p.base)) {
+    // a committed link: removing it is enough, and walking or deleting where it points is not ours
+    fs.rmSync(p.base, { force: true });
+    removeGitignoreLine(root);
+    console.log('- Removed the .codehere link (a teammate may have committed it); what it points to was left alone.');
+    console.log('Codehere is removed from this repo on this machine. Commit the changes so your team gets them too.');
+    return;
+  }
+  // not through a committed link: with local/ linked elsewhere this would delete <target>
+  if (ownPath(root, p.local)) fs.rmSync(p.local, { recursive: true, force: true });
   const readme = path.join(p.base, 'README.md');
   const written = [p.config, p.rules, readme, ...[p.lessons, p.help, p.briefs].map((d) => path.join(d, '.gitkeep'))];
   const rules = readRules(root).length;
@@ -554,7 +606,7 @@ export async function brief(flags) {
   }
 
   const file = path.join(paths(root).briefs, `${stamp()}.md`);
-  fs.writeFileSync(file, text + '\n');
+  writePlain(root, file, text + '\n'); // briefs/ may be a committed link
   state.pendingBrief = file;
   writeState(root, state);
   console.log(text);
