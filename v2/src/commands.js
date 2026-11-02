@@ -7,6 +7,7 @@ import {
   findRoot, paths, ensureDirs, readConfig, writeConfig, readState, writeState,
   readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
   readApprovals, isApproved, addApproval, removeApprovals, markRemoved, printable, commitId,
+  saveRecord, writeDraft,
 } from './brain.js';
 import { redact } from './signals.js';
 import { summarize } from './gemma.js';
@@ -168,6 +169,7 @@ function addGitignore(root) {
 const AGENT_PROCESSES = new Set(['claude', 'codex', 'copilot', 'opencode']);
 const PS = fs.existsSync('/bin/ps') ? '/bin/ps' : '/usr/bin/ps';
 function underAgent() {
+  if (process.env.CODEHERE_TEST_AGENT === '1') return true; // for tests; it can only make Codehere stricter
   let pid = process.ppid;
   for (let i = 0; i < 100 && pid > 1; i++) {
     let line, args;
@@ -185,6 +187,39 @@ function underAgent() {
   return pid > 1;
 }
 const atTerminal = () => !!(process.stdin.isTTY && process.stdout.isTTY) && !underAgent();
+// rule, lesson, help and reply save at once only when the developer typed them: they ask nothing,
+// so stdout may be piped (`codehere help "..." | pbcopy`). Run by an agent, they make a draft.
+const typedByPerson = () => !!process.stdin.isTTY && !underAgent();
+
+// The draft is printed for the agent to show the person. The prompt hook saves it if the person's
+// next message is a plain yes; the after-tool hook ties it to the session by the last line.
+function draft(root, rec, lines) {
+  const id = writeDraft(root, rec);
+  if (!id) {
+    console.error('Codehere: .codehere/local/drafts/ is not a plain folder in this repo (a link?), so nothing was written.');
+    process.exit(1);
+  }
+  console.log(
+    [
+      ...lines,
+      'Show the user this draft exactly as printed. Codehere saves it if their next message is a plain yes; any other reply discards it.',
+      `Codehere draft id: ${id}`,
+    ]
+      .map(printable)
+      .join('\n')
+  );
+}
+const indent = (text) => text.trimEnd().split('\n').map((l) => `  ${l}`);
+// One line, built before the record, so the draft prints exactly what a yes saves.
+const oneLine = (s) => String(s).replace(/\s*[\r\n]+\s*/g, ' ');
+function saveOrExit(root, rec) {
+  const saved = saveRecord(root, rec);
+  if (saved.error) {
+    console.error(saved.error);
+    process.exit(1);
+  }
+  return saved;
+}
 
 async function askApproval(root, command) {
   const last = git(root, 'log -1 --format="%an on %ad (%h)" --date=short -- .codehere/config.json');
@@ -363,7 +398,9 @@ export function rule(text) {
     console.log(rules.length ? rules.map((r) => `- ${r}`).join('\n') : 'No team rules yet. Add one: codehere rule "Never edit migrations by hand"');
     return;
   }
-  fs.appendFileSync(paths(root).rules, `- ${text} (${me(root)}, ${today()})\n`);
+  const rec = { kind: 'rule', line: `- ${oneLine(text)} (${me(root)}, ${today()})` };
+  if (!typedByPerson()) return draft(root, rec, ['Not saved yet. Draft of a new line in .codehere/rules.md:', `  ${rec.line}`]);
+  saveOrExit(root, rec);
   console.log('Rule added. Every new agent session will follow it. Commit .codehere/rules.md to share it.');
 }
 
@@ -382,15 +419,10 @@ export function lesson(title, flags) {
     console.error('Add the fix: codehere lesson "<problem>" --fix "<what fixed it>" [--sig "<error text>"]');
     process.exit(1);
   }
-  const file = path.join(dir, `${today()}-${slug(title)}.md`);
-  fs.writeFileSync(
-    file,
-    renderDoc(
-      { title, signature: flags.sig || title, author: me(root), date: today() },
-      `## Fix\n- ${flags.fix}\n`
-    )
-  );
-  console.log(`Lesson saved: ${path.relative(root, file)}. Commit it to share with your team.`);
+  const cause = typeof flags.cause === 'string' ? `- Cause: ${oneLine(flags.cause)}\n` : '';
+  const rec = { kind: 'lesson', meta: { title: oneLine(title), signature: oneLine(flags.sig || title), author: me(root), date: today() }, body: `## Fix\n${cause}- Fix: ${oneLine(flags.fix)}\n` };
+  if (!typedByPerson()) return draft(root, rec, ['Not saved yet. Draft of a new team lesson in .codehere/lessons/:', ...indent(renderDoc(rec.meta, rec.body))]);
+  console.log(`Lesson saved: ${saveOrExit(root, rec).file}. Commit it to share with your team.`);
 }
 
 // ---------- transcript reading ----------
@@ -519,7 +551,7 @@ export async function help(question, flags) {
   const prompts = userPrompts(s && s.transcript);
   const errs = repeatedErrors(s);
   const g = gitSummary(root, s && s.startHead);
-  const ask = question || (errs[0] ? `Stuck on: ${errs[0].sig}` : 'I am stuck and could use a second pair of eyes');
+  const ask = oneLine(question || (errs[0] ? `Stuck on: ${errs[0].sig}` : 'I am stuck and could use a second pair of eyes'));
 
   const body = ['## Question', ask, ''];
   if (prompts[0]) body.push('## What I am trying to build', prompts[0].slice(0, 600), '');
@@ -550,18 +582,16 @@ export async function help(question, flags) {
     else console.error(summary?.error || '(Gemma not reachable through Ollama; using the plain help card.)');
   }
 
-  const id = `${stamp()}-${slug(ask, 30)}`;
-  const file = path.join(paths(root).help, `${id}.md`);
-  fs.writeFileSync(
-    file,
-    renderDoc(
-      { id, author: me(root), date: today(), status: 'open', signature: errs[0] ? errs[0].sig : '', ...(errs[0]?.test ? { test: redact(errs[0].test).slice(0, 120) } : {}) },
-      text
-    )
-  );
+  const rec = {
+    kind: 'help',
+    meta: { id: `${stamp()}-${slug(ask, 30)}`, author: me(root), date: today(), status: 'open', signature: errs[0] ? errs[0].sig : '', ...(errs[0]?.test ? { test: redact(errs[0].test).slice(0, 120) } : {}) },
+    text,
+  };
+  if (!typedByPerson()) return draft(root, rec, ['Not saved yet. Draft of a help card for your team in .codehere/help/ (secrets and emails redacted):', ...indent(renderDoc(rec.meta, rec.text))]);
+  const { file } = saveOrExit(root, rec);
   console.log(text);
   console.log('---');
-  console.log(`Help card saved: ${path.relative(root, file)} (secrets and emails redacted, please still check).`);
+  console.log(`Help card saved: ${file} (secrets and emails redacted, please still check).`);
   console.log('Share it one of two ways:');
   console.log('  1. Commit and push. Teammates see it with `codehere inbox` and answer with `codehere reply`.');
   console.log('  2. Copy the text above into WhatsApp, Discord or Slack.');
@@ -607,25 +637,24 @@ export function reply(id, text, flags) {
   const d = findHelp(root, id);
   const { meta, body } = parseDoc(fs.readFileSync(d.file, 'utf8'));
   const who = me(root);
-  let newBody = body.includes('## Replies') ? body.trimEnd() : `${body.trimEnd()}\n\n## Replies`;
-  newBody += `\n- ${who} (${today()}): ${text}\n`;
+  const rec = { kind: 'reply', card: d.id, line: `- ${who} (${today()}): ${oneLine(text)}` };
   if (flags.solved) {
-    meta.status = 'resolved';
-    meta.resolvedBy = who;
     const q = (body.match(/## Question\n(.+)/) || [null, meta.id])[1];
-    const lessonFile = path.join(paths(root).lessons, `${today()}-${slug(q)}.md`);
-    fs.writeFileSync(
-      lessonFile,
-      renderDoc(
-        { title: q, signature: meta.signature || q, ...(meta.test ? { test: meta.test } : {}), author: who, date: today(), from: `help/${d.id}` },
-        `## Fix\n- ${text}\n`
-      )
-    );
-    console.log(`Marked solved and saved as a team lesson: ${path.relative(root, lessonFile)}`);
+    rec.lesson = {
+      meta: { title: oneLine(q), signature: oneLine(meta.signature || q), ...(meta.test ? { test: oneLine(meta.test) } : {}), author: who, date: today(), from: `help/${d.id}` },
+      body: `## Fix\n- ${oneLine(text)}\n`,
+    };
+  }
+  if (!typedByPerson()) {
+    const lesson = rec.lesson ? ['It also marks the card solved and saves this team lesson:', ...indent(renderDoc(rec.lesson.meta, rec.lesson.body))] : [];
+    return draft(root, rec, [`Not saved yet. Draft of a reply to help card ${d.id}:`, `  ${rec.line}`, ...lesson]);
+  }
+  const saved = saveOrExit(root, rec);
+  if (saved.lesson) {
+    console.log(`Marked solved and saved as a team lesson: ${saved.lesson}`);
     console.log('From now on, any teammate\'s agent that hits this error gets your fix automatically.');
   }
-  fs.writeFileSync(d.file, renderDoc(meta, newBody));
-  console.log(`Reply added to ${path.relative(root, d.file)}. Commit and push so ${meta.author} sees it.`);
+  console.log(`Reply added to ${saved.file}. Commit and push so ${meta.author} sees it.`);
 }
 
 // ---------- status ----------

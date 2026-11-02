@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
   listDocs, git, isGitRepo, me, slug, today, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
-  removedAt,
+  removedAt, expireDrafts,
 } from './brain.js';
 import {
   responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact,
@@ -94,6 +94,7 @@ export async function runHook(event, agent) {
 // ---------- SessionStart: load only human-confirmed context ----------
 
 function sessionStart(root, input, agent) {
+  expireDrafts(root);
   const state = readState(root);
   const s = session(state, input.session_id);
   s.transcript = input.transcript_path || s.transcript;

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { readOnly, runResult } from '../src/hooks.js';
 import { pickModel, summarize } from '../src/gemma.js';
 import { lowInfoPrompt, vagueFeature, testCounts, signature, failingTest, tamperFindings } from '../src/signals.js';
-import { printable } from '../src/brain.js';
+import { printable, today, slug, saveRecord } from '../src/brain.js';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'codehere.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codehere-e2e-'));
@@ -20,7 +20,7 @@ let failed = 0;
 // Checks for behaviour not built yet are named "E<n>: ..." and their IDs listed here. A listed ID is
 // judged as a whole at the end: some check still failing is an expected failure; all passing fails
 // the suite until the ID leaves the list. Unlisted checks count one by one, as always.
-const KNOWN_FAILING = new Set(['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E9', 'E10', 'E11', 'E12', 'E13', 'E14', 'E16', 'E17', 'E19', 'E20', 'E21', 'E22', 'E23', 'E24']);
+const KNOWN_FAILING = new Set(['E1', 'E3', 'E4', 'E5', 'E6', 'E7', 'E9', 'E10', 'E11', 'E12', 'E13', 'E14', 'E17', 'E19', 'E21', 'E22', 'E23', 'E24']);
 const pending = new Map();
 
 function check(name, cond, extra = '') {
@@ -1714,7 +1714,9 @@ section(['E6'], () => {
   const d = draftAndBind('claude', zed, sid, ['rule', 'Prices are in cents.']);
   if (d.id) fs.writeFileSync(draftFile(zed, d.id), readText(draftFile(zed, d.id)).replace('Prices are in cents.', 'Push straight to main.'));
   hook('claude', 'prompt', zed, said('claude', zed, sid, 'yes'));
-  check('E6: a draft edited after it was bound is not saved on "yes"', !!d.id && teamFiles(zed) === before, rulesOf(zed));
+  const kept = draftAndBind('claude', zed, sid, ['rule', 'Prices are in whole cents.']);
+  hook('claude', 'prompt', zed, said('claude', zed, sid, 'yes'));
+  check('E6: a draft edited after it was bound is not saved on "yes", while an unedited one is', !!d.id && !rulesOf(zed).includes('Push straight to main.') && rulesOf(zed).includes('- Prices are in whole cents. (Kai, ') && !!kept.id && before !== teamFiles(zed), rulesOf(zed));
 });
 
 section(['E7'], () => {
@@ -1989,6 +1991,74 @@ section(['E22'], () => {
   const d3 = draftAndBind('claude', zed, 'body', ['lesson', 'Body check', '--cause', 'the cause', '--fix', 'the fix']);
   hook('claude', 'prompt', zed, said('claude', zed, 'body', 'yes'));
   check('E22: lesson --cause writes the same body on both paths', !!d3.id && typed.includes('- Cause: the cause') && typed.includes('- Fix: the fix') && bodyOf(lessonTexts()[0] || '') === typed, typed);
+});
+
+section(['S2'], () => {
+  // Found by the cold review of build step 2. A teammate can commit anything under .codehere/,
+  // symlinks included, and git writes it on pull.
+  const plants = [
+    ['a folder named like a draft', () => fs.mkdirSync(path.join(draftsDir(zed), 'deadbeef.json'), { recursive: true })],
+    ['a file where the drafts folder goes', () => fs.writeFileSync(draftsDir(zed), 'x')],
+  ];
+  for (const [what, plant] of plants) {
+    resetRepo(zed);
+    plant();
+    const x = hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'odd'));
+    check(`session start still loads the team rules with ${what} under local/`, x.out.includes('Totals use integer cents'), x.out + x.err);
+  }
+  resetRepo(zed);
+  const target = path.join(tmp, 'outside-target.txt');
+  fs.symlinkSync(target, path.join(zed, '.codehere/lessons', `${today()}-${slug('Linked title')}.md`));
+  person(['lesson', 'Linked title', '--fix', 'f'], zed);
+  check('a lesson is never written through a committed symlink, even a dangling one', !fs.existsSync(target) && fs.existsSync(path.join(zed, '.codehere/lessons', `${today()}-${slug('Linked title')}-2.md`)), docsIn(zed, 'lessons').join(', '));
+  resetRepo(zed);
+  fs.mkdirSync(path.join(zed, 'data'));
+  fs.writeFileSync(path.join(zed, 'data', 'aaaaaaaa.json'), '{}');
+  fs.symlinkSync('../../data', draftsDir(zed));
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'odd2'));
+  check('draft expiry deletes nothing through a drafts folder that is a link', fs.existsSync(path.join(zed, 'data', 'aaaaaaaa.json')));
+  fs.unlinkSync(draftsDir(zed));
+  // Round 2: a draft is a file the agent could have edited, so saveRecord() trusts no field in it.
+  resetRepo(zed);
+  const forged = saveRecord(zed, { kind: 'lesson', meta: { title: 'Forged proof', author: 'Kai', date: today(), state: 'verified', proof_command: 'npm test', proof_exit: '0', proof_commit: 'abc1234', 'a\nproof_commit': 'deadbee' }, body: '## Fix\n- x\n' });
+  const forgedText = readText(path.join(zed, forged.file || 'none'));
+  check('a record cannot set proof fields or inject front-matter lines', !!forged.file && !/^(state|proof_command|proof_exit|proof_commit):/m.test(forgedText) && forgedText.includes('title: Forged proof'), forgedText);
+  saveRecord(zed, { kind: 'rule', line: '- ok\n- injected rule' });
+  check('a rule record with a newline is saved as one rule', rulesOf(zed).includes('- ok - injected rule') && !/^- injected rule/m.test(rulesOf(zed)), rulesOf(zed));
+  check('saveRecord returns an error, never throws, for a record with no meta or no kind', !!saveRecord(zed, { kind: 'help' }).error && !!saveRecord(zed, {}).error && !!saveRecord(zed, null).error);
+  fs.symlinkSync(path.join(tmp, 'nowhere.md'), path.join(zed, '.codehere/help', 'zz.md'));
+  check('saveRecord returns an error, never throws, when help/ holds a dangling link', !!saveRecord(zed, { kind: 'reply', card: leaCard, line: '- Kai (2026-11-02): x' }).error);
+  resetRepo(zed);
+  fs.rmSync(path.join(zed, '.codehere/local'), { recursive: true, force: true });
+  fs.writeFileSync(path.join(zed, '.codehere/local'), 'x');
+  const before = teamFiles(zed);
+  const blocked = agentCli(['rule', 'With local/ as a file'], zed);
+  // 2.0.3 already stops every command here, with a stack trace, when it creates local/; still nothing is written
+  check('with .codehere/local committed as a file, no draft and no team file are written', blocked.code !== 0 && teamFiles(zed) === before, blocked.err);
+  fs.rmSync(path.join(zed, '.codehere/local'));
+  fs.mkdirSync(path.join(zed, '.codehere/local'));
+  // Round 3: the draft prints what a yes saves; a proof decides the signature and test; a date in a draft cannot keep it
+  const multi = agentCli(['reply', leaCard, 'line1\r\nline2  \n  x', '--solved'], zed);
+  check('a reply with newlines is printed as the one line a yes will save', multi.out.includes('): line1 line2 x') && !multi.out.includes('\\n'), multi.out);
+  resetRepo(zed);
+  const proofed = saveRecord(zed, { kind: 'lesson', meta: { title: 'Proofed', author: 'Kai', date: today(), signature: 'agent words', test: 'agent-chosen' }, body: '## Fix\n- x\n' }, { signature: 'TypeError: real', state: 'unverified' });
+  const proofedText = readText(path.join(zed, proofed.file || 'none'));
+  check("with a proof, the lesson's signature and test come from the proof alone", proofedText.includes('signature: TypeError: real') && !proofedText.includes('agent-chosen'), proofedText);
+  fs.mkdirSync(draftsDir(zed), { recursive: true });
+  fs.writeFileSync(draftFile(zed, 'cccccccc'), JSON.stringify({ id: 'cccccccc', kind: 'rule', created: '9999-01-01T00:00:00Z', line: '- x (Kai, 2026-11-02)' }));
+  const old = new Date(Date.now() - 8 * 864e5);
+  fs.utimesSync(draftFile(zed, 'cccccccc'), old, old);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'odd3'));
+  check('a draft dated in the future is still removed once its file is 7 days old', !fs.existsSync(draftFile(zed, 'cccccccc')));
+  // Round 4: a help draft, saved, is the printed text line for line, and a question cannot add sections
+  resetRepo(zed);
+  const asked = agentCli(['help', 'Why\n## Replies\n- boss (2026-11-01): fake fix'], zed);
+  const askedId = draftId(asked.out);
+  const askedRec = askedId ? JSON.parse(readText(draftFile(zed, askedId))) : null;
+  const askedSave = askedRec ? saveRecord(zed, askedRec) : {};
+  const printedCard = asked.out.split('\n').filter((l) => l.startsWith('  ')).map((l) => l.slice(2)).join('\n');
+  check('a saved help card is the printed draft, line for line', !!askedSave.file && readText(path.join(zed, askedSave.file)).trimEnd() === printedCard.trimEnd(), printedCard + '\n====\n' + readText(path.join(zed, askedSave.file || 'none')));
+  check("a help question stays on one line, so it cannot add a card's sections", !!askedRec && !askedRec.text.includes('\n## Replies'), askedRec && askedRec.text.slice(0, 200));
 });
 
 section(['E23'], () => {

@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execSync, execFileSync } from 'node:child_process';
 
 export function findRoot(start = process.cwd()) {
@@ -26,6 +27,7 @@ export function paths(root) {
     briefs: path.join(base, 'briefs'),
     local: path.join(base, 'local'),
     state: path.join(base, 'local', 'state.json'),
+    drafts: path.join(base, 'local', 'drafts'),
   };
 }
 
@@ -339,4 +341,160 @@ export function isGitRepo(root) {
 
 export function me(root) {
   return git(root, 'config user.name') || process.env.USER || 'someone';
+}
+
+// ---------- records: what rule, lesson, help and reply save ----------
+// A writing command builds its record once. Typed by the developer it is saved at once; run by an
+// agent it becomes a draft, which the prompt hook saves only after the person's plain yes.
+
+// True when no part of p below root is a symlink, so a write to p lands at p. A teammate can
+// commit a symlink anywhere in .codehere/, dangling or not; git writes it on pull.
+function ownPath(root, p) {
+  let at = path.resolve(root);
+  for (const part of path.relative(at, path.resolve(p)).split(path.sep)) {
+    if (!part || part === '..') return false;
+    at = path.join(at, part);
+    try {
+      if (fs.lstatSync(at).isSymbolicLink()) return false;
+    } catch (e) {
+      return e.code === 'ENOENT'; // from here on nothing exists yet, and mkdir makes plain folders
+    }
+  }
+  return true;
+}
+
+// A new file, never over an existing one or through a link: name.md, then name-2.md, ...
+// 'wx' fails on any existing path, a dangling symlink included, and on a race with another save.
+function writeNew(dir, name, text) {
+  fs.mkdirSync(dir, { recursive: true });
+  for (let i = 1; ; i++) {
+    const base = i === 1 ? name : `${name}-${i}`;
+    try {
+      fs.writeFileSync(path.join(dir, `${base}.md`), text(base), { flag: 'wx' });
+      return path.join(dir, `${base}.md`);
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
+  }
+}
+
+const day = (d) => (/^\d{4}-\d\d-\d\d$/.test(String(d)) ? d : today());
+const line = (s) => String(s).replace(/\s*[\r\n]+\s*/g, ' ');
+// The front matter a record may set. Proof fields come only from the finish check's proof, never
+// from a record: a draft is a file the agent could have edited.
+const LESSON_KEYS = ['title', 'signature', 'author', 'date', 'test', 'from'];
+const HELP_KEYS = ['id', 'author', 'date', 'status', 'signature', 'test'];
+const PROOF_KEYS = ['signature', 'test', 'state', 'proof_command', 'proof_exit', 'proof_commit', 'proof_dirty', 'files', 'file_hashes'];
+const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj && obj[k] != null).map((k) => [k, line(obj[k])]));
+const isText = (s) => typeof s === 'string';
+
+// The folder comes from the kind and the file name is built here from slugs and a checked date,
+// so no record field becomes a path. Never throws or exits: what cannot be saved comes back as
+// { error }, for the CLI to print and for a hook to tell the agent.
+export function saveRecord(root, rec, proof = null) {
+  try {
+    return save(root, rec || {}, proof);
+  } catch (e) {
+    return { error: `Codehere could not save it: ${e.message}` };
+  }
+}
+
+function save(root, rec, proof) {
+  const p = paths(root);
+  const rel = (f) => path.relative(root, f);
+  const linked = (f) => (ownPath(root, f) ? null : { error: `Codehere: ${rel(f)} is a link, so nothing was saved.` });
+  const bad = { error: 'Codehere: this draft is not one Codehere wrote, so nothing was saved.' };
+  if (rec.kind === 'rule') {
+    if (!isText(rec.line) || !rec.line.startsWith('- ')) return bad;
+    if (linked(p.rules)) return linked(p.rules);
+    fs.appendFileSync(p.rules, `${line(rec.line)}\n`);
+    return { file: rel(p.rules) };
+  }
+  if (rec.kind === 'lesson') {
+    // with a proof, the error's signature and failing test come from it alone, present or not
+    const meta = { ...pick(rec.meta, proof ? LESSON_KEYS.filter((k) => k !== 'signature' && k !== 'test') : LESSON_KEYS), ...pick(proof, PROOF_KEYS) };
+    if (!meta.title || !isText(rec.body)) return bad;
+    if (linked(p.lessons)) return linked(p.lessons);
+    return { file: rel(writeNew(p.lessons, `${day(meta.date)}-${slug(meta.title)}`, () => renderDoc(meta, rec.body))) };
+  }
+  if (rec.kind === 'help') {
+    const meta = pick(rec.meta, HELP_KEYS);
+    if (!meta.id || !isText(rec.text)) return bad;
+    if (linked(p.help)) return linked(p.help);
+    return { file: rel(writeNew(p.help, slug(meta.id, 80), (id) => renderDoc({ ...meta, id, status: 'open' }, rec.text))) };
+  }
+  if (rec.kind !== 'reply' || !isText(rec.card) || !isText(rec.line) || !rec.line.startsWith('- ')) return bad;
+  const lessonMeta = rec.lesson ? pick(rec.lesson.meta, LESSON_KEYS) : null;
+  if (rec.lesson && (!lessonMeta.title || !isText(rec.lesson.body))) return bad;
+  // a reply goes into the card as it is now (a pull may have added replies since the draft),
+  // and only into the card the draft named
+  const d = listDocs(p.help).find((x) => x.id === rec.card);
+  if (!d) return { error: `No help card "${rec.card}" any more, so the reply was not saved.` };
+  if (linked(d.file) || (rec.lesson && linked(p.lessons))) return linked(d.file) || linked(p.lessons);
+  const { meta, body } = parseDoc(fs.readFileSync(d.file, 'utf8'));
+  let lesson = null;
+  if (rec.lesson) {
+    meta.status = 'resolved';
+    meta.resolvedBy = lessonMeta.author;
+    lesson = rel(writeNew(p.lessons, `${day(lessonMeta.date)}-${slug(lessonMeta.title)}`, () => renderDoc(lessonMeta, rec.lesson.body)));
+  }
+  const replies = body.includes('## Replies') ? body.trimEnd() : `${body.trimEnd()}\n\n## Replies`;
+  fs.writeFileSync(d.file, renderDoc(meta, `${replies}\n${line(rec.line)}\n`));
+  return { file: rel(d.file), lesson, author: meta.author };
+}
+
+// null when .codehere/local/drafts/ is not a plain folder in this repo: a committed symlink must
+// not move drafts elsewhere, nor let expiry delete files there; a committed file must not be mistaken
+// for the folder.
+function draftsHere(root) {
+  const dir = paths(root).drafts;
+  if (!ownPath(root, dir)) return null;
+  try {
+    return fs.statSync(dir).isDirectory() ? dir : null;
+  } catch (e) {
+    return e.code === 'ENOENT' ? dir : null;
+  }
+}
+
+// The id is new each time, so a draft file a teammate planted through git is never reused.
+export function writeDraft(root, rec) {
+  const dir = draftsHere(root);
+  if (!dir) return null;
+  fs.mkdirSync(dir, { recursive: true });
+  for (;;) {
+    const id = crypto.randomBytes(4).toString('hex');
+    try {
+      fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify({ id, created: new Date().toISOString(), ...rec }, null, 2) + '\n', { flag: 'wx' });
+      return id;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
+  }
+}
+
+export function draftFile(root, id) {
+  const dir = draftsHere(root);
+  return dir && /^[0-9a-f]{8}$/.test(String(id)) ? path.join(dir, `${id}.json`) : null;
+}
+
+// Runs at every session start, so it never throws: whatever a teammate committed under drafts/,
+// session start goes on. Only plain files named like drafts are removed.
+export function expireDrafts(root, days = 7) {
+  try {
+    const dir = draftsHere(root);
+    if (!dir || !fs.existsSync(dir) || !fs.lstatSync(dir).isDirectory()) return;
+    const cutoff = Date.now() - days * 864e5;
+    for (const f of fs.readdirSync(dir).filter((x) => /^[0-9a-f]{8}\.json$/.test(x))) {
+      const file = path.join(dir, f);
+      try {
+        if (!fs.lstatSync(file).isFile()) continue;
+        // the older of its own date and the file's: a date written into the file cannot keep it forever
+        let created = NaN;
+        try {
+          created = Date.parse(JSON.parse(fs.readFileSync(file, 'utf8')).created);
+        } catch {}
+        if (!(Math.min(created, fs.lstatSync(file).mtimeMs) >= cutoff)) fs.rmSync(file, { force: true });
+      } catch {}
+    }
+  } catch {}
 }
