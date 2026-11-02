@@ -20,7 +20,7 @@ let failed = 0;
 // Checks for behaviour not built yet are named "E<n>: ..." and their IDs listed here. A listed ID is
 // judged as a whole at the end: some check still failing is an expected failure; all passing fails
 // the suite until the ID leaves the list. Unlisted checks count one by one, as always.
-const KNOWN_FAILING = new Set(['E1', 'E10', 'E11', 'E13', 'E17', 'E19', 'E23']);
+const KNOWN_FAILING = new Set(['E1', 'E13', 'E17', 'E19', 'E23']);
 const pending = new Map();
 
 function check(name, cond, extra = '') {
@@ -49,6 +49,18 @@ function sh(cmd, cwd) {
 function ch(args, cwd, input) {
   const r = spawnSync('node', [BIN, ...args], { cwd, input: input ? JSON.stringify(input) : '', encoding: 'utf8' });
   return { code: r.status, out: r.stdout, err: r.stderr };
+}
+
+// 2.1.0: the person accepts the finish check's lesson offer. The agent drafts the lesson, the
+// after-tool hook of that call binds it (and it takes Codehere's proof), and the person says yes.
+function acceptOffer(dir, sid, title, cause, fix) {
+  const made = spawnSync('node', [BIN, 'lesson', title, '--cause', cause, '--fix', fix], { cwd: dir, input: '', encoding: 'utf8', env: { ...process.env, CODEHERE_TEST_AGENT: '1' } });
+  const command = `codehere lesson ${JSON.stringify(title)} --cause ${JSON.stringify(cause)} --fix ${JSON.stringify(fix)}`;
+  const tool = { session_id: sid, cwd: dir, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: made.stdout, stderr: '' } };
+  const bound = spawnSync('node', [BIN, 'hook', 'post-tool'], { cwd: dir, input: JSON.stringify(tool), encoding: 'utf8' });
+  const said = { session_id: sid, cwd: dir, hook_event_name: 'UserPromptSubmit', prompt: 'yes' };
+  const saved = spawnSync('node', [BIN, 'hook', 'prompt'], { cwd: dir, input: JSON.stringify(said), encoding: 'utf8' });
+  return { made: made.stdout, bound: bound.stdout, saved: saved.stdout };
 }
 
 // A person at a terminal: `script` gives codehere a real one, and the answer is typed after the prompt.
@@ -192,19 +204,20 @@ console.log('\n6. real fix passes; solved loop becomes a team lesson');
 fs.writeFileSync(path.join(ana, 'app.js'), 'export const add = (a, b) => a + b;\n');
 r = ch(['hook', 'stop'], ana, { session_id: 's1', cwd: ana, hook_event_name: 'Stop', stop_hook_active: true });
 j = r.out ? JSON.parse(r.out) : {};
-check('agent asked to write a lesson once', j.decision === 'block' && j.reason.includes('.codehere/lessons/'), r.out + r.err);
+check('the agent is asked once to offer the fix as a lesson, and nothing is written yet', j.decision === 'block' && j.reason.includes('codehere lesson "<short title>"') && !fs.readdirSync(path.join(ana, '.codehere/lessons')).some((x) => x.endsWith('.md')), r.out + r.err);
 const lessonDocs = (dir) => fs.readdirSync(path.join(dir, '.codehere/lessons')).filter((x) => x.endsWith('.md')).map((x) => {
   const text = fs.readFileSync(path.join(dir, '.codehere/lessons', x), 'utf8');
   const meta = Object.fromEntries(text.split('\n---')[0].split('\n').slice(1).map((l) => [l.slice(0, l.indexOf(':')).trim(), l.slice(l.indexOf(':') + 1).trim()]));
   return { file: path.join(dir, '.codehere/lessons', x), text, meta };
 });
+acceptOffer(ana, 's1', 'add subtracts instead of adding', 'add used a - b', 'use a + b');
 let L = lessonDocs(ana).find((d) => d.meta.signature && d.meta.signature.startsWith('AssertionError'));
 check(
-  'Codehere wrote the lesson with proof from the run it just made',
+  'the lesson saved on the person\'s yes carries the proof from the run Codehere just made',
   L && L.meta.state === 'verified' && L.meta.proof_command === 'npm test --silent' && L.meta.proof_exit === '0' && /^[0-9a-f]{7,}$/.test(L.meta.proof_commit) && ['true', 'false'].includes(L.meta.proof_dirty) && L.meta.author === 'Ana',
   L && L.text
 );
-check('the agent fills only the title, cause and fix', L && L.text.includes('title: <short name of the problem>') && L.text.includes('- Cause: <one line>') && L.text.includes('- Fix: <one line>') && j.reason.includes('Do not change the other fields'), L && L.text);
+check("the lesson has the agent's title, cause and fix, and the offer no longer asks the agent to keep quiet", L && L.meta.title === 'add subtracts instead of adding' && L.text.includes('- Cause: add used a - b') && L.text.includes('- Fix: use a + b') && !j.reason.includes('Do not mention'), L && L.text);
 r = ch(['hook', 'stop'], ana, { session_id: 's2', cwd: ana, hook_event_name: 'Stop', stop_hook_active: false });
 j = r.out ? JSON.parse(r.out) : {};
 check('clean finish: one line with ✓, "exit 0" when no count can be read, re-run here, seconds', /^codehere ✓ npm test --silent · exit 0 · re-run here · \d+(\.\d)? s$/.test(j.systemMessage || ''), r.out + r.err);
@@ -676,12 +689,12 @@ fs.writeFileSync(path.join(ana2, 'src/price.js'), "export const parsePrice = (s)
 const before = lessonCount(ana2);
 r = H('stop', ana2, { session_id: 'a1', hook_event_name: 'Stop', stop_hook_active: false });
 check('the pass is shown with the count read from the run', /^codehere ✓ npm test --silent · 2 passed · re-run here · \d+(\.\d)? s$/.test(r.j.systemMessage || ''), r.out);
+check('nothing is written until the person accepts the offer', lessonCount(ana2) === before && r.j.decision === 'block' && r.j.reason.includes('codehere lesson'), r.out);
+acceptOffer(ana2, 'a1', 'Price parse fails on a pound prefix', 'parsePrice returns NaN when the string starts with a currency sign.', 'Strip the currency sign in parsePrice before parsing.');
 L = lessonDocs(ana2).find((d) => d.meta.signature && d.meta.signature.startsWith('AssertionError'));
 check('one lesson written, verified, with the changed file and its hash', lessonCount(ana2) === before + 1 && L.meta.state === 'verified' && L.meta.proof_dirty === 'true' && L.meta.files === '["src/price.js"]' && L.meta.file_hashes === JSON.stringify([sh('git hash-object src/price.js', ana2).trim()]), L && L.text);
 check('the proof commit is the commit the run was made on', L && L.meta.proof_commit === sh('git rev-parse --short HEAD', ana2).trim(), L && L.text);
 if (!L) throw new Error('section 21 needs the lesson file to go on');
-// the agent fills in the three lines, as asked
-fs.writeFileSync(L.file, L.text.replace('<short name of the problem>', 'Price parse fails on a pound prefix').replace('- Cause: <one line>', '- Cause: parsePrice returns NaN when the string starts with a currency sign.').replace('- Fix: <one line>', '- Fix: Strip the currency sign in parsePrice before parsing.'));
 r = H('stop', ana2, { session_id: 'a1', hook_event_name: 'Stop', stop_hook_active: true });
 check('the next finish shows the pass and asks for no second lesson', (r.j.systemMessage || '').startsWith('codehere ✓') && !r.j.decision && lessonCount(ana2) === before + 1, r.out);
 sh('git add -A && git commit -qm "fix price parse, with lesson" && git push -q origin main', ana2);
@@ -724,6 +737,7 @@ r = H('stop', sam, { session_id: 'm3', hook_event_name: 'Stop', stop_hook_active
 check('a failing run sends the agent back with the count, and writes no lesson', r.j.decision === 'block' && r.j.systemMessage === 'codehere ✕ npm test --silent · 1 failed · agent sent back · 1 of 3' && lessonCount(sam) === samBefore, r.out);
 const noApprovals = path.join(tmp, 'no-approvals');
 r = H('stop', sam, { session_id: 'm3', hook_event_name: 'Stop', stop_hook_active: true }, { XDG_CONFIG_HOME: noApprovals });
+acceptOffer(sam, 'm3', 'Type error with tests not run', 'the tests were not run', 'run them');
 const U = lessonDocs(sam).find((d) => d.meta.signature && d.meta.signature.startsWith('TypeError'));
 check('when the tests did not run, the lesson is unverified and has no proof fields, and the ⊘ line is shown', r.j.decision === 'block' && (r.j.systemMessage || '').includes('codehere ⊘ npm test --silent · not run') && U && U.meta.state === 'unverified' && !Object.keys(U.meta).some((k) => k.startsWith('proof_')), U && U.text);
 sh('git checkout -q -- src/price.js && git clean -fdq', sam);
@@ -738,6 +752,7 @@ fs.writeFileSync(samCfg, JSON.stringify({ ...JSON.parse(fs.readFileSync(samCfg, 
 fs.appendFileSync(path.join(sam, 'src/price.js'), '// m4\n');
 H('stop', sam, { session_id: 'm4', hook_event_name: 'Stop', stop_hook_active: false }); // settings: sent back once
 r = H('stop', sam, { session_id: 'm4', hook_event_name: 'Stop', stop_hook_active: true });
+acceptOffer(sam, 'm4', 'Range error after a config change', 'config changed', 'restore config');
 const C4 = lessonDocs(sam).find((d) => d.meta.signature && d.meta.signature.startsWith('RangeError'));
 check('after config.json changed, the lesson is not verified and the pass has no ✓', C4 && C4.meta.state === 'unverified' && !(r.j.systemMessage || '').includes('✓'), (C4 && C4.text) + r.out);
 sh('git checkout -q -- . && git clean -fdq', sam);
@@ -790,6 +805,7 @@ H('post-tool', sam, { session_id: 'g2', hook_event_name: 'PostToolUse', ...shopE
 fs.writeFileSync(path.join(sam, '.git/info/attributes'), '*.js text eol=crlf\n'); // git's filters apply to the hash
 fs.writeFileSync(path.join(sam, 'src/café "menu".js'), 'export const menu = 1;\r\n');
 r = H('stop', sam, { session_id: 'g2', hook_event_name: 'Stop', stop_hook_active: false });
+acceptOffer(sam, 'g2', 'Syntax error in the cafe menu', 'a stray quote', 'remove it');
 const Q = lessonDocs(sam).find((d) => d.meta.signature && d.meta.signature.startsWith('SyntaxError: café'));
 check('a file name git would quote is stored as it is, with its git hash (filters applied)', Q && Q.meta.files === JSON.stringify(['src/café "menu".js']) && Q.meta.file_hashes === JSON.stringify([sh('git hash-object -- "src/café \\"menu\\".js"', sam).trim()]), Q && Q.text);
 fs.rmSync(path.join(sam, '.git/info/attributes'));
@@ -808,6 +824,7 @@ fs.appendFileSync(path.join(sam, 'src/price.js'), '// g5\n');
 sh('git commit -qam "g5 fix"', sam);
 fs.appendFileSync(path.join(sam, '.codehere/rules.md'), '- g5 rule\n');
 H('stop', sam, { session_id: 'g5', hook_event_name: 'Stop', stop_hook_active: false });
+acceptOffer(sam, 'g5', 'Committed type error', 'a bad call', 'fix the call');
 const D = lessonDocs(sam).find((d) => d.meta.signature && d.meta.signature.startsWith('TypeError: committed'));
 check('a committed fix is recorded without "uncommitted changes", even when .codehere/ changed', D && D.meta.state === 'verified' && D.meta.proof_dirty === 'false', D && D.text);
 sh('git reset -q --hard HEAD~1 && git clean -fdq', sam);
@@ -821,7 +838,7 @@ for (let i = 0; i < 3; i++) H('stop', sam, { session_id: 'g4', hook_event_name: 
 fs.writeFileSync(path.join(sam, 'src/price.js'), "export const parsePrice = (s) => Number(String(s).replace(/^[^0-9.-]+/, ''));\n// g4\n");
 r = H('stop', sam, { session_id: 'g4', hook_event_name: 'Stop', stop_hook_active: true });
 const K = lessonDocs(sam).find((d) => d.meta.signature && d.meta.signature.startsWith('TypeError: capped'));
-check('after the cap, the passing run still writes a verified lesson and tells the developer', !r.j.decision && K && K.meta.state === 'verified' && (r.j.systemMessage || '').includes(`codehere › lesson saved: ${path.relative(sam, K.file)} · fill in its title, cause and fix`), (K && K.text) + r.out);
+check('after the cap there is no offer and no lesson file, and the developer is told', !r.j.decision && !K && (r.j.systemMessage || '').includes('codehere › repeated error solved · not offered as a lesson · limit of 3 reached'), r.out);
 sh('git checkout -q -- . && git clean -fdq', sam);
 
 // .codehere/ in a subfolder of the repo: paths are relative to that folder
@@ -842,6 +859,7 @@ H('post-tool', pkg, { session_id: 'k1', hook_event_name: 'PostToolUse', ...shopE
 H('post-tool', pkg, { session_id: 'k1', hook_event_name: 'PostToolUse', ...shopErr('TypeError: mono error') });
 fs.writeFileSync(path.join(pkg, 'src/a.js'), 'export const a = 1; // fixed\n');
 r = H('stop', pkg, { session_id: 'k1', hook_event_name: 'Stop', stop_hook_active: false });
+acceptOffer(pkg, 'k1', 'Mono type error', 'a bad import', 'fix the import');
 const M = lessonDocs(pkg).find((d) => d.meta.signature && d.meta.signature.startsWith('TypeError: mono'));
 check('in a subfolder: the lesson names the file relative to it, with its git hash', M && M.meta.files === '["src/a.js"]' && M.meta.file_hashes === JSON.stringify([sh('git hash-object src/a.js', pkg).trim()]) && M.meta.proof_dirty === 'true', M && M.text);
 H('session-start', pkg, { session_id: 'k2', hook_event_name: 'SessionStart', source: 'startup' });
@@ -1354,6 +1372,7 @@ H('post-tool', tess, { session_id: 't4', hook_event_name: 'PostToolUse', ...cart
 H('post-tool', tess, { session_id: 't4', hook_event_name: 'PostToolUse', ...cartFail });
 fs.writeFileSync(path.join(tess, 'cart.js'), 'export const total = (items) => items.reduce((s, i) => s + i.price * i.qty, 0);\n');
 r = H('stop', tess, { session_id: 't4', hook_event_name: 'Stop', stop_hook_active: false });
+acceptOffer(tess, 't4', 'Cart total ignores quantity', 'total used price only', 'use price * qty');
 check('an agent-saved lesson records the failing test', lessonDocs(tess).some((d) => d.meta.test === 'total uses quantity' && d.meta.signature === generic), r.out + JSON.stringify(lessonDocs(tess).map((d) => d.meta)));
 
 // review of the change above: names must be the same test, not a similar one
@@ -1371,6 +1390,7 @@ H('post-tool', tess, { session_id: 't7', hook_event_name: 'PostToolUse', ...cart
 H('post-tool', tess, { session_id: 't7', hook_event_name: 'PostToolUse', ...shipFail });
 fs.appendFileSync(path.join(tess, 'cart.js'), '// t7\n');
 H('stop', tess, { session_id: 't7', hook_event_name: 'Stop', stop_hook_active: false });
+acceptOffer(tess, 't7', 'Cart line fails two tests', 'one line broke two tests', 'fix the line');
 check('two different tests failed on that line: the saved lesson names no test', lessonDocs(tess).length === 1 && !('test' in lessonDocs(tess)[0].meta), JSON.stringify(lessonDocs(tess).map((d) => d.meta)));
 check('jest: "● Console" (logs) is not the failing test', failingTest('  ● Console\n\n    console.log\n      hi\n\n  ● cart › total uses quantity\n\n    expect(received).toBe(expected)') === 'cart › total uses quantity');
 H('post-tool', tess, { session_id: 't8', hook_event_name: 'PostToolUse', ...nodeTestFail('invites ana@corp.example to the team', 1, 2) });
@@ -1892,7 +1912,7 @@ section(['E10'], () => {
   const d = draftAndBind('claude', pip, 'p1', ['lesson', 'Price parse fails on a pound prefix', '--cause', 'parsePrice returns NaN on a currency sign', '--fix', 'strip the currency sign first']);
   const b = boundIn(pip, 'p1').find((x) => x.id === d.id);
   check("E10: the lesson draft takes the proof and the error's signature at binding", !!b?.proof && b.proof.signature === priceSig && b.proof.state === 'verified', JSON.stringify(b));
-  check('E10: the agent and the person are shown the proof line', (d.bound.j.systemMessage || '').startsWith('codehere › lesson draft · proof: npm test --silent passed here at ') && d.bound.out.includes('Show the user this line'), d.bound.out);
+  check('E10: the agent and the person are shown the proof line', (d.bound.j.systemMessage || '').startsWith(`codehere › lesson draft for "${priceSig.slice(0, 60)}${priceSig.length > 60 ? '…' : ''}" · proof: npm test --silent passed here at `) && d.bound.out.includes('Show the user this line'), d.bound.out);
   H('prompt', pip, { session_id: 'p1', hook_event_name: 'UserPromptSubmit', prompt: 'yes' });
   const L = lessonDocs(pip).find((x) => x.meta.title === 'Price parse fails on a pound prefix');
   check("E10: after \"yes\" the lesson keeps the error's signature and the proof, and is verified", !!L && L.meta.signature === priceSig && L.meta.state === 'verified' && L.meta.proof_exit === '0' && /^[0-9a-f]{7,64}$/.test(L.meta.proof_commit || '') && L.text.includes('- Cause: parsePrice returns NaN'), L && L.text);

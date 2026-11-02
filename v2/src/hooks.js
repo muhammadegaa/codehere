@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
-  listDocs, git, isGitRepo, me, slug, today, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
+  listDocs, git, isGitRepo, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
   removedAt, expireDrafts, draftFile, saveRecord, readPlain,
 } from './brain.js';
 import {
@@ -388,9 +388,15 @@ function bindDraft(root, input, command, text) {
   const state = readState(root);
   if (!input.session_id) return 'refused';
   const s = session(state, input.session_id);
-  s.drafts = [...(Array.isArray(s.drafts) ? s.drafts : []), { id: m[1], kind, hash: crypto.createHash('sha256').update(content).digest('hex') }];
+  const entry = { id: m[1], kind, hash: crypto.createHash('sha256').update(content).digest('hex') };
+  // the lesson the agent drafts after the finish check's offer takes the proof kept for it
+  if (kind === 'lesson' && s.pendingLesson && typeof s.pendingLesson === 'object') {
+    entry.proof = s.pendingLesson;
+    delete s.pendingLesson;
+  }
+  s.drafts = [...(Array.isArray(s.drafts) ? s.drafts : []), entry];
   delete s.lastSendBack; // any send-back came before this draft, so it cannot be the answer to it
-  return writeState(root, state) ? 'bound' : 'refused'; // a binding that was not kept is not one
+  return writeState(root, state) ? { proof: entry.proof || null } : 'refused'; // a binding that was not kept is not one
 }
 
 // The lines the CLI printed for this record (commands.js draft()), each indented by two spaces.
@@ -485,26 +491,31 @@ function lessonLine(doc) {
   return printable(`codehere › ${who}'s lesson given to the agent · ${lessonProof(doc) ? `verified on ${who}'s machine` : 'not verified'}${date}`);
 }
 
-// Codehere writes the proof fields itself; the agent fills in the title, cause and fix.
-function writeLesson(root, sig, proofCommand, changed, test) {
-  const dir = paths(root).lessons;
-  fs.mkdirSync(dir, { recursive: true });
-  const name = `${today()}-${slug(sig, 30)}`;
-  let file = path.join(dir, `${name}.md`);
-  for (let i = 2; fs.existsSync(file); i++) file = path.join(dir, `${name}-${i}.md`);
-  const meta = { title: PLACEHOLDERS[0], signature: sig, ...(test ? { test: redact(test).slice(0, 120) } : {}), author: me(root), date: today(), state: proofCommand ? 'verified' : 'unverified' };
+// The proof the finish check keeps for a solved repeated error. Nothing is written: the agent offers
+// the lesson, its draft takes this proof at binding, and the person's yes saves both. Only Codehere
+// writes these fields; the signature is redacted like the test name, since it goes to the team.
+function lessonProofFor(root, sig, proofCommand, changed, test) {
+  const proof = { signature: redact(sig), ...(test ? { test: redact(test).slice(0, 120) } : {}), state: proofCommand ? 'verified' : 'unverified' };
   if (proofCommand) {
-    Object.assign(meta, {
+    Object.assign(proof, {
       proof_command: proofCommand,
       proof_exit: 0,
       proof_commit: git(root, ['rev-parse', '--short', 'HEAD']),
       proof_dirty: statusFiles(root).some((f) => !IGNORE(f)),
     });
   }
-  meta.files = JSON.stringify(changed);
-  meta.file_hashes = JSON.stringify(gitHashes(root, changed));
-  fs.writeFileSync(file, renderDoc(meta, `## Fix\n- Cause: ${PLACEHOLDERS[1]}\n- Fix: ${PLACEHOLDERS[1]}\n`));
-  return path.relative(root, file);
+  proof.files = JSON.stringify(changed);
+  proof.file_hashes = JSON.stringify(gitHashes(root, changed));
+  return proof;
+}
+
+// What the agent and the person are shown when an offered lesson's draft takes its proof. The
+// person's line names the error, so a yes after a declined offer cannot attach it to another lesson unseen.
+function proofNote(agent, event, proof) {
+  const line = proof.state === 'verified' ? `proof: ${noTick(proof.proof_command)} passed here at ${noTick(proof.proof_commit)}` : 'not verified: no passing test run here this session';
+  const context = `Codehere will add this to the lesson: the error "${noTick(proof.signature)}" and ${line}. Show the user this line with the draft.`;
+  if (agent === 'copilot') return { additionalContext: context };
+  return { systemMessage: printable(`codehere › lesson draft for "${short(noTick(String(proof.signature)))}" · ${line}`), hookSpecificOutput: { hookEventName: event, additionalContext: context } };
 }
 
 function postTool(root, input, agent) {
@@ -512,7 +523,9 @@ function postTool(root, input, agent) {
   const command = (input.tool_input && input.tool_input.command) || '';
   const text = responseText(input.tool_response) + '\n' + (input.error || '');
   // a refused draft never stops the error count: the note waits for a hook that has nothing else to say
-  if (bindDraft(root, input, command, text) === 'refused') quietNote = noteFor(agent, input.hook_event_name || 'PostToolUse', NOT_BOUND);
+  const bind = bindDraft(root, input, command, text);
+  if (bind === 'refused') quietNote = noteFor(agent, input.hook_event_name || 'PostToolUse', NOT_BOUND);
+  else if (bind?.proof) quietNote = proofNote(agent, input.hook_event_name || 'PostToolUse', bind.proof);
   if (ownOrReadOnly(command)) quiet();
   const sig = signature(text);
   if (!sig) {
@@ -961,28 +974,27 @@ function stop(root, input) {
     lines.unshift(passLine);
   }
 
-  // 4. turn a solved repeated error into a team lesson (once per session). After the 3-block
-  // cap the agent is not asked to fill it in; the developer is told instead.
+  // 4. a solved repeated error: the agent offers it to the team as a lesson (once per session).
+  // Nothing is written here; the proof waits in the session for the lesson draft, and the person's
+  // yes saves it. After the 3-block cap there is no offer, and the developer is told.
   const solved = Object.entries(s.errors).filter(([, n]) => n >= 2);
   if (solved.length && !s.lessonAsked) {
     s.lessonAsked = true;
     const [sig] = solved.sort((a, b) => b[1] - a[1])[0];
     const named = s.tests && s.tests[sig];
-    const file = writeLesson(root, sig, proven ? cfg.testCommand : null, changed, typeof named === 'string' ? named : '');
     if (mayBlock) {
+      s.pendingLesson = lessonProofFor(root, sig, proven ? cfg.testCommand : null, changed, typeof named === 'string' ? named : '');
       s.stopBlocks++;
-      writeState(root, state);
       sendAgentBack(
         [
           `Before you finish: you hit and solved a repeated error ("${sig}").`,
-          `Codehere saved it for the team in ${file}${proven ? ', with this test run as proof' : ''}.`,
-          'In that file, replace the three <...> placeholders (title, Cause, Fix) with one line each.',
-          'Do not change the other fields. Then finish your reply as normal. Do not mention this step unless asked.',
+          'Offer it to your team as a lesson: run `codehere lesson "<short title>" --cause "<one line>" --fix "<one line>"` and show the user the draft in one short message.',
+          `Codehere adds ${proven ? 'this test run as proof' : 'the error and the changed files'}; it saves the lesson only if the user says yes.`,
         ].join('\n'),
-        message()
+        message(),
+        true
       );
-    }
-    lines.push(`codehere › lesson saved: ${file} · fill in its title, cause and fix`);
+    } else lines.push('codehere › repeated error solved · not offered as a lesson · limit of 3 reached');
   }
 
   writeState(root, state);
