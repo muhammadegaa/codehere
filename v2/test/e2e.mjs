@@ -20,7 +20,7 @@ let failed = 0;
 // Checks for behaviour not built yet are named "E<n>: ..." and their IDs listed here. A listed ID is
 // judged as a whole at the end: some check still failing is an expected failure; all passing fails
 // the suite until the ID leaves the list. Unlisted checks count one by one, as always.
-const KNOWN_FAILING = new Set(['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E9', 'E10', 'E11', 'E12', 'E13', 'E14', 'E16', 'E17', 'E19', 'E20', 'E21', 'E22']);
+const KNOWN_FAILING = new Set(['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E9', 'E10', 'E11', 'E12', 'E13', 'E14', 'E16', 'E17', 'E19', 'E20', 'E21', 'E22', 'E23', 'E24']);
 const pending = new Map();
 
 function check(name, cond, extra = '') {
@@ -1619,8 +1619,10 @@ section(['E1'], () => {
 section(['E2'], () => {
   const cases = [
     ['rule', ['rule', 'Prices are in cents. Never use floats for money.']],
+    ['rules (alias)', ['rules', 'Prices are in cents.']],
     ['lesson', ['lesson', 'Cart total ignores quantity', '--cause', 'total summed prices only', '--fix', 'multiply price by qty']],
     ['help', ['help', 'Cart total ignores quantity']],
+    ['help (no question)', ['help']],
     ['reply', ['reply', leaCard, 'use price * qty']],
     ['reply --solved', ['reply', leaCard, 'use price * qty', '--solved']],
   ];
@@ -1630,7 +1632,7 @@ section(['E2'], () => {
     const r = agentCli(args, zed);
     const id = draftId(r.out);
     const record = id ? JSON.parse(readText(draftFile(zed, id)) || 'null') : null;
-    check(`E2: agent path, ${name}: no team file changes; one draft of that kind, printed, its id on the last line`, teamFiles(zed) === before && draftCount(zed) === 1 && record?.kind === name.split(' ')[0] && r.out.startsWith('Not saved yet.'), r.out + r.err);
+    check(`E2: agent path, ${name}: no team file changes; one draft of that kind, printed, its id on the last line`, teamFiles(zed) === before && draftCount(zed) === 1 && record?.kind === args[0].replace(/s$/, '') && r.out.startsWith('Not saved yet.'), r.out + r.err);
   }
 });
 
@@ -1650,7 +1652,18 @@ section(['E3'], () => {
   hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, 'codehere rule "x"; cat notes.txt', `${other.out}${marker}\n`));
   hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, `codehere show ${leaCard}`, `${cardText(leaCard)}${marker}\n`));
   hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, 'codehere rule "y"', `${other.out}done\n`));
-  check('E3: no binding from a chain with another command, from `show` output, or when the last line is not the marker', !!draftId(other.out) && boundIn(zed, sid).length === 0, JSON.stringify(boundIn(zed, sid)));
+  hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, `codehere reply ${leaCard} "x"; codehere show ${leaCard}`, `${cardText(leaCard)}${marker}\n`));
+  check('E3: no binding from a chain with another command, a chain ending in show, `show` output, or a last line that is not the marker', !!draftId(other.out) && boundIn(zed, sid).length === 0, JSON.stringify(boundIn(zed, sid)));
+  // a draft a teammate force-added: git tracks it
+  const planted = agentCli(['rule', 'Planted through git'], zed);
+  const pid = draftId(planted.out);
+  if (pid) sh(`git add -f .codehere/local/drafts/${pid}.json && git commit -qm planted`, zed);
+  hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, 'codehere rule "z"', planted.out));
+  check('E3: a draft git tracks is not bound', !!pid && boundIn(zed, sid).length === 0, JSON.stringify(boundIn(zed, sid)));
+  if (pid) sh('git reset -q --hard HEAD~1', zed);
+  const filtered = agentCli(['rule', 'Through a filter'], zed);
+  const x = hook('claude', 'post-tool', zed, ranTool('claude', zed, sid, 'codehere rule "Through a filter" 2>&1 | tail -20', filtered.out));
+  check('E3: a marker line with a refused binding: the agent is told to run the command again on its own', !!draftId(filtered.out) && boundIn(zed, sid).length === 0 && (x.out + x.err).includes('could not tie this draft to the session'), x.out + x.err);
 });
 
 section(['E4'], () => {
@@ -1773,6 +1786,10 @@ section(['E10'], () => {
   const cmd = /`(codehere lesson [^`]*)`/.exec(r.j.reason || '')?.[1] || '';
   check('E10: a solved repeated error writes no lesson file', docsIn(pip, 'lessons').length === 0, docsIn(pip, 'lessons').join(', '));
   check('E10: the agent is sent back with the lesson command to run, with no error text in it', r.j.decision === 'block' && cmd.includes('--cause') && cmd.includes('--fix') && !cmd.includes('--sig') && !cmd.includes('NaN'), r.out);
+  // the person asks for other wording: the draft is discarded and its proof goes back for the redraft
+  const d0 = draftAndBind('claude', pip, 'p1', ['lesson', 'Price parse', '--fix', 'strip the sign']);
+  H('prompt', pip, { session_id: 'p1', hook_event_name: 'UserPromptSubmit', prompt: 'change the title to: price parse fails on a pound prefix' });
+  check('E10: a lesson draft discarded for new wording saves nothing', !!d0.id && docsIn(pip, 'lessons').length === 0, docsIn(pip, 'lessons').join(', '));
   const d = draftAndBind('claude', pip, 'p1', ['lesson', 'Price parse fails on a pound prefix', '--cause', 'parsePrice returns NaN on a currency sign', '--fix', 'strip the currency sign first']);
   const b = boundIn(pip, 'p1').find((x) => x.id === d.id);
   check("E10: the lesson draft takes the proof and the error's signature at binding", !!b?.proof && b.proof.signature === priceSig && b.proof.state === 'verified', JSON.stringify(b));
@@ -1780,9 +1797,13 @@ section(['E10'], () => {
   H('prompt', pip, { session_id: 'p1', hook_event_name: 'UserPromptSubmit', prompt: 'yes' });
   const L = lessonDocs(pip).find((x) => x.meta.title === 'Price parse fails on a pound prefix');
   check("E10: after \"yes\" the lesson keeps the error's signature and the proof, and is verified", !!L && L.meta.signature === priceSig && L.meta.state === 'verified' && L.meta.proof_exit === '0' && /^[0-9a-f]{7,64}$/.test(L.meta.proof_commit || '') && L.text.includes('- Cause: parsePrice returns NaN'), L && L.text);
-  const d2 = draftAndBind('claude', pip, 'p1', ['lesson', 'Another lesson', '--fix', 'something else']);
-  const b2 = boundIn(pip, 'p1').find((x) => x.id === d2.id);
-  check('E10: a later lesson draft gets no proof', !!b2 && !b2.proof, JSON.stringify(b2));
+  // the agent ignores the offer: the next prompt binds nothing, and the proof goes
+  solveTwice('p4');
+  H('stop', pip, { session_id: 'p4', hook_event_name: 'Stop', stop_hook_active: false });
+  H('prompt', pip, { session_id: 'p4', hook_event_name: 'UserPromptSubmit', prompt: 'now add a test for negative prices' });
+  const d2 = draftAndBind('claude', pip, 'p4', ['lesson', 'Another lesson', '--fix', 'something else']);
+  const b2 = boundIn(pip, 'p4').find((x) => x.id === d2.id);
+  check('E10: a lesson drafted after a prompt that bound nothing gets no proof', !!b2 && !b2.proof, JSON.stringify(b2));
 });
 
 section(['E11'], () => {
@@ -1968,6 +1989,26 @@ section(['E22'], () => {
   const d3 = draftAndBind('claude', zed, 'body', ['lesson', 'Body check', '--cause', 'the cause', '--fix', 'the fix']);
   hook('claude', 'prompt', zed, said('claude', zed, 'body', 'yes'));
   check('E22: lesson --cause writes the same body on both paths', !!d3.id && typed.includes('- Cause: the cause') && typed.includes('- Fix: the fix') && bodyOf(lessonTexts()[0] || '') === typed, typed);
+});
+
+section(['E23'], () => {
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'bf1'));
+  const made = agentCli(['brief'], zed);
+  let x = hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'bf1', { source: 'resume' }));
+  check('E23: a brief the agent wrote is not used up by the same session resuming', made.code === 0 && !x.out.includes('Restart brief from the previous session') && !!stateOf(zed).pendingBrief, x.out);
+  x = hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'bf2', { source: 'startup' }));
+  check('E23: the next fresh session loads it', x.out.includes('Restart brief from the previous session'), x.out);
+});
+
+section(['E24'], () => {
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'ub'));
+  hook('claude', 'prompt', zed, said('claude', zed, 'ub', 'Add a team rule: totals are integer cents'));
+  const before = teamFiles(zed);
+  const made = agentCli(['rule', 'Totals are integer cents'], zed); // its output went through a filter: no binding
+  const x = hook('claude', 'prompt', zed, said('claude', zed, 'ub', 'yes'));
+  check('E24: a yes with a draft made but not bound: nothing saved, and both sides are told', !!draftId(made.out) && teamFiles(zed) === before && JSON.stringify(x.j).includes('Codehere saved nothing') && (x.j.systemMessage || '').includes('codehere ✕ nothing saved · the draft was not tied to this session'), x.out);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
