@@ -75,6 +75,15 @@ const REPAIR =
 const POSITIVE = /\b(thanks|thank you|thx|works now|working now|great|nice|good|perfect|awesome|mantap|makasih|terima kasih|sip|berhasil|sudah bisa|udah bisa)\b/i;
 
 // "still broken", "fix it", "masih error": short, no specifics, asks for a repair.
+// The person's answer to a draft: a yes word, optionally with one polite word. A fixed list, in the
+// style of askApproval(), so no model decides what is saved for the team.
+const YES = new Set(['yes', 'y', 'yep', 'yeah', 'ok', 'okay', 'sure', 'save', 'save it', 'go ahead', 'do it', 'ya', 'iya', 'oke', 'boleh', 'simpan']);
+export function plainYes(p) {
+  const t = String(p || '').trim().toLowerCase().replace(/[.!]+$/, '').trim();
+  const m = /^(.+?)(?:[\s,]+(?:please|thanks|thank you|makasih|dong))?$/.exec(t);
+  return !!m && YES.has(m[1].trim());
+}
+
 export function lowInfoPrompt(p) {
   const w = words(p);
   if (!w.length || w.length > 8 || SPECIFIC.test(p) || POSITIVE.test(p)) return false;

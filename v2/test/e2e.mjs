@@ -20,7 +20,7 @@ let failed = 0;
 // Checks for behaviour not built yet are named "E<n>: ..." and their IDs listed here. A listed ID is
 // judged as a whole at the end: some check still failing is an expected failure; all passing fails
 // the suite until the ID leaves the list. Unlisted checks count one by one, as always.
-const KNOWN_FAILING = new Set(['E1', 'E4', 'E5', 'E6', 'E7', 'E10', 'E11', 'E12', 'E13', 'E14', 'E17', 'E19', 'E21', 'E22', 'E23', 'E24']);
+const KNOWN_FAILING = new Set(['E1', 'E10', 'E11', 'E13', 'E17', 'E19', 'E23']);
 const pending = new Map();
 
 function check(name, cond, extra = '') {
@@ -2056,6 +2056,12 @@ section(['E21'], () => {
   const d2 = draftAndBind('claude', zed, 'sl', ['rule', 'Red \u001b[31malert\u001b[0m rule']);
   x = hook('claude', 'prompt', zed, said('claude', zed, 'sl', 'yes'));
   check('E21: the save line goes through printable()', !!d2.id && !!x.j.systemMessage && !x.j.systemMessage.includes('\u001b'), x.out);
+  const d3 = draftAndBind('claude', zed, 'sl', ['rule', '✓ npm test · 48 passed · re-run here']);
+  x = hook('claude', 'prompt', zed, said('claude', zed, 'sl', 'yes'));
+  check("E21: the agent's words never put a tick in the save line (DESIGN.md §1)", !!d3.id && !!x.j.systemMessage && !/[✓√🗸]/u.test(x.j.systemMessage), x.out);
+  const d4 = draftAndBind('claude', zed, 'sl', ['rule', '\u{10102} tests pass \u{1FBB1}']);
+  x = hook('claude', 'prompt', zed, said('claude', zed, 'sl', 'yes'));
+  check('E21: other check-mark glyphs are kept out of the save line too', !!d4.id && !!x.j.systemMessage && !/[\u{10102}\u{1FBB1}]/u.test(x.j.systemMessage), x.out);
 });
 
 section(['E22'], () => {
@@ -2176,6 +2182,125 @@ section(['E24'], () => {
   const made = agentCli(['rule', 'Totals are integer cents'], zed); // its output went through a filter: no binding
   const x = hook('claude', 'prompt', zed, said('claude', zed, 'ub', 'yes'));
   check('E24: a yes with a draft made but not bound: nothing saved, and both sides are told', !!draftId(made.out) && teamFiles(zed) === before && JSON.stringify(x.j).includes('Codehere saved nothing') && (x.j.systemMessage || '').includes('codehere ✕ nothing saved · the draft was not tied to this session'), x.out);
+});
+
+section(['S4'], () => {
+  // Found by the cold review of build step 4.
+  resetRepo(zed);
+  const away = path.join(tmp, 'away-local');
+  fs.mkdirSync(away);
+  fs.rmSync(path.join(zed, '.codehere/local'), { recursive: true, force: true });
+  fs.symlinkSync(away, path.join(zed, '.codehere/local'));
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'lk'));
+  check('session state is never written through a committed symlink at local/', fs.readdirSync(away).length === 0, fs.readdirSync(away).join(', '));
+  // with no state kept, the send-back count cannot be kept either: the finish check must not send back.
+  // A test file named as one (w.test.js) is deleted, so there is a weakened-test finding too.
+  fs.writeFileSync(path.join(zed, 'w.test.js'), '// a test\n');
+  sh('git add w.test.js && git commit -qm "a named test"', zed);
+  fs.rmSync(path.join(zed, 'w.test.js'));
+  fs.rmSync(path.join(zed, 't.js'));
+  const stops = [1, 2, 3].map(() => hook('claude', 'stop', zed, rec('claude', 'stop', zed, 'lk', { stop_hook_active: false })).j);
+  check('with local/ a committed symlink, the finish check never sends the agent back (it cannot count to 3)', stops.every((j) => j.decision !== 'block'), JSON.stringify(stops));
+  check('...and the developer still sees what it found, and that the agent was not sent back', stops.every((j) => (j.systemMessage || '').includes('not sent back · Codehere could not save its state')), JSON.stringify(stops));
+  fs.writeFileSync(path.join(zed, 'cart.js'), 'export const total = () => 0;\n');
+  const both = [1, 2].map(() => hook('claude', 'stop', zed, rec('claude', 'stop', zed, 'lk', { stop_hook_active: false })).j.systemMessage || '');
+  check('...and a weakened-test finding does not hide the test result: both lines, on every stop', both.every((m) => m.includes('weaken tests or checks') && /^codehere ✕ npm test --silent/m.test(m)), JSON.stringify(both));
+  sh('git reset -q --hard HEAD~1', zed);
+  fs.unlinkSync(path.join(zed, '.codehere/local'));
+  fs.mkdirSync(path.join(zed, '.codehere/local'));
+  // local/ committed as a plain file: session start still loads the rules, a failing test still shows
+  resetRepo(zed);
+  fs.rmSync(path.join(zed, '.codehere/local'), { recursive: true, force: true });
+  fs.writeFileSync(path.join(zed, '.codehere/local'), 'x');
+  const lf = hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'lf'));
+  check('with local/ a committed file, session start still loads the team rules', lf.out.includes('Totals use integer cents'), lf.out + lf.err);
+  fs.writeFileSync(path.join(zed, 'cart.js'), 'export const total = () => 0;\n');
+  const lfStop = hook('claude', 'stop', zed, rec('claude', 'stop', zed, 'lf', { stop_hook_active: false })).j;
+  check('with local/ a committed file, a failing test run is still shown, and the agent not sent back', lfStop.decision !== 'block' && /^codehere ✕ npm test --silent/m.test(lfStop.systemMessage || ''), JSON.stringify(lfStop));
+  fs.rmSync(path.join(zed, '.codehere/local'));
+  fs.mkdirSync(path.join(zed, '.codehere/local'));
+  resetRepo(zed);
+  // a state.json that is a folder: each hook call fails open and leaves no temp file behind
+  fs.mkdirSync(path.join(zed, '.codehere/local/state.json/x'), { recursive: true });
+  for (let i = 0; i < 3; i++) hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, `dir${i}`));
+  const leftovers = fs.readdirSync(path.join(zed, '.codehere/local')).filter((f) => f.endsWith('.tmp'));
+  check('no temporary state file is left when state.json cannot be replaced', leftovers.length === 0, leftovers.join(', '));
+  fs.writeFileSync(path.join(zed, 'cart.js'), 'export const total = () => 0;\n');
+  const failed = hook('claude', 'stop', zed, rec('claude', 'stop', zed, 'dir0', { stop_hook_active: false })).j;
+  check('a failing test run is still shown when the state cannot be saved', failed.decision !== 'block' && /^codehere ✕ npm test --silent · exit 1$/m.test(failed.systemMessage || ''), JSON.stringify(failed));
+  fs.rmSync(path.join(zed, '.codehere/local/state.json'), { recursive: true, force: true });
+  // a draft that git tracks, freshly written by a pull, is not "a draft this session made"
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'tr'));
+  hook('claude', 'prompt', zed, said('claude', zed, 'tr', 'start'));
+  fs.mkdirSync(draftsDir(zed), { recursive: true });
+  fs.writeFileSync(draftFile(zed, 'abcdef14'), JSON.stringify({ id: 'abcdef14', kind: 'rule', created: new Date().toISOString(), line: '- Pulled (Lea, 2026-11-02)' }));
+  sh('git add -f .codehere/local/drafts/abcdef14.json && git commit -qm pulled', zed);
+  const pulled = hook('claude', 'prompt', zed, said('claude', zed, 'tr', 'yes'));
+  check("a draft that came through git does not trigger 'nothing saved'", !(pulled.j.systemMessage || '').includes('nothing saved'), pulled.out);
+  sh('git reset -q --hard HEAD~1', zed);
+  // a send-back reason pasted by the person later is their message: the draft is decided by it
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'pa'));
+  fs.writeFileSync(path.join(zed, 'cart.js'), 'export const total = () => 0;\n');
+  const back = hook('claude', 'stop', zed, rec('claude', 'stop', zed, 'pa', { stop_hook_active: false })).j;
+  fs.writeFileSync(path.join(zed, 'cart.js'), 'export const total = (items) => items.reduce((s, i) => s + i.price * i.qty, 0);\n');
+  const pd = draftAndBind('claude', zed, 'pa', ['rule', 'Always run lint']);
+  hook('claude', 'prompt', zed, said('claude', zed, 'pa', `${String(back.reason || '').split('\n')[0]} Why did that happen?`));
+  hook('claude', 'prompt', zed, said('claude', zed, 'pa', 'yes'));
+  check('a pasted send-back line is the next message: it discards the draft, and a later yes saves nothing', back.decision === 'block' && !!pd.id && !rulesOf(zed).includes('Always run lint'), rulesOf(zed));
+  // a malformed entry in the session's drafts does not stop later saves
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'mf'));
+  const stMf = stateOf(zed);
+  stMf.sessions.mf.drafts = [null];
+  fs.writeFileSync(path.join(zed, '.codehere/local/state.json'), JSON.stringify(stMf));
+  const mf = draftAndBind('claude', zed, 'mf', ['rule', 'Saved past a bad entry']);
+  hook('claude', 'prompt', zed, said('claude', zed, 'mf', 'yes'));
+  check('a malformed draft entry does not stop a later draft from being saved', !!mf.id && rulesOf(zed).includes('- Saved past a bad entry (Kai, '), rulesOf(zed));
+  // two drafts in one turn, one binding lost (as to a parallel call): the yes says so
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'pl'));
+  hook('claude', 'prompt', zed, said('claude', zed, 'pl', 'add two rules'));
+  const kept1 = draftAndBind('claude', zed, 'pl', ['rule', 'Rule A']);
+  agentCli(['rule', 'Rule B'], zed); // its binding was lost
+  const plYes = hook('claude', 'prompt', zed, said('claude', zed, 'pl', 'yes'));
+  check('a yes that saves one draft also says when another draft of the turn was not tied', !!kept1.id && rulesOf(zed).includes('- Rule A (Kai, ') && (plYes.j.systemMessage || '').includes('codehere ✕ not saved · a draft was not tied to this session'), plYes.out);
+  // a binding that could not be kept is not reported as bound: the agent is told
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'sd'));
+  fs.rmSync(path.join(zed, '.codehere/local/state.json'), { force: true });
+  fs.mkdirSync(path.join(zed, '.codehere/local/state.json/x'), { recursive: true });
+  const sdMade = agentCli(['rule', 'Bound nowhere'], zed);
+  const sdHook = hook('claude', 'post-tool', zed, ranTool('claude', zed, 'sd', 'codehere rule "Bound nowhere"', sdMade.out));
+  check('when the binding cannot be saved, the agent is told the draft was not tied', !!draftId(sdMade.out) && (sdHook.out + sdHook.err).includes('could not tie this draft to the session'), sdHook.out + sdHook.err);
+  fs.rmSync(path.join(zed, '.codehere/local/state.json'), { recursive: true, force: true });
+  // two prompt hooks answering one yes at the same moment save the draft once
+  let doubled = 0;
+  for (let i = 0; i < 5; i++) {
+    resetRepo(zed);
+    hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, `two${i}`));
+    const d = draftAndBind('claude', zed, `two${i}`, ['rule', `Saved once ${i}`]);
+    const yesFile = path.join(tmp, `yes-${i}.json`);
+    fs.writeFileSync(yesFile, JSON.stringify(said('claude', zed, `two${i}`, 'yes')));
+    spawnSync('bash', ['-c', `node "${BIN}" hook prompt < "${yesFile}" > /dev/null & node "${BIN}" hook prompt < "${yesFile}" > /dev/null & wait`], { cwd: zed });
+    if (!d.id || rulesOf(zed).split(`- Saved once ${i} (`).length !== 2) doubled++;
+  }
+  check('two prompt hooks at the same moment save a draft once (5 tries)', doubled === 0, `${doubled} of 5 not saved exactly once`);
+  // "nothing saved" is said only for an unbound draft made since this session's previous prompt
+  resetRepo(zed);
+  for (const sid of ['nA', 'nB']) hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, sid));
+  hook('claude', 'prompt', zed, said('claude', zed, 'nA', 'start'));
+  draftAndBind('claude', zed, 'nB', ['rule', 'Bound in session B']);
+  let x = hook('claude', 'prompt', zed, said('claude', zed, 'nA', 'yes'));
+  check("a yes in one session is not told 'nothing saved' about another session's bound draft", !(x.j.systemMessage || '').includes('nothing saved'), x.out);
+  resetRepo(zed);
+  agentCli(['rule', 'An older draft'], zed);
+  const older = new Date(Date.now() - 60e3);
+  for (const f of fs.readdirSync(draftsDir(zed))) fs.utimesSync(path.join(draftsDir(zed), f), older, older);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'nC'));
+  x = hook('claude', 'prompt', zed, said('claude', zed, 'nC', 'yes'));
+  check("a session's first yes is not told 'nothing saved' about a draft older than the session", !(x.j.systemMessage || '').includes('nothing saved'), x.out);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');

@@ -72,10 +72,28 @@ export function readState(root) {
   return { sessions: {}, lastSession: null, lastGreen: null, pendingBrief: null };
 }
 
+// Written to a temporary file and renamed into place: a reader never sees half a file (which
+// readState would take as empty, erasing every session), and a committed symlink is replaced,
+// not followed.
+// Nothing is written when local/ is a committed symlink, and the temporary file has a random name
+// made with exclusive create, so no planted link at that name is followed. Never throws: false when
+// nothing was saved, and a caller that needs the state kept (the finish check's send-back count)
+// then holds back, while what it reports still goes out.
 export function writeState(root, state) {
   const p = paths(root);
-  fs.mkdirSync(p.local, { recursive: true });
-  fs.writeFileSync(p.state, JSON.stringify(state, null, 2));
+  if (!ownPath(root, p.local)) return false;
+  const tmp = `${p.state}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  try {
+    fs.mkdirSync(p.local, { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), { flag: 'wx' });
+    fs.renameSync(tmp, p.state);
+    return true;
+  } catch {
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {} // local/ may be a file: there is no temporary file to remove
+    return false;
+  }
 }
 
 export function session(state, id) {
@@ -326,7 +344,7 @@ export function gitHashes(root, files) {
 // A tick is Codehere's mark for a run it made on this machine (DESIGN.md §1). Text from the
 // repo or from a teammate never brings its own.
 export function noTick(text, mark = '?') {
-  return String(text).replace(/[✓✔☑✅√🗸🗹]/gu, mark);
+  return String(text).replace(/[✓✔☑✅√🗸🗹\u{10102}\u{1FBB1}]/gu, mark);
 }
 
 // A commit id read back from state.json, or null. The state file can arrive through git,

@@ -8,10 +8,10 @@ import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
   listDocs, git, isGitRepo, me, slug, today, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
-  removedAt, expireDrafts, draftFile,
+  removedAt, expireDrafts, draftFile, saveRecord,
 } from './brain.js';
 import {
-  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact,
+  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes,
 } from './signals.js';
 
 function readStdin() {
@@ -379,9 +379,9 @@ function bindDraft(root, input, command, text) {
   const state = readState(root);
   if (!input.session_id) return 'refused';
   const s = session(state, input.session_id);
-  s.drafts = [...(s.drafts || []), { id: m[1], kind, hash: crypto.createHash('sha256').update(content).digest('hex') }];
-  writeState(root, state);
-  return 'bound';
+  s.drafts = [...(Array.isArray(s.drafts) ? s.drafts : []), { id: m[1], kind, hash: crypto.createHash('sha256').update(content).digest('hex') }];
+  delete s.lastSendBack; // any send-back came before this draft, so it cannot be the answer to it
+  return writeState(root, state) ? 'bound' : 'refused'; // a binding that was not kept is not one
 }
 
 // The lines the CLI printed for this record (commands.js draft()), each indented by two spaces.
@@ -585,6 +585,98 @@ function postTool(root, input, agent) {
 // ---------- UserPromptSubmit: restore what a short prompt leaves out ----------
 // One message at most, only about this session, under 300 tokens. Silent on normal turns.
 
+// ---------- the person's answer to a draft ----------
+// A draft is decided by the person's very next message: a plain yes saves it, anything else
+// discards it. Notes go to the agent, lines to the person.
+const RULES = '.codehere/rules.md';
+function gist(rec) {
+  if (rec.kind === 'rule') return String(rec.line).replace(/^- /, '').replace(/ \([^()]*\)$/, '');
+  if (rec.kind === 'lesson') return String(rec.meta?.title ?? '');
+  if (rec.kind === 'help') return (/## Question\n(.+)/.exec(String(rec.text)) || [])[1] || '';
+  return String(rec.line).replace(/^- [^:]*\): /, '');
+}
+const short = (t) => (t.length > 60 ? `${t.slice(0, 60)}…` : t);
+
+function decideDrafts(root, state, s, prompt) {
+  const notes = [];
+  const lines = [];
+  // Copilot passes a send-back to this hook as if the person typed it: that is not their answer
+  // used once: a later message that happens to start the same way is the person's
+  const skip = s.lastSendBack && prompt.startsWith(s.lastSendBack);
+  delete s.lastSendBack;
+  if (skip) return { notes, lines };
+  // since this session's previous prompt, or its start: an older draft is not this answer's
+  const since = Date.parse(s.lastPromptAt || s.startedAt || '') || Date.now();
+  s.lastPromptAt = new Date().toISOString();
+  const bound = (Array.isArray(s.drafts) ? s.drafts : []).filter((d) => d && typeof d === 'object' && /^[0-9a-f]{8}$/.test(String(d.id)));
+  const yes = plainYes(prompt);
+  let proofBack = null;
+  for (const d of bound) {
+    const file = draftFile(root, d.id);
+    // Taken by a rename, which only one of two hooks running at the same moment can win (two unlinks
+    // of one file both succeeded in a test on macOS); the other finds it gone and saves nothing.
+    let content = null;
+    try {
+      const taken = `${file}.${crypto.randomBytes(4).toString('hex')}.taken`;
+      fs.renameSync(file, taken);
+      content = fs.readFileSync(taken);
+      fs.rmSync(taken, { force: true });
+    } catch {
+      continue;
+    }
+    if (!yes) {
+      proofBack = d.proof || proofBack; // "change the title": the redraft keeps the proof
+      continue;
+    }
+    if (!content || crypto.createHash('sha256').update(content).digest('hex') !== d.hash) {
+      notes.push('Codehere did not save a draft: its file changed after it was shown to the user.');
+      lines.push('codehere ✕ not saved · the draft changed after it was shown');
+      continue;
+    }
+    let rec = null;
+    try {
+      rec = JSON.parse(content);
+    } catch {}
+    const before = settingsSnapshot(root)[RULES];
+    const saved = saveRecord(root, rec, d.proof || null);
+    if (saved.error) {
+      notes.push(`Codehere could not save the draft: ${saved.error}`);
+      lines.push(`codehere ✕ not saved · ${noTick(saved.error)}`);
+      continue;
+    }
+    // a saved rule is not a settings change, unless rules.md had already changed this session
+    if (rec.kind === 'rule' && s.settings && s.settings[RULES] === before) s.settings[RULES] = settingsSnapshot(root)[RULES];
+    notes.push(`Codehere saved the draft after the user's yes: ${saved.file}. Tell them it is saved. Teammates get it once the user commits and pushes it.`);
+    // the agent's own words: never a tick in a codehere line (DESIGN.md §1)
+    lines.push(`codehere › saved after your yes · ${rec.kind} · ${short(noTick(gist(rec)))}`);
+  }
+  if (bound.length && !yes) notes.push("Codehere discarded the draft because the user's reply was not a plain yes. If they still want it, draft it again.");
+  // a yes that a draft made this turn did not reach (for example a binding lost to a parallel call)
+  if (yes && draftMadeSince(root, state, since)) {
+    notes.push(`Codehere saved ${bound.length ? 'not all of it' : 'nothing'}: a draft was not tied to this session. Run that codehere command again on its own.`);
+    lines.push(bound.length ? 'codehere ✕ not saved · a draft was not tied to this session' : 'codehere ✕ nothing saved · the draft was not tied to this session');
+  }
+  s.drafts = [];
+  if (proofBack) s.pendingLesson = proofBack;
+  else delete s.pendingLesson;
+  return { notes, lines };
+}
+
+// An unbound draft made since then: one bound in any session is that session's to decide.
+function draftMadeSince(root, state, since) {
+  try {
+    const dir = path.dirname(draftFile(root, '00000000'));
+    const bound = new Set(Object.values(state.sessions).flatMap((x) => (Array.isArray(x.drafts) ? x.drafts.map((d) => `${d.id}.json`) : [])));
+    const fresh = fs.readdirSync(dir).filter((f) => /^[0-9a-f]{8}\.json$/.test(f) && !bound.has(f) && fs.lstatSync(path.join(dir, f)).mtimeMs > since);
+    if (!fresh.length) return false;
+    // a draft git tracks came through git (a pull), not from a command this session ran
+    const tracked = new Set(git(root, ['ls-files', '-z']).split('\0').map((x) => path.basename(x).toLowerCase()));
+    return fresh.some((f) => !tracked.has(f));
+  } catch {
+    return false;
+  }
+}
+
 function promptSubmit(root, input) {
   if (!input.session_id) quiet(); // without it, sessions cannot be told apart
   const prompt = String(input.prompt || '');
@@ -594,6 +686,7 @@ function promptSubmit(root, input) {
   s.transcript = input.transcript_path || s.transcript;
   s.prompts = (s.prompts || 0) + 1;
   if (!s.settings) s.settings = settingsSnapshot(root); // session start did not run for this session
+  const decided = decideDrafts(root, state, s, prompt);
 
   // Only a failure from the agent's last turn counts: an older one may be fixed or forgotten.
   const f = s.lastFailure && (s.lastFailure.prompt || 0) === s.prompts - 1 ? s.lastFailure : null;
@@ -631,8 +724,12 @@ function promptSubmit(root, input) {
   }
 
   writeState(root, state);
-  if (msg) {
-    emitJson({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: msg.slice(0, 1100) } });
+  const context = [...decided.notes, ...(msg ? [msg.slice(0, 1100)] : [])].join('\n\n');
+  if (context || decided.lines.length) {
+    emitJson({
+      ...(decided.lines.length ? { systemMessage: decided.lines.map(printable).join('\n') } : {}),
+      ...(context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: context } } : {}),
+    });
   }
   quiet();
 }
@@ -723,6 +820,20 @@ function stop(root, input) {
   const state = readState(root);
   const s = session(state, input.session_id);
   const mayBlock = (s.stopBlocks || 0) < 3; // never trap the agent: after 3 blocks, only observe
+  // The first line of each reason is kept: Copilot passes a send-back to the prompt hook as if the
+  // person typed it, and the prompt hook must not take it as their answer to a draft.
+  // A send-back that cannot be counted is not sent: without the count the 3-block cap would never
+  // stop the agent. The developer still gets what was found and why the agent was not sent back.
+  // carryOn: a finding that comes before the test run goes in the report and the check goes on, so
+  // the test result is not hidden behind it.
+  const sendAgentBack = (reason, message, carryOn = false) => {
+    s.lastSendBack = reason.split('\n')[0];
+    if (writeState(root, state)) block(reason, message);
+    const found = reason.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2));
+    const why = `codehere ✕ ${noTick([s.lastSendBack, ...found].join(' ')).slice(0, 160)} · not sent back · Codehere could not save its state in .codehere/local`;
+    if (carryOn) return void lines.push(why);
+    emitJson({ systemMessage: [String(message || '').replace(/ · agent sent back · \d+ of 3/, ''), printable(why)].filter(Boolean).join('\n') });
+  };
 
   if (!isGitRepo(root)) quiet();
   const base = commitId(s.startHead) || 'HEAD';
@@ -760,13 +871,15 @@ function stop(root, input) {
     s.tamperReported = key;
     s.stopBlocks++;
     writeState(root, state);
-    block(
+    sendAgentBack(
       [
         'Codehere found changes that weaken tests or checks:',
         ...findings.map((f) => `- ${f}`),
         'Restore them and fix the code instead.',
         'If the change is truly intended, tell the user in one line why, then finish.',
-      ].join('\n')
+      ].join('\n'),
+      null,
+      true
     );
   }
 
@@ -779,13 +892,15 @@ function stop(root, input) {
     s.settingsReported = settingsKey;
     s.stopBlocks++;
     writeState(root, state);
-    block(
+    sendAgentBack(
       [
         'Codehere settings or hook settings changed during this session:',
         ...settings.map((f) => `- ${f}`),
         'If you changed them and the user did not ask for it, undo your change.',
         'Then tell the user in one line what changed and why, and finish.',
-      ].join('\n')
+      ].join('\n'),
+      null,
+      true
     );
   }
 
@@ -813,7 +928,7 @@ function stop(root, input) {
       s.stopBlocks++;
       writeState(root, state);
       const tail = t.output.split('\n').slice(-25).join('\n');
-      block(
+      sendAgentBack(
         [
           `Codehere ran \`${cmd}\` and it ${t.timedOut ? 'timed out' : 'failed'}. The task is not done yet.`,
           ...(t.code === 0 && !t.timedOut ? ['Its own summary counts failed tests, though the command exited 0.'] : []),
@@ -848,7 +963,7 @@ function stop(root, input) {
     if (mayBlock) {
       s.stopBlocks++;
       writeState(root, state);
-      block(
+      sendAgentBack(
         [
           `Before you finish: you hit and solved a repeated error ("${sig}").`,
           `Codehere saved it for the team in ${file}${proven ? ', with this test run as proof' : ''}.`,
