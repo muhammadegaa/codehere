@@ -2130,7 +2130,8 @@ section(['S2'], () => {
   check('a rule record with a newline is saved as one rule', rulesOf(zed).includes('- ok - injected rule') && !/^- injected rule/m.test(rulesOf(zed)), rulesOf(zed));
   check('saveRecord returns an error, never throws, for a record with no meta or no kind', !!saveRecord(zed, { kind: 'help' }).error && !!saveRecord(zed, {}).error && !!saveRecord(zed, null).error);
   fs.symlinkSync(path.join(tmp, 'nowhere.md'), path.join(zed, '.codehere/help', 'zz.md'));
-  check('saveRecord returns an error, never throws, when help/ holds a dangling link', !!saveRecord(zed, { kind: 'reply', card: leaCard, line: '- Kai (2026-11-02): x' }).error);
+  const pastLink = saveRecord(zed, { kind: 'reply', card: leaCard, line: '- Kai (2026-11-02): x' });
+  check('a dangling link in help/ is skipped: saveRecord does not throw, and the reply to the real card is saved', !pastLink.error && pastLink.file === `.codehere/help/${leaCard}.md`, JSON.stringify(pastLink));
   resetRepo(zed);
   fs.rmSync(path.join(zed, '.codehere/local'), { recursive: true, force: true });
   fs.writeFileSync(path.join(zed, '.codehere/local'), 'x');
@@ -2301,6 +2302,48 @@ section(['S4'], () => {
   hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'nC'));
   x = hook('claude', 'prompt', zed, said('claude', zed, 'nC', 'yes'));
   check("a session's first yes is not told 'nothing saved' about a draft older than the session", !(x.j.systemMessage || '').includes('nothing saved'), x.out);
+});
+
+section(['S5'], () => {
+  // A committed symlink to /dev/zero (git can commit symlinks) must not hang any hook that reads it.
+  const timed = (event, input) => {
+    const x = spawnSync('node', [BIN, 'hook', event], { cwd: zed, input: JSON.stringify(input), encoding: 'utf8', timeout: 10000 });
+    return { done: !x.error, out: x.stdout || '' };
+  };
+  for (const file of ['.codehere/local/state.json', '.codehere/config.json', '.codehere/rules.md', '.codehere/lessons/zero.md', '.claude/settings.json']) {
+    resetRepo(zed);
+    fs.mkdirSync(path.dirname(path.join(zed, file)), { recursive: true });
+    fs.rmSync(path.join(zed, file), { force: true });
+    fs.symlinkSync('/dev/zero', path.join(zed, file));
+    const start = timed('session-start', rec('claude', 'session-start', zed, 'z0'));
+    fs.appendFileSync(path.join(zed, 'cart.js'), '// edit\n');
+    const stop = timed('stop', rec('claude', 'stop', zed, 'z0', { stop_hook_active: false }));
+    check(`no hook hangs on a committed symlink to /dev/zero at ${file}`, start.done && stop.done, `${start.done} ${stop.done}`);
+    fs.rmSync(path.join(zed, file), { force: true });
+  }
+  // the same through the commands, a transcript path in state.json, and a linked briefs/ folder
+  const cli = (args, env = {}) => !spawnSync('node', [BIN, ...args], { cwd: zed, input: '', encoding: 'utf8', timeout: 10000, env: { ...process.env, ...env } }).error;
+  resetRepo(zed);
+  fs.rmSync(path.join(zed, '.claude/settings.json'), { force: true });
+  fs.symlinkSync('/dev/zero', path.join(zed, '.claude/settings.json'));
+  check('codehere status does not hang on a linked .claude/settings.json', cli(['status']));
+  resetRepo(zed);
+  fs.writeFileSync(path.join(zed, '.codehere/local/state.json'), JSON.stringify({ sessions: { s0: { transcript: '/dev/zero', lastActive: '9999' } }, lastSession: 's0' }));
+  check('codehere brief and help do not hang on a transcript path of /dev/zero', cli(['brief'], { CODEHERE_TEST_AGENT: '1' }) && cli(['help', 'stuck'], { CODEHERE_TEST_AGENT: '1' }));
+  resetRepo(zed);
+  fs.rmSync(path.join(zed, '.codehere/briefs'), { recursive: true, force: true });
+  fs.symlinkSync('/dev', path.join(zed, '.codehere/briefs'));
+  fs.writeFileSync(path.join(zed, '.codehere/local/state.json'), JSON.stringify({ sessions: {}, pendingBrief: '.codehere/briefs/zero' }));
+  const bz = spawnSync('node', [BIN, 'hook', 'session-start'], { cwd: zed, input: JSON.stringify(rec('claude', 'session-start', zed, 'bz')), encoding: 'utf8', timeout: 10000 });
+  check('session start does not hang on a briefs/ folder linked to /dev, and still loads the rules', !bz.error && (bz.stdout || '').includes('Totals use integer cents'), bz.stdout);
+  fs.unlinkSync(path.join(zed, '.codehere/briefs'));
+  resetRepo(zed);
+  const fresh = path.join(tmp, 'linked-gitignore');
+  fs.mkdirSync(fresh);
+  sh('git init -q -b main', fresh);
+  fs.symlinkSync('/dev/zero', path.join(fresh, '.gitignore'));
+  const gi = spawnSync('node', [BIN, 'init'], { cwd: fresh, input: '', encoding: 'utf8', timeout: 10000 });
+  check('codehere init refuses a linked .gitignore instead of hanging', !gi.error && gi.status !== 0, `${gi.error} ${gi.status} ${gi.stderr}`);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');

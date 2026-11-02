@@ -48,10 +48,37 @@ const DEFAULT_CONFIG = {
   gemmaModel: 'gemma4:e4b',
 };
 
+// What a teammate can commit is read only as a plain file: git can commit a symlink (mode 120000),
+// and one to /dev/zero would hang the hook that reads it. The file is opened without following a
+// final link and without blocking, checked on the open file, and read up to max bytes: a linked
+// folder can still reach a file such as /proc/self/pagemap, which says it is plain and never ends.
+// encoding null gives a Buffer.
+export function readPlain(file, encoding = 'utf8', max = 8 * 1024 * 1024) {
+  const notPlain = () => Object.assign(new Error(`not a plain file: ${file}`), { code: 'ENOTPLAIN' });
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  } catch (e) {
+    throw e.code === 'ELOOP' ? notPlain() : e;
+  }
+  try {
+    if (!fs.fstatSync(fd).isFile()) throw notPlain();
+    const chunks = [];
+    const buf = Buffer.alloc(64 * 1024);
+    for (let total = 0, n; total < max && (n = fs.readSync(fd, buf, 0, Math.min(buf.length, max - total), null)) > 0; total += n) {
+      chunks.push(Buffer.from(buf.subarray(0, n)));
+    }
+    const data = Buffer.concat(chunks);
+    return encoding ? data.toString(encoding) : data;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function readConfig(root) {
   const p = paths(root);
   try {
-    return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(p.config, 'utf8')) };
+    return { ...DEFAULT_CONFIG, ...JSON.parse(readPlain(p.config)) };
   } catch {
     return { ...DEFAULT_CONFIG };
   }
@@ -65,7 +92,7 @@ export function writeConfig(root, cfg) {
 
 export function readState(root) {
   try {
-    const state = JSON.parse(fs.readFileSync(paths(root).state, 'utf8'));
+    const state = JSON.parse(readPlain(paths(root).state));
     // state.json can arrive through git: a file of the wrong shape counts as empty
     if (state && state.sessions && typeof state.sessions === 'object') return state;
   } catch {}
@@ -148,10 +175,14 @@ export function listDocs(dir) {
     .readdirSync(dir)
     .filter((f) => f.endsWith('.md'))
     .sort()
-    .map((f) => {
+    .flatMap((f) => {
       const file = path.join(dir, f);
-      const { meta, body } = parseDoc(fs.readFileSync(file, 'utf8'));
-      return { id: f.replace(/\.md$/, ''), file, meta, body };
+      try {
+        const { meta, body } = parseDoc(readPlain(file));
+        return [{ id: f.replace(/\.md$/, ''), file, meta, body }];
+      } catch {
+        return []; // a link or a folder named like a lesson or card
+      }
     });
 }
 
@@ -179,9 +210,13 @@ export function today() {
 
 export function readRules(root) {
   const file = paths(root).rules;
-  if (!fs.existsSync(file)) return [];
-  return fs
-    .readFileSync(file, 'utf8')
+  let text = '';
+  try {
+    text = readPlain(file);
+  } catch {
+    return [];
+  }
+  return text
     .split('\n')
     .filter((l) => l.startsWith('- '))
     .map((l) => l.slice(2).trim());
@@ -449,7 +484,7 @@ function save(root, rec, proof) {
   const d = listDocs(p.help).find((x) => x.id === rec.card);
   if (!d) return { error: `No help card "${rec.card}" any more, so the reply was not saved.` };
   if (linked(d.file) || (rec.lesson && linked(p.lessons))) return linked(d.file) || linked(p.lessons);
-  const { meta, body } = parseDoc(fs.readFileSync(d.file, 'utf8'));
+  const { meta, body } = parseDoc(readPlain(d.file));
   let lesson = null;
   if (rec.lesson) {
     meta.status = 'resolved';

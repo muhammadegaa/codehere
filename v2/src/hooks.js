@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
   listDocs, git, isGitRepo, me, slug, today, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
-  removedAt, expireDrafts, draftFile, saveRecord,
+  removedAt, expireDrafts, draftFile, saveRecord, readPlain,
 } from './brain.js';
 import {
   responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes,
@@ -57,7 +57,7 @@ const COPILOT_EVENT = { 'session-start': 'sessionStart', prompt: 'userPromptSubm
 // Whether Copilot's own hook file runs Codehere for this event.
 function copilotFileRuns(root, event) {
   try {
-    const hooks = JSON.parse(fs.readFileSync(path.join(root, '.github/hooks/codehere.json'), 'utf8')).hooks;
+    const hooks = JSON.parse(readPlain(path.join(root, '.github/hooks/codehere.json'))).hooks;
     return (hooks?.[COPILOT_EVENT[event]] || []).some((h) => h?.command === `codehere hook ${event} --agent copilot`);
   } catch {
     return false;
@@ -120,9 +120,13 @@ function sessionStart(root, input, agent) {
 
   // Only a brief in .codehere/briefs/: state.json can arrive through git and point anywhere.
   const brief = briefFile(root, state.pendingBrief);
-  if (brief) {
+  let briefText = null;
+  try {
+    briefText = brief && readPlain(brief); // briefs/ itself can be a committed link to /dev
+  } catch {}
+  if (briefText) {
     out.push('', 'Restart brief from the previous session. Treat it as the full, current spec:');
-    out.push(fs.readFileSync(brief, 'utf8').slice(0, 4000));
+    out.push(briefText.slice(0, 4000));
   }
   state.pendingBrief = null;
 
@@ -204,11 +208,16 @@ const PROTECTED = [
   '.github/hooks/', '.github/copilot/settings.json', '.github/copilot/settings.local.json',
 ];
 
+// A symlink is not followed (one to /dev/zero would hang the hook); its target stands for it, so a
+// change is still seen.
+function readProtectedFile(file) {
+  return fs.lstatSync(file).isSymbolicLink() ? `link:${fs.readlinkSync(file)}` : readPlain(file);
+}
 function readProtected(root, f) {
-  if (!f.endsWith('/')) return fs.readFileSync(path.join(root, f), 'utf8');
+  if (!f.endsWith('/')) return readProtectedFile(path.join(root, f));
   const files = fs.readdirSync(path.join(root, f)).filter((n) => n.endsWith('.json')).sort();
   if (!files.length) return null;
-  return files.map((n) => `${n}\0${fs.readFileSync(path.join(root, f, n), 'utf8')}`).join('\0');
+  return files.map((n) => `${n}\0${readProtectedFile(path.join(root, f, n))}`).join('\0');
 }
 
 function settingsSnapshot(root) {
@@ -368,7 +377,7 @@ function bindDraft(root, input, command, text) {
   const rel = path.relative(root, file || '').toLowerCase();
   const tracked = git(root, ['ls-files', '-z']).split('\0').some((x) => x.toLowerCase() === rel); // .CODEHERE/... too
   if (!callOk || !exact || tracked) return 'refused';
-  const content = fs.readFileSync(file);
+  const content = readPlain(file, null);
   let rec = null;
   try {
     rec = JSON.parse(content);
@@ -619,7 +628,7 @@ function decideDrafts(root, state, s, prompt) {
     try {
       const taken = `${file}.${crypto.randomBytes(4).toString('hex')}.taken`;
       fs.renameSync(file, taken);
-      content = fs.readFileSync(taken);
+      content = readPlain(taken, null);
       fs.rmSync(taken, { force: true });
     } catch {
       continue;

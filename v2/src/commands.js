@@ -7,7 +7,7 @@ import {
   findRoot, paths, ensureDirs, readConfig, writeConfig, readState, writeState,
   readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
   readApprovals, isApproved, addApproval, removeApprovals, markRemoved, printable, commitId,
-  saveRecord, writeDraft,
+  saveRecord, writeDraft, readPlain,
 } from './brain.js';
 import { redact } from './signals.js';
 import { summarize } from './gemma.js';
@@ -60,7 +60,7 @@ function requireRoot() {
 
 function detectTestCommand(root) {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(readPlain(path.join(root, 'package.json')));
     const t = pkg.scripts && pkg.scripts.test;
     if (t && !/no test specified/.test(t)) return 'npm test --silent';
   } catch {}
@@ -75,8 +75,11 @@ function mergeHooks(root, agent) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let settings = {};
   try {
-    settings = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {}
+    settings = JSON.parse(readPlain(file));
+  } catch (e) {
+    // a committed link: reading it could hang, and writing would land wherever it points
+    if (e.code === 'ENOTPLAIN') throw new Error(`${agent.file} is a link or not a plain file, so Codehere will not read or write it.`);
+  }
   if (agent.flat) settings = { version: 1, ...settings };
   settings.hooks = settings.hooks || {};
   for (const [event, spec] of Object.entries(agent.events)) {
@@ -104,7 +107,7 @@ function removeHooks(root, agent) {
   const file = path.join(root, agent.file);
   let settings;
   try {
-    settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+    settings = JSON.parse(readPlain(file));
   } catch {
     return false;
   }
@@ -142,7 +145,7 @@ function removeHooks(root, agent) {
 function installedAgents(root) {
   return Object.values(AGENTS).filter((a) => {
     try {
-      const hooks = JSON.parse(fs.readFileSync(path.join(root, a.file), 'utf8')).hooks || {};
+      const hooks = JSON.parse(readPlain(path.join(root, a.file))).hooks || {};
       return Object.values(hooks).some((gs) => Array.isArray(gs) && gs.some((g) => hooksOf(g).some(ours)));
     } catch {
       return false;
@@ -153,7 +156,7 @@ function installedAgents(root) {
 function addGitignore(root) {
   const file = path.join(root, '.gitignore');
   const line = '.codehere/local/';
-  const cur = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const cur = fs.existsSync(file) ? readPlain(file) : ''; // a link is refused, not written through
   if (!cur.split('\n').includes(line)) {
     fs.writeFileSync(file, cur + (cur && !cur.endsWith('\n') ? '\n' : '') + line + '\n');
   }
@@ -323,8 +326,13 @@ export async function init(flags) {
 
 function removeGitignoreLine(root) {
   const file = path.join(root, '.gitignore');
-  if (!fs.existsSync(file)) return;
-  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  let text;
+  try {
+    text = readPlain(file);
+  } catch {
+    return; // missing, or a link: left alone
+  }
+  const lines = text.split('\n');
   const kept = lines.filter((l) => l !== '.codehere/local/');
   if (kept.length === lines.length) return;
   if (kept.join('\n').trim()) fs.writeFileSync(file, kept.join('\n'));
@@ -375,7 +383,14 @@ export async function uninstall() {
   const rules = readRules(root).length;
   const docs = [p.lessons, p.help, p.briefs].map((d) => listDocs(d).length);
   const other = filesIn(p.base).filter((f) => !written.includes(f)).length - docs.reduce((a, b) => a + b, 0);
-  const edited = [[p.rules, RULES_MD], [readme, README_MD]].filter(([f, text]) => fs.existsSync(f) && fs.readFileSync(f, 'utf8') !== text).map(([f]) => path.basename(f));
+  const unchanged = (f, text) => {
+    try {
+      return readPlain(f) === text;
+    } catch {
+      return false; // a link counts as edited, so .codehere/ is kept
+    }
+  };
+  const edited = [[p.rules, RULES_MD], [readme, README_MD]].filter(([f, text]) => fs.existsSync(f) && !unchanged(f, text)).map(([f]) => path.basename(f));
   const held = [[rules, 'rule'], [docs[0], 'lesson'], [docs[1], 'help card'], [docs[2], 'brief'], [other, 'other file']].filter(([n]) => n).map(([n, w]) => count(n, w));
   if (!rules) held.push(...edited.map((f) => `an edited ${f}`));
   else if (edited.includes('README.md')) held.push('an edited README.md');
@@ -428,9 +443,15 @@ export function lesson(title, flags) {
 // ---------- transcript reading ----------
 
 function userPrompts(transcript) {
-  if (!transcript || !fs.existsSync(transcript)) return [];
+  // the path comes from state.json, which can arrive through git: only a plain file is read
+  let text = '';
+  try {
+    text = readPlain(transcript);
+  } catch {
+    return [];
+  }
   const prompts = [];
-  for (const line of fs.readFileSync(transcript, 'utf8').split('\n')) {
+  for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     let rec;
     try {
@@ -625,7 +646,7 @@ function findHelp(root, id) {
 export function show(id) {
   const root = requireRoot();
   const d = findHelp(root, id);
-  console.log(fs.readFileSync(d.file, 'utf8'));
+  console.log(readPlain(d.file));
 }
 
 export function reply(id, text, flags) {
@@ -635,7 +656,7 @@ export function reply(id, text, flags) {
     process.exit(1);
   }
   const d = findHelp(root, id);
-  const { meta, body } = parseDoc(fs.readFileSync(d.file, 'utf8'));
+  const { meta, body } = parseDoc(readPlain(d.file));
   const who = me(root);
   const rec = { kind: 'reply', card: d.id, line: `- ${who} (${today()}): ${oneLine(text)}` };
   if (flags.solved) {
