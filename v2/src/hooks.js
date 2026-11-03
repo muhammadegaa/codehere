@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
   listDocs, git, isGitRepo, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
-  removedAt, expireDrafts, draftFile, saveRecord, readPlain,
+  removedAt, expireDrafts, draftFile, saveRecord, readPlain, ownPath,
 } from './brain.js';
 import {
   responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes,
@@ -178,13 +178,14 @@ function sessionStart(root, input, agent) {
   quiet();
 }
 
+// Only a brief directly in this repo's .codehere/briefs/, with no link on the way. state.json and
+// briefs/ can both arrive through git: a resolved path would follow a committed briefs/ link out
+// of the repo. The final name is refused if it is a link when it is read (readPlain).
 function briefFile(root, file) {
-  try {
-    const real = fs.realpathSync(path.resolve(root, file));
-    return real.startsWith(fs.realpathSync(paths(root).briefs) + path.sep) ? real : null;
-  } catch {
-    return null;
-  }
+  const name = typeof file === 'string' ? path.basename(file) : '';
+  if (!/^[\w-]+\.md$/.test(name)) return null;
+  const brief = path.join(paths(root).briefs, name);
+  return ownPath(root, brief) ? brief : null;
 }
 
 // ---------- what changed in THIS session ----------

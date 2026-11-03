@@ -2443,6 +2443,11 @@ section(['S6'], () => {
   fs.symlinkSync(briefsAway, path.join(zed, '.codehere/briefs'));
   agentCli(['brief'], zed);
   check('brief writes nothing through a linked briefs/ folder', fs.readdirSync(briefsAway).length === 0, fs.readdirSync(briefsAway).join(', '));
+  // and reads nothing through it: a committed state.json can name a brief in the linked folder
+  fs.writeFileSync(path.join(briefsAway, 'secret.md'), 'SECRET-IN-A-LINKED-BRIEFS-FOLDER');
+  fs.writeFileSync(path.join(zed, '.codehere/local/state.json'), JSON.stringify({ sessions: {}, pendingBrief: path.join(zed, '.codehere/briefs/secret.md') }));
+  x = spawnSync('node', [BIN, 'hook', 'session-start'], { cwd: zed, input: JSON.stringify(rec('claude', 'session-start', zed, 'bl')), encoding: 'utf8', timeout: 10000 });
+  check('session start loads no brief through a linked briefs/ folder', !x.error && (x.stdout || '').includes('Codehere is set up') && !(x.stdout || '').includes('SECRET-IN-A-LINKED'), x.stdout);
   fs.unlinkSync(path.join(zed, '.codehere/briefs'));
   resetRepo(zed);
 });
