@@ -33,7 +33,7 @@ Setup
 
 Team brain
   codehere rule ["text"]              add a team rule (or list rules)
-  codehere lesson ["problem" --fix "what fixed it" --sig "error text"]
+  codehere lesson ["problem" --fix "what fixed it" --cause "why" --sig "error text"]
                                       add a lesson (or list lessons)
 
 When you're stuck
@@ -47,6 +47,9 @@ When you're stuck
 
   codehere status                     what Codehere has seen
   codehere stats                      turns to green, loops stopped, session size
+
+Run by an agent, rule, lesson, help and reply print a draft; it is saved if your next
+message in the chat is a plain yes. Typed in your own terminal, they save at once.
 
 Hooks (called by the agent, not by you)
   codehere hook session-start | prompt | post-tool | stop [--agent codex|copilot]

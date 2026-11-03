@@ -2,7 +2,7 @@
 
 **A team brain for vibe coders.** It stops your AI coding agent from going in circles, checks "done" for real, and shares what your team learns. It works through plain files in git.
 
-Codehere is built to remove work, not add it. You keep using Claude Code, Codex CLI or Copilot CLI as usual. Codehere talks to the agent, not to you, and stays silent unless it helps.
+Codehere is built to remove work, not add it. You keep using Claude Code, Codex CLI or Copilot CLI as usual. Codehere talks to the agent, not to you, and stays silent unless it helps. For team chores, you ask your agent, and it shows you a draft first.
 
 ## What it does
 
@@ -14,8 +14,8 @@ Codehere is built to remove work, not add it. You keep using Claude Code, Codex 
 | Watch the agent try the same failing fix again and again | After the same error 3 times, the agent is told to stop and find the root cause first |
 | Trust "Done!" and find it broken later | Codehere runs your tests itself. If they fail, the agent goes back to work. |
 | Miss that a test was skipped or deleted to make it "pass" | The agent is blocked and asked to restore it |
-| Lose a long, messy session and start over from scratch | When a long session keeps hitting the same error, the agent suggests `codehere brief`: one clean spec that the next session loads |
-| Write a long message to ask a friend for help | `codehere help` writes a redacted help card for you |
+| Lose a long, messy session and start over from scratch | When a long session keeps hitting the same error, the agent offers a restart brief: one clean spec that the next session loads |
+| Write a long message to ask a friend for help | Your agent writes a redacted help card and shows it to you |
 | Solve a bug that a teammate already solved last week | Their fix reaches your agent the first time the error appears |
 
 ## Install (2 minutes)
@@ -42,6 +42,21 @@ The test command is in `.codehere/config.json`, which anyone with push access ca
 
 ## The team loop
 
+Ask your agent in chat. It runs a Codehere command that prints a draft, shows you the draft, and Codehere saves it only if your next message is a plain yes:
+
+```text
+You:    Add a team rule: prices are in cents, never floats.
+Agent:  Here is the draft:
+          - Prices are in cents. Never use floats for money. (Ana, 2026-11-03)
+        Save it?
+You:    yes
+        codehere › saved after your yes · rule · Prices are in cents. Never use floats for money.
+```
+
+The agent's words vary; the draft line and the `codehere ›` line come from Codehere. A reply from a fixed list saves: "yes", "ok", "sure", "save it", "go ahead", "do it" and a few more, alone or followed by "please" or "thanks". Any other reply discards the draft, including "no", "change the wording first" and "yes, save it", and you see a line saying it was not saved. Then commit and push `.codehere/` yourself: Codehere never does, and the agent is told not to. Teammates get it after `git pull`.
+
+The same works for "ask the team for help with this", "anything from my team?" and answering a teammate's card. These are the commands the agent runs. Typed in your own terminal, they save at once, as before:
+
 ```bash
 codehere rule "Prices are in cents. Never use floats for money."   # every agent follows it
 
@@ -55,7 +70,7 @@ codehere reply <id> "Use price * qty; same bug was in checkout.js" --solved
 git add .codehere && git commit -m "answer" && git push
 ```
 
-`--solved` turns the answer into a **team lesson**. From then on, any teammate's agent that hits a similar error gets that fix automatically. When an agent solves a repeated error by itself, Codehere saves a lesson with the proof from that test run (command, exit code, commit, the files the fix changed) and asks the agent to fill in the cause and the fix.
+`--solved` turns the answer into a **team lesson**. From then on, any teammate's agent that hits a similar error gets that fix automatically. When an agent solves a repeated error by itself, it offers the fix as a team lesson. When Codehere's own test run passed here, the lesson carries that proof (command, exit code, commit, the files the fix changed); otherwise it is saved as not verified. You see a line naming the error and the proof, and the lesson is saved only if you say yes.
 
 You see one line per event:
 
@@ -94,7 +109,8 @@ codehere init [--agent claude,codex,copilot] [--test "npm test"]
 codehere approve                        let the finish check run the test command on this machine
 codehere uninstall                      remove Codehere from this repo (asks first)
 codehere rule ["text"]                  add or list team rules
-codehere lesson ["problem" --fix "..."] add or list lessons
+codehere lesson ["problem" --fix "..." [--cause "..."]]
+                                        add or list lessons
 codehere brief [--gemma]                restart brief for a fresh session
 codehere help ["question"] [--gemma]    help card for a teammate
 codehere inbox [--all]                  teammates' help cards
@@ -104,16 +120,18 @@ codehere status                         what Codehere has seen
 codehere stats                          turns to green, loops stopped, context size
 ```
 
+When an agent runs `rule`, `lesson`, `help` or `reply`, the command prints a draft and saves nothing. Codehere saves it if your next message is a plain yes. Typed in your own terminal, they save at once.
+
 ## What lives where
 
 ```
 .codehere/
-  rules.md        team rules (written by people)
+  rules.md        team rules (typed by a person, or saved after their yes)
   lessons/        solved errors, one markdown file each
   help/           help cards
   briefs/         restart briefs
   config.json     test command, loop threshold
-  local/          this machine only, git-ignored (session state)
+  local/          this machine only, git-ignored (session state, drafts)
 ```
 
 Everything is plain markdown, so you can read, edit, review and delete it like any other file.
@@ -121,13 +139,13 @@ Everything is plain markdown, so you can read, edit, review and delete it like a
 ## Design rules (from the research)
 
 - **No AI in the decision path.** Loops, failed tests and tampering are detected with plain rules, so Codehere doesn't inherit the agent's mistakes.
-- **It talks to the agent, not to you.** If Codehere is wrong, the agent does one extra check. You lose nothing.
-- **Silent on normal turns.** Your prompt gets extra context only after a failure, for a feature with no way to check it, or in a long session stuck on one error. Each at most once, under 300 tokens.
-- **It only reacts to this session's work.** Changes you had before the session are ignored. If the agent changed nothing, Codehere does nothing.
+- **It talks to the agent, not to you.** If Codehere is wrong, the agent does one extra check. You lose nothing. For team chores, you ask your agent, and it shows you a draft first.
+- **Silent on normal turns.** Your prompt gets extra context only after a failure, for a feature with no way to check it, or in a long session stuck on one error. Each at most once, under 300 tokens. After you answer a draft, you also get one line saying whether it was saved.
+- **It only reacts to this session's work.** Changes you had before the session are ignored. If the agent changed nothing, Codehere does nothing. A draft saved after your yes does not count as a change by the agent.
 - **It never traps the agent.** At most 3 "not done yet" messages per session, then it lets go.
 - **It fails open.** If anything breaks, the hook exits quietly and the agent carries on.
 - **Small model, small job.** Gemma 4 (via Ollama) is optional and only writes summaries for briefs and help cards, which you read before using. Turn it on with `--gemma`. The text goes only to a model on this machine: Codehere refuses an `OLLAMA_HOST` on another machine and Ollama cloud models, and uses the plain text instead.
-- **Only human-confirmed context at session start.** Rules are written by people. Lessons appear only when a matching error shows up, because auto-generated context files can make agents worse.
+- **Only human-confirmed context at session start.** Rules and lessons are typed by a person, or drafted by the agent and saved after the person's yes. Lessons appear only when a matching error shows up, because auto-generated context files can make agents worse.
 
 ## Try the demo (no Claude account needed)
 
@@ -145,13 +163,22 @@ npm test                    # end-to-end checks
 - The "done" check needs a test command. Without one, only the tampering check runs.
 - Approvals are per folder. Each git worktree or extra clone needs its own `codehere approve`.
 - In `codex exec`, Codex shows you none of Codehere's lines. The agent still gets every message, and the finish check still sends it back.
-- Copilot shows you none of Codehere's lines either, so on Copilot you do not see the ✓, the ⊘, or the notes about an approval, an uninstall or a settings change during a session. The agent still gets every message, and when the finish check sends it back you see the reason as the next prompt.
+- Copilot shows you none of Codehere's lines either, so on Copilot you do not see the ✓, the ⊘, or the notes about an approval, an uninstall or a settings change during a session. The agent gets every message except what Codehere adds to your prompt (Copilot drops that, so its agent is not told when a draft is saved or discarded), and when the finish check sends it back you see the reason as the next prompt.
 - Copilot's cloud agent also runs the committed `.github/hooks/codehere.json`. `codehere` is not installed there, so by GitHub's docs each hook fails and the job carries on without Codehere.
 - `codehere approve` and `codehere uninstall` ask only in your own terminal. They refuse when Claude Code, Codex or Copilot is among the processes above them, and inside Codex's sandbox. An agent that detaches its terminal on purpose can still answer, so the finish check of a session that was open tells you when an approval or an uninstall happened (not on Copilot, which shows none of these lines).
 - Approving `npm test` approves that command, not the scripts behind it in `package.json`. And Claude Code runs any hook a teammate adds to the committed `.claude/settings.json`, as Copilot does in a trusted folder for `.github/hooks/` and `.claude/settings.json`; Codex asks each developer to trust a new or changed hook first. Both are your repo's code, with the same trust as running it yourself.
-- When the agent changes `.codehere/config.json`, `.codehere/rules.md`, the hook and env settings in `.claude/settings*.json` or `.github/copilot/settings*.json`, or `.codex/hooks.json`, `.codex/config.toml` or `.github/hooks/codehere.json` during a session, the finish check tells you. It cannot tell you if the session ends without a finish check, for example when you close it mid-turn. An agent that sets out to fake your terminal or rewrite Codehere's local files can also get around this.
+- When the agent changes `.codehere/config.json`, `.codehere/rules.md` (except a rule saved after your yes), the hook and env settings in `.claude/settings*.json` or `.github/copilot/settings*.json`, or `.codex/hooks.json`, `.codex/config.toml` or `.github/hooks/codehere.json` during a session, the finish check tells you. It cannot tell you if the session ends without a finish check, for example when you close it mid-turn. An agent that sets out to fake your terminal or rewrite Codehere's local files can also get around this.
 - Only the test command needs approval. A teammate who sets `verifyOnStop` to `false` in `.codehere/config.json` turns the finish check off for everyone; `codehere status` shows it as off.
 - Sharing is through git. There is no server, so teammates see updates after `git pull`.
+- The yes before a draft is saved is checked by Codehere's hooks with a word list. An agent deliberately working around Codehere could fake that reply, as it could fake other hook input, or write files in `.codehere/` directly; that is not stopped or reported.
+- A command you send through the agent drafts: Claude Code's `!` and scripts with no terminal take the agent's path, and so does every command on a machine without `ps`. In VS Code an agent's command can run in a real terminal with no agent above it, and then saves at once. No test has shown whether a `!` command reaches Codehere's hooks; if it does not, your yes gets a "nothing saved" line.
+- A one-shot run (`claude -p`, `codex exec`) that is never resumed has no next message, so its drafts are never saved; a resumed turn (`--resume`, `codex exec resume`) can answer them. Unsaved drafts are removed after 7 days.
+- Codex saves no drafts until you trust its hooks in `/hooks`.
+- If the agent deletes a draft after showing it to you, your yes saves nothing and neither of you is told.
+- Two agent sessions in one repo at once: `help` and `brief` read the session that last ran a hook, a yes in one session can get a wrong "nothing saved" line about the other session's draft, and a rule saved after a yes can be reported once as a settings change.
+- A lesson offered at the finish check is saved only if you say yes. In 2.0.3 every solved repeated error left a lesson file.
+- Restart briefs are written without a yes, for your own next session. They enter git only if you commit `.codehere/briefs/`.
+- A committed link to a folder that holds another repo's `.codehere/` can lead Codehere, run from inside that folder, to write its own local files there. `init` can stop halfway on a file it may not write, such as a read-only `.gitignore`.
 - Prompt checks are plain word lists (English and Indonesian). They can miss a short prompt in another language.
 - The weakened-test scan catches skipped and focused tests (`.skip`, `xit`, `{ skip: true }`, `.only`, `fit`), deleted test files, an assertion commented out with `//` or `#`, assertions that cannot fail (`assert.equal(1, 1)`), at least two more assertion lines removed than added, and a `package.json` test script changed to always pass (`|| true`). It does not catch one removed assertion, assertions wrapped in `/* */`, options spread over several lines, an edited expected value, or a `return` above an assertion; see `docs/overlap-with-check.md`.
 

@@ -9,6 +9,21 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ---
 
+## [2.1.0] - unreleased
+
+The agent runs the team chores. After `init`, you ask your agent to add a rule, save a lesson, write a help card, or read and answer teammates' cards. It shows you a draft, and Codehere saves it only if your next message is a plain yes.
+
+- When an agent runs `rule`, `lesson`, `help` or `reply`, the command prints a draft and saves nothing. Codehere's prompt hook saves the draft on a plain yes ("yes", "save it") and discards it on any other reply, and you see one line either way (except on Copilot and in `codex exec`, which show none of Codehere's lines). Typed in your own terminal, these commands save at once, as in 2.0.3.
+- Every session start teaches the agent these commands and the yes rule, after the team rules, and tells it to leave committing and pushing `.codehere/` to you.
+- When the agent solves a repeated error, it offers the fix as a team lesson, and you see a line naming the error and whether Codehere's own test run proved the fix. 2.0.3 wrote a lesson file with placeholders and sent the agent back to fill them in. After 3 send-backs in a session there is no offer, only a line for you.
+- Codehere no longer reads its own output as an error, so a help card or `codehere status` that quotes an error does not count toward the loop stop.
+- When an agent runs `inbox` or `show`, each teammate's card is framed as their request to the team, not an instruction, and its text passes the same tick and control-character filter as lessons.
+- A restart brief loads only in a fresh session. In 2.0.3 a resume or a compaction of the same session used it up.
+- Where 2.0.3 told the agent to suggest `codehere help` or `codehere brief`, the agent now offers to write the help card or the brief.
+- New repos get a `rules.md` header saying each rule was typed by a person or saved after their yes. `uninstall` treats the 2.0.3 header and the new one as unedited.
+- `lesson --cause "..."` sets the lesson's cause line.
+- Codehere no longer reads, writes or deletes through a symlink committed at any path it uses, and reads repo files with a size limit. In 2.0.3 a committed link could hang a hook (a link to `/dev/zero`), send `init`, `uninstall` or a brief's write outside the repo, or, with a force-added `state.json`, load a file from outside the repo into the agent as a restart brief. `init` checks every file it will touch before writing any.
+
 ## [2.0.3] - 2026-10-30
 
 From an outside test run of 2.0.2 against the R1a requirements (30 Oct).
