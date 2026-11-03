@@ -95,11 +95,12 @@ Don't want to commit help cards? Copy the printed text into WhatsApp, Discord or
 | Finish check: your tests re-run, the agent sent back | yes | yes | yes |
 | Your one line (✓ ✕ ⊘ ›) | yes | in the interactive screen, as `↳ Hook · codehere ✓ …`; not in `codex exec` | no; when the agent is sent back, you see the full reason as the next prompt |
 | Restart-brief suggestion in long sessions | yes | no | no |
+| Ask the agent for a team chore, saved on your yes | yes: 12 of 12 runs (rule, help card, answer a card, lesson; [result](docs/conformance/2026-11-03-claude-2.1.317-haiku-chores.md)) | partly, with a 9B local model: lesson 2 of 3, rule, help card and answer 0 of 3; the agent wrote the team files itself ([result](docs/conformance/2026-11-03-codex-0.164.0-qwen3.5-9b-q4_K_M-chores.md), [lesson](docs/conformance/2026-11-03-codex-0.164.0-qwen3.5-9b-q4_K_M-chores-L10.md)) | partly, with a 9B local model: rule and answer 3 of 3, help card and lesson 0 of 3 ([result](docs/conformance/2026-11-03-copilot-1.0.105-qwen3.5-9b-q4_K_M-chores.md)) |
 | Before it works | nothing | each developer trusts the hooks in `/hooks` | each developer trusts the folder when Copilot asks |
 | MCP tools, instruction file | no | no | no |
 | Tested on | 2.1.311 with haiku: [result](docs/conformance/2026-10-27-claude-2.1.311-haiku.md) | 0.164.0 with a local model (Qwen 3.5 9B through Ollama): [result](docs/conformance/2026-10-27-codex-0.164.0-qwen3.5-9b-q4-K-M.md) | 1.0.105 with a local model (Qwen 3.5 9B through Ollama): [result](docs/conformance/2026-10-29-copilot-1.0.105-qwen3.5-9b-q4-K-M.md), with only the Claude Code hooks installed: [result](docs/conformance/2026-10-29-copilot-1.0.105-qwen3.5-9b-q4-K-M-claude-hooks-only.md), and with a GitHub-hosted model (`auto`, which picked gpt-6-luna): [result](docs/conformance/2026-10-29-copilot-1.0.105-auto.md) |
 
-The rows for rules, lessons and the finish check are checked on the real agent by `node scripts/conformance.mjs`. The other rows are checked by `npm test` on hook inputs recorded from each agent.
+The rows for rules, lessons and the finish check are checked on the real agent by `node scripts/conformance.mjs`, and the chores row by `node scripts/chores.mjs` (3 runs per chore, each in a fresh repo). The other rows are checked by `npm test` on hook inputs recorded from each agent.
 
 ## Commands
 
