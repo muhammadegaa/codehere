@@ -514,8 +514,8 @@ function lessonProofFor(root, sig, proofCommand, changed, test) {
 function proofNote(agent, event, proof) {
   const line = proof.state === 'verified' ? `proof: ${noTick(proof.proof_command)} passed here at ${noTick(proof.proof_commit)}` : 'not verified: no passing test run here this session';
   const context = `Codehere will add this to the lesson: the error "${noTick(proof.signature)}" and ${line}. Show the user this line with the draft.`;
-  if (agent === 'copilot') return { additionalContext: context };
-  return { systemMessage: printable(`codehere › lesson draft for "${short(noTick(String(proof.signature)))}" · ${line}`), hookSpecificOutput: { hookEventName: event, additionalContext: context } };
+  if (agent === 'copilot') return { additionalContext: printable(context) };
+  return { systemMessage: printable(`codehere › lesson draft for "${short(noTick(String(proof.signature)))}" · ${line}`), hookSpecificOutput: { hookEventName: event, additionalContext: printable(context) } };
 }
 
 function postTool(root, input, agent) {
@@ -987,7 +987,10 @@ function stop(root, input) {
       s.stopBlocks++;
       sendAgentBack(
         [
-          `Before you finish: you hit and solved a repeated error ("${sig}").`,
+          // the first line is fixed text: Copilot sends the reason back as a prompt, and the skip
+          // compares this line, so the error's own text must not be in it
+          'Before you finish: you hit and solved a repeated error.',
+          `The error: ${printable(noTick(sig))}`,
           'Offer it to your team as a lesson: run `codehere lesson "<short title>" --cause "<one line>" --fix "<one line>"` and show the user the draft in one short message.',
           `Codehere adds ${proven ? 'this test run as proof' : 'the error and the changed files'}; it saves the lesson only if the user says yes.`,
         ].join('\n'),

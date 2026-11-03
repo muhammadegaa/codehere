@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import {
   findRoot, paths, ensureDirs, readConfig, writeConfig, readState, writeState,
   readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
-  readApprovals, isApproved, addApproval, removeApprovals, markRemoved, printable, commitId,
+  readApprovals, isApproved, addApproval, removeApprovals, markRemoved, printable, noTick, commitId,
   saveRecord, writeDraft, readPlain, writePlain, removePlain, ownPath,
 } from './brain.js';
 import { redact } from './signals.js';
@@ -479,7 +479,7 @@ export function lesson(title, flags) {
   if (!title) {
     const docs = listDocs(dir);
     if (!docs.length) return console.log('No lessons yet. They are created when someone solves a repeated error.');
-    for (const d of docs) console.log(`- ${d.meta.title || d.id}  (${d.meta.author || '?'}, ${d.meta.date || ''})`);
+    for (const d of docs) console.log(printable(noTick(`- ${d.meta.title || d.id}  (${d.meta.author || '?'}, ${d.meta.date || ''})`)));
     return;
   }
   if (!flags.fix) {

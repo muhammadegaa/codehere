@@ -1905,6 +1905,7 @@ section(['E10'], () => {
   const cmd = /`(codehere lesson [^`]*)`/.exec(r.j.reason || '')?.[1] || '';
   check('E10: a solved repeated error writes no lesson file', docsIn(pip, 'lessons').length === 0, docsIn(pip, 'lessons').join(', '));
   check('E10: the agent is sent back with the lesson command to run, with no error text in it', r.j.decision === 'block' && cmd.includes('--cause') && cmd.includes('--fix') && !cmd.includes('--sig') && !cmd.includes('NaN'), r.out);
+  check("E10: the offer starts with a fixed line, so Copilot's send-back skip does not depend on the error text", (r.j.reason || "").split("\n")[0] === "Before you finish: you hit and solved a repeated error." && (r.j.reason || "").includes("The error: "), r.out);
   // the person asks for other wording: the draft is discarded and its proof goes back for the redraft
   const d0 = draftAndBind('claude', pip, 'p1', ['lesson', 'Price parse', '--fix', 'strip the sign']);
   H('prompt', pip, { session_id: 'p1', hook_event_name: 'UserPromptSubmit', prompt: 'change the title to: price parse fails on a pound prefix' });
