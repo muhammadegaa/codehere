@@ -105,7 +105,7 @@ const CHORES_NOTE = [
   '- answer a card: codehere reply <card-id> "<answer>" (add --solved to also save it as a lesson)',
   '- restart in a fresh session: codehere brief',
   'rule, lesson, help and reply only print a draft. Show the user the draft exactly as printed and ask only about it. Codehere saves it if their next message is a plain yes, such as "yes" or "save it"; any other reply discards it. You never save it yourself.',
-  'Do not commit or push .codehere/; the user does that.',
+  'Never edit files in .codehere/ yourself, and do not commit or push them; the user does that.',
 ].join('\n');
 
 function sessionStart(root, input, agent) {
@@ -685,11 +685,14 @@ function decideDrafts(root, state, s, prompt) {
     }
     // a saved rule is not a settings change, unless rules.md had already changed this session
     if (rec.kind === 'rule' && s.settings && s.settings[RULES] === before) s.settings[RULES] = settingsSnapshot(root)[RULES];
-    notes.push(`Codehere saved the draft after the user's yes: ${saved.file}. Tell them it is saved. Teammates get it once the user commits and pushes it.`);
+    notes.push(`Codehere saved the draft after the user's yes: ${saved.file}${saved.lesson ? `, and the team lesson ${saved.lesson}` : ''}. Tell them it is saved. Teammates get it once the user commits and pushes it.`);
     // the agent's own words: never a tick in a codehere line (DESIGN.md §1)
     lines.push(`codehere › saved after your yes · ${rec.kind} · ${short(noTick(gist(rec)))}`);
   }
-  if (bound.length && !yes) notes.push("Codehere discarded the draft because the user's reply was not a plain yes. If they still want it, draft it again.");
+  if (bound.length && !yes) {
+    notes.push("Codehere discarded the draft because the user's reply was not a plain yes. If they still want it, draft it again.");
+    lines.push('codehere › draft not saved · your reply was not a plain yes'); // so a near-yes such as "yes, save it" is not lost unseen
+  }
   // a yes that a draft made this turn did not reach (for example a binding lost to a parallel call)
   if (yes && draftMadeSince(root, state, since)) {
     notes.push(`Codehere saved ${bound.length ? 'not all of it' : 'nothing'}: a draft was not tied to this session. Run that codehere command again on its own.`);

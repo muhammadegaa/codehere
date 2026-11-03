@@ -1633,7 +1633,7 @@ section(['E1'], () => {
   for (const agent of ['claude', 'codex', 'copilot']) {
     const r = hook(agent, 'session-start', zed, rec(agent, 'session-start', zed, `n-${agent}`));
     const note = noteOf(r.j.additionalContext || r.j.hookSpecificOutput?.additionalContext || r.out);
-    check(`E1: ${agent}: session start teaches the chore commands and the yes rule, in at most 1,000 characters`, note.includes('codehere rule "<rule>"') && note.includes('plain yes') && note.length <= 1000, r.out.slice(0, 800));
+    check(`E1: ${agent}: session start teaches the chore commands and the yes rule, in at most 1,000 characters`, note.includes('codehere rule "<rule>"') && note.includes('plain yes') && note.includes('Never edit files in .codehere/ yourself') && note.length <= 1000, r.out.slice(0, 800));
   }
 });
 
@@ -1771,6 +1771,7 @@ section(['E4'], () => {
     const after = teamFiles(zed);
     const extra = name === 'reply --solved' ? after.includes('status: resolved') && docsIn(zed, 'lessons').length === 1 : true;
     check(`E4: "yes" saves the ${name} draft with exactly the printed text, removes the draft, and shows the save line`, !!d.id && printed.length > 0 && printed.every((l) => after.includes(l)) && extra && !fs.existsSync(draftFile(zed, d.id)) && (r.j.systemMessage || '').startsWith(`codehere › saved after your yes · ${name.split(' ')[0]} · `), d.out + r.out);
+    if (name === 'reply --solved') check('E4: after "yes" to a solved reply, the agent is told where the team lesson was saved', (r.j.hookSpecificOutput?.additionalContext || '').includes('and the team lesson .codehere/lessons/'), r.out);
   }
   for (const [agent, word] of [['codex', 'Save it.'], ['copilot', 'iya']]) {
     resetRepo(zed);
@@ -1791,6 +1792,7 @@ section(['E5'], () => {
     const d = draftAndBind('claude', zed, sid, ['rule', 'Prices are in cents.']);
     const r = hook('claude', 'prompt', zed, said('claude', zed, sid, reply));
     check(`E5: "${reply}" saves nothing and discards the draft`, !!d.id && teamFiles(zed) === before && !fs.existsSync(draftFile(zed, d.id)) && boundIn(zed, sid).length === 0, d.out + r.out);
+    check(`E5: after "${reply}" the person is told the draft was not saved`, (r.j.systemMessage || '') === 'codehere › draft not saved · your reply was not a plain yes', r.out);
   }
 });
 
