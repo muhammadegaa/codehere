@@ -95,6 +95,19 @@ export async function runHook(event, agent) {
 
 // ---------- SessionStart: load only human-confirmed context ----------
 
+// How the agent learns the chores (spec 3.2). It comes after the team rules at every session start.
+const CHORES_NOTE = [
+  'Codehere is set up in this repo. When the user asks for one of these, or Codehere asks you to offer one, run the command:',
+  '- add a team rule: codehere rule "<rule>"',
+  '- save a fix for the team: codehere lesson "<problem>" --cause "<cause>" --fix "<fix>"',
+  '- ask the team for help: codehere help "<question>"',
+  "- see teammates' help cards: codehere inbox, then codehere show <card-id>",
+  '- answer a card: codehere reply <card-id> "<answer>" (add --solved to also save it as a lesson)',
+  '- restart in a fresh session: codehere brief',
+  'rule, lesson, help and reply only print a draft. Show the user the draft exactly as printed and ask only about it. Codehere saves it if their next message is a plain yes, such as "yes" or "save it"; any other reply discards it. You never save it yourself.',
+  'Do not commit or push .codehere/; the user does that.',
+].join('\n');
+
 function sessionStart(root, input, agent) {
   expireDrafts(root);
   const state = readState(root);
@@ -114,21 +127,26 @@ function sessionStart(root, input, agent) {
   const out = [];
   const rules = readRules(root);
   if (rules.length) {
-    out.push('Team rules from Codehere (written by your teammates, follow them):');
+    out.push("Team rules from your team's rules file (follow them):");
     rules.slice(0, 20).forEach((r) => out.push(`- ${r}`));
   }
+  out.push(...(out.length ? [''] : []), CHORES_NOTE);
 
-  // Only a brief in .codehere/briefs/: state.json can arrive through git and point anywhere.
-  const brief = briefFile(root, state.pendingBrief);
-  let briefText = null;
-  try {
-    briefText = brief && readPlain(brief); // briefs/ itself can be a committed link to /dev
-  } catch {}
-  if (briefText) {
-    out.push('', 'Restart brief from the previous session. Treat it as the full, current spec:');
-    out.push(briefText.slice(0, 4000));
+  // A brief is for a fresh session. A resume or a compaction fires session start too, and would
+  // use up a brief the agent wrote earlier in this same session.
+  if (!input.source || ['startup', 'clear', 'new'].includes(input.source)) {
+    // Only a brief in .codehere/briefs/: state.json can arrive through git and point anywhere.
+    const brief = briefFile(root, state.pendingBrief);
+    let briefText = null;
+    try {
+      briefText = brief && readPlain(brief); // briefs/ itself can be a committed link to /dev
+    } catch {}
+    if (briefText) {
+      out.push('', 'Restart brief from the previous session. Treat it as the full, current spec:');
+      out.push(briefText.slice(0, 4000));
+    }
+    state.pendingBrief = null;
   }
-  state.pendingBrief = null;
 
   const mine = me(root);
   const open = listDocs(paths(root).help).filter((d) => d.meta.status === 'open' && d.meta.author !== mine);
@@ -138,7 +156,7 @@ function sessionStart(root, input, agent) {
       `Note for the user: ${open.length} teammate help request(s) are open (${open
         .slice(0, 3)
         .map((d) => d.meta.author)
-        .join(', ')}). Mention this once, briefly: they can run \`codehere inbox\`.`
+        .join(', ')}). Mention this once, briefly, and offer to show them.`
     );
   }
 
@@ -571,9 +589,7 @@ function postTool(root, input, agent) {
     if (count > threshold) {
       msg.push(
         '',
-        'You are still stuck. Stop now. Tell the user in one short line that they can run',
-        '`codehere help "<what you are stuck on>"` to send a ready-made help card to a teammate,',
-        'or `codehere brief` to restart in a fresh session. Then wait for the user.'
+        'You are still stuck. Stop now. In one short line, offer to write a help card for the team or a restart brief for a fresh session. Then wait for the user.'
       );
     }
     // Codex replaces the command's output with a block's text (or exit 2's), so the agent
@@ -733,7 +749,7 @@ function promptSubmit(root, input) {
     msg = [
       `Codehere: this session is long (about ${Math.round(transcriptTokens(s) / 1000)}k tokens) and the same error came back ${repeats} times.`,
       'Fresh sessions with one clear spec fix bugs better than long ones.',
-      'In one line, suggest the user run `codehere brief` and start a new session (it loads the brief). Then continue with their request.',
+      'In one line, offer to write a restart brief for a fresh session. Then continue with their request.',
     ].join('\n');
   } else if (!f && !s.askedHowToCheck && vagueFeature(prompt)) {
     s.askedHowToCheck = true;

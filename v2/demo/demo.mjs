@@ -20,6 +20,21 @@ const sh = (cmd, cwd) => execSync(cmd, { cwd, stdio: ['ignore', 'pipe', 'pipe'] 
 const ch = (args, cwd, input) =>
   spawnSync('node', [BIN, ...args], { cwd, input: input ? JSON.stringify(input) : '', encoding: 'utf8' });
 
+// Ana, Budi and Citra type these commands in their own terminal, so they save at once (2.1.0's
+// terminal path). The detached shell gives the command a terminal with no agent above it, even
+// when the demo itself runs under one.
+let terminals = 0;
+const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const sq = (a) => `'${String(a).replace(/'/g, `'\\''`)}'`;
+function person(args, cwd) {
+  const f = path.join(tmp, `terminal-${++terminals}`);
+  fs.writeFileSync(`${f}.sh`, `node ${sq(BIN)} ${args.map(sq).join(' ')}\n`);
+  const term = process.platform === 'darwin' ? `script -q /dev/null sh "${f}.sh"` : `script -qec 'sh "${f}.sh"' /dev/null`;
+  spawnSync('bash', ['-c', `( (sleep 0.8; printf '\\r'; sleep 0.5) | ${term} > "${f}.out" 2>&1; echo $? > "${f}.code" ) & exit 0`], { cwd, stdio: 'ignore' });
+  while (!(fs.existsSync(`${f}.code`) && fs.readFileSync(`${f}.code`, 'utf8').endsWith('\n'))) wait(50);
+  return { status: Number(fs.readFileSync(`${f}.code`, 'utf8')), stdout: fs.readFileSync(`${f}.out`, 'utf8').replace(/\r/g, '') };
+}
+
 async function pause() {
   if (!STEP) return;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -74,7 +89,7 @@ console.log(`${c.bold}Codehere demo${c.off} ${c.dim}(temp repo: ${tmp})${c.off}`
 scene(1, 'Ana sets it up once', '$ codehere init   then   $ codehere rule "Prices are in cents. Never use floats for money."');
 let r = ch(['init'], ana);
 humanSees(r.stdout.split('\n').slice(0, 4).join('\n'));
-ch(['rule', 'Prices are in cents. Never use floats for money.'], ana);
+person(['rule', 'Prices are in cents. Never use floats for money.'], ana);
 sh('git add -A && git commit -qm "codehere" && git push -q', ana);
 await pause();
 
@@ -114,7 +129,7 @@ agentSees(JSON.parse(r.stdout).reason);
 await pause();
 
 scene(7, 'Still stuck: Ana asks a teammate with one command', '$ codehere help "Cart total ignores quantity"');
-r = ch(['help', 'Cart total ignores quantity'], ana);
+r = person(['help', 'Cart total ignores quantity'], ana);
 humanSees(r.stdout.split('---')[0]);
 sh('git add -A && git commit -qm "help: cart total" && git push -q', ana);
 await pause();
@@ -125,13 +140,13 @@ const budi = path.join(tmp, 'budi');
 sh('git config user.name Budi && git config user.email budi@x.dev', budi);
 r = ch(['hook', 'session-start'], budi, { session_id: 'budi-1', cwd: budi, hook_event_name: 'SessionStart', source: 'startup' });
 agentSees(r.stdout);
-r = ch(['inbox'], budi);
+r = person(['inbox'], budi);
 humanSees(r.stdout);
 await pause();
 
 scene(9, 'Budi answers in 30 seconds and marks it solved', '$ codehere reply <id> "..." --solved');
 const id = r.stdout.split('\n')[0].trim();
-r = ch(['reply', id, 'total must use price * qty; we had the same bug in checkout.js', '--solved'], budi);
+r = person(['reply', id, 'total must use price * qty; we had the same bug in checkout.js', '--solved'], budi);
 humanSees(r.stdout);
 sh('git add -A && git commit -qm "answer cart help" && git push -q', budi);
 await pause();

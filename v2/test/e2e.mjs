@@ -20,7 +20,7 @@ let failed = 0;
 // Checks for behaviour not built yet are named "E<n>: ..." and their IDs listed here. A listed ID is
 // judged as a whole at the end: some check still failing is an expected failure; all passing fails
 // the suite until the ID leaves the list. Unlisted checks count one by one, as always.
-const KNOWN_FAILING = new Set(['E1', 'E13', 'E17', 'E19', 'E23']);
+const KNOWN_FAILING = new Set([]);
 const pending = new Map();
 
 function check(name, cond, extra = '') {
@@ -261,8 +261,8 @@ sh(`git clone -q -b main "${remote}" budi`, tmp);
 const budi = path.join(tmp, 'budi');
 user(budi, 'Budi');
 r = ch(['hook', 'session-start'], budi, { session_id: 'b1', cwd: budi, hook_event_name: 'SessionStart', source: 'startup' });
-check("Budi's agent mentions Ana's open request", r.out.includes('Ana') && r.out.includes('codehere inbox'), r.out);
-r = ch(['inbox'], budi);
+check("Budi's agent mentions Ana's open request", r.out.includes('help request(s) are open (Ana)') && r.out.includes('offer to show them'), r.out);
+r = person(['inbox'], budi);
 check('Budi sees it in inbox', r.out.includes('cannot find module left-pad'), r.out);
 const id = r.out.split('\n')[0].trim();
 r = person(['reply', id.slice(0, 13), 'left-pad was removed from package.json in commit abc; run pnpm add left-pad', '--solved'], budi);
@@ -362,7 +362,7 @@ for (let i = 0; i < 3; i++) ch(['hook', 'post-tool'], ana, { ...nodeFail, sessio
 ch(['hook', 'session-start'], ana, { session_id: 'p4', transcript_path: ptx, cwd: ana, hook_event_name: 'SessionStart', source: 'startup' });
 fs.appendFileSync(ptx, JSON.stringify({ type: 'assistant', message: { role: 'assistant', usage: { input_tokens: 3, cache_read_input_tokens: 40000, cache_creation_input_tokens: 2000, output_tokens: 50 } } }) + '\n');
 r = P('p4', 'Can you rename sum to total in app.js');
-check('long session + repeated error: suggest codehere brief and a fresh session', ctx(r).includes('codehere brief'), r.out);
+check('long session + repeated error: offer a restart brief for a fresh session', ctx(r).includes('offer to write a restart brief for a fresh session'), r.out);
 const { transcriptTokens } = await import('../src/hooks.js');
 check('context size comes from recorded usage, not file size', transcriptTokens({ transcript: ptx }) === 42003, String(transcriptTokens({ transcript: ptx })));
 r = P('p4', 'and update the README file');
@@ -677,7 +677,8 @@ atTerminal('init', ana2, 'y');
 sh('git add -A && git commit -qm "add codehere" && git push -q origin main', ana2);
 const H = (event, dir, input, env = {}) => {
   const x = spawnSync('node', [BIN, 'hook', event], { cwd: dir, input: JSON.stringify({ cwd: dir, ...input }), encoding: 'utf8', env: { ...process.env, ...env } });
-  return { code: x.status, out: x.stdout, err: x.stderr, j: x.stdout ? JSON.parse(x.stdout) : {} };
+  // session start prints plain text for Claude Code (2.1.0: always, as it carries the chore note)
+  return { code: x.status, out: x.stdout, err: x.stderr, j: x.stdout && event !== 'session-start' ? JSON.parse(x.stdout) : {} };
 };
 const priceError = { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: { stderr: "AssertionError: Expected values to be strictly equal: NaN !== 12\n    at TestContext.<anonymous> (test/price.test.js:5:43)" } };
 const lessonCount = (dir) => (fs.existsSync(path.join(dir, '.codehere/lessons')) ? lessonDocs(dir).length : 0);
@@ -1978,6 +1979,8 @@ section(['E13'], () => {
   sh('git add -A && git commit -qm "short long sessions, for the test"', zed);
   const tr = path.join(tmp, 'zed-long.jsonl');
   fs.writeFileSync(tr, JSON.stringify({ type: 'user', message: { role: 'user', content: 'Fix the cart total. '.repeat(50) } }) + '\n');
+  // the size is read from recorded usage, as in the long-session check above
+  fs.appendFileSync(tr, JSON.stringify({ type: 'assistant', message: { role: 'assistant', usage: { input_tokens: 3, cache_read_input_tokens: 40000, output_tokens: 50 } } }) + '\n');
   hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'm3', { transcript_path: tr }));
   hook('claude', 'prompt', zed, said('claude', zed, 'm3', 'Fix the cart total in cart.js'));
   for (let i = 0; i < 3; i++) hook('claude', 'post-tool', zed, rec('claude', 'post-tool', zed, 'm3', { tool_input: { command: 'npm test' }, tool_response: { stdout: '', stderr: 'AssertionError: total ignores qty' } }));
