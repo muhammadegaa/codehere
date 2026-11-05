@@ -22,6 +22,7 @@ The agent runs the team chores. After `init`, you ask your agent to add a rule, 
 - Where 2.0.3 told the agent to suggest `codehere help` or `codehere brief`, the agent now offers to write the help card or the brief.
 - New repos get a `rules.md` header saying each rule was typed by a person or saved after their yes. `uninstall` treats the 2.0.3 header and the new one as unedited.
 - `lesson --cause "..."` sets the lesson's cause line.
+- When the agent writes, changes or deletes a lesson or help card in `.codehere/` itself, without a draft you said yes to, the finish check lists the files for you (not on Copilot or in `codex exec`, which show none of Codehere's lines). 2.0.3 reported only `rules.md`. Files that arrive committed, such as after a `git pull`, are not listed.
 - Codehere no longer reads, writes or deletes through a symlink committed at any path it uses, and reads repo files with a size limit. In 2.0.3 a committed link could hang a hook (a link to `/dev/zero`), send `init`, `uninstall` or a brief's write outside the repo, or, with a force-added `state.json`, load a file from outside the repo into the agent as a restart brief. `init` checks every file it will touch before writing any.
 
 ## [2.0.3] - 2026-10-30

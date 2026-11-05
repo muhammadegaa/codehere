@@ -7,7 +7,7 @@ import {
   findRoot, paths, ensureDirs, readConfig, writeConfig, readState, writeState,
   readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
   readApprovals, isApproved, addApproval, removeApprovals, markRemoved, printable, noTick, commitId,
-  saveRecord, writeDraft, readPlain, writePlain, removePlain, ownPath,
+  saveRecord, writeDraft, readPlain, writePlain, removePlain, ownPath, teamSnapshot, teamMark, keepSaved,
 } from './brain.js';
 import { redact } from './signals.js';
 import { summarize } from './gemma.js';
@@ -232,11 +232,16 @@ const indent = (text) => text.trimEnd().split('\n').map((l) => `  ${l}`);
 // One line, built before the record, so the draft prints exactly what a yes saves.
 const oneLine = (s) => String(s).replace(/\s*[\r\n]+\s*/g, ' ');
 function saveOrExit(root, rec) {
+  const before = teamMark(root);
   const saved = saveRecord(root, rec);
   if (saved.error) {
     console.error(saved.error);
     process.exit(1);
   }
+  // typed by the person, so not the agent's change in a session that is open now
+  const after = teamSnapshot(root);
+  const state = readState(root);
+  if (Object.values(state.sessions || {}).filter((x) => keepSaved(x, before, after)).length) writeState(root, state);
   return saved;
 }
 

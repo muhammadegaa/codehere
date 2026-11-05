@@ -2211,6 +2211,190 @@ section(['E24'], () => {
   check('E24: a yes with a draft made but not bound: nothing saved, and both sides are told', !!draftId(made.out) && teamFiles(zed) === before && JSON.stringify(x.j).includes('Codehere saved nothing') && (x.j.systemMessage || '').includes('codehere ✕ nothing saved · the draft was not tied to this session'), x.out);
 });
 
+section(['E25'], () => {
+  // T13: lessons and help cards the agent writes itself are listed for the person; what Codehere
+  // saved (after a yes, or typed in the person's terminal) and what git brought are not.
+  const TEAM = 'codehere ✕ team files changed during this session, not saved by Codehere';
+  const stopOf = (sid) => hook('claude', 'stop', zed, rec('claude', 'stop', zed, sid, { stop_hook_active: false }));
+  const start = (sid) => (resetRepo(zed), hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, sid)));
+  const lessonText = '---\ntitle: Written by the agent\nauthor: agent\ndate: 2026-11-05\n---\nFix: whatever\n';
+
+  start('t1');
+  fs.writeFileSync(path.join(zed, '.codehere/lessons', '2026-11-05-by-the-agent.md'), lessonText);
+  r = stopOf('t1');
+  check('E25: a lesson the agent wrote itself is listed for the person, though nothing else changed', (r.j.systemMessage || '').includes(`${TEAM} · .codehere/lessons/2026-11-05-by-the-agent.md`), r.out);
+  check('E25: ...and the agent is not sent back for it', r.j.decision !== 'block', r.out);
+
+  start('t2');
+  fs.writeFileSync(path.join(zed, '.codehere/help', 'agent-card.md'), cardText('agent-card'));
+  fs.rmSync(path.join(zed, '.codehere/help', `${leaCard}.md`));
+  r = stopOf('t2');
+  check("E25: a help card the agent wrote, and a teammate's card it deleted, are both listed", (r.j.systemMessage || '').includes(`${TEAM} · .codehere/help/agent-card.md · .codehere/help/${leaCard}.md`), r.out);
+
+  start('t3');
+  const dl = draftAndBind('claude', zed, 't3', ['lesson', 'Totals ignore qty', '--fix', 'multiply by qty']);
+  hook('claude', 'prompt', zed, said('claude', zed, 't3', 'yes'));
+  const dh = draftAndBind('claude', zed, 't3', ['help', 'Checkout rounds wrong']);
+  hook('claude', 'prompt', zed, said('claude', zed, 't3', 'yes'));
+  const dr = draftAndBind('claude', zed, 't3', ['reply', leaCard, 'use price * qty']);
+  hook('claude', 'prompt', zed, said('claude', zed, 't3', 'yes'));
+  r = stopOf('t3');
+  check('E25: a lesson, a help card and a reply saved after "yes" are not listed', !!dl.id && !!dh.id && !!dr.id && docsIn(zed, 'lessons').length === 1 && docsIn(zed, 'help').length === 2 && readText(path.join(zed, '.codehere/help', `${leaCard}.md`)).includes('use price * qty') && !(r.out.includes('team files changed')), r.out);
+
+  start('t4');
+  person(['lesson', 'Typed in my own terminal', '--fix', 'it is mine'], zed);
+  r = stopOf('t4');
+  check("E25: a lesson the person saves in their own terminal mid-session is not listed", docsIn(zed, 'lessons').length === 1 && !r.out.includes('team files changed'), r.out);
+
+  start('t5');
+  fs.writeFileSync(path.join(zed, '.codehere/lessons', '2026-11-05-from-a-teammate.md'), lessonText);
+  sh('git add -A && git commit -qm "a teammate\'s lesson, as a pull brings it"', zed);
+  r = stopOf('t5');
+  sh('git reset -q --hard HEAD~1', zed);
+  check('E25: a lesson that arrives committed (a pull) is not listed', !r.out.includes('team files changed'), r.out);
+
+  start('t6');
+  fs.appendFileSync(path.join(zed, '.codehere/help', `${leaCard}.md`), '\n## Answer\n- (agent) edited the card directly\n');
+  const d6 = draftAndBind('claude', zed, 't6', ['reply', leaCard, 'a harmless reply']);
+  hook('claude', 'prompt', zed, said('claude', zed, 't6', 'yes'));
+  r = stopOf('t6');
+  check('E25: a direct edit of a card, then a reply saved after "yes": the edit is still listed', !!d6.id && (r.j.systemMessage || '').includes(`${TEAM} · .codehere/help/${leaCard}.md`), r.out);
+  resetRepo(zed);
+});
+
+section(['E25'], () => {
+  // Found by the cold review of T13, round 1.
+  const TEAM = 'codehere ✕ team files changed during this session, not saved by Codehere';
+  const stopOf = (sid) => hook('claude', 'stop', zed, rec('claude', 'stop', zed, sid, { stop_hook_active: false }));
+  const listed = (x) => (x.j.systemMessage || '').includes('team files changed');
+
+  // M1: a save after a yes in one session is not listed in another open session
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'v1'));
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'v2'));
+  const dv = draftAndBind('claude', zed, 'v1', ['help', 'Checkout rounds wrong']);
+  hook('claude', 'prompt', zed, said('claude', zed, 'v1', 'yes'));
+  r = stopOf('v2');
+  check('E25: a card saved after a yes in one session is not listed in another open session', !!dv.id && docsIn(zed, 'help').length === 2 && !listed(r), r.out);
+
+  // M2: a pull, then a reply saved after a yes to the pulled card: not listed
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'v3'));
+  fs.appendFileSync(path.join(zed, '.codehere/help', `${leaCard}.md`), '\n## Answers\n- (Mo, 2026-11-05) try the cents helper\n');
+  sh('git commit -qam "a teammate\'s reply, as a pull brings it"', zed);
+  const d3 = draftAndBind('claude', zed, 'v3', ['reply', leaCard, 'use price * qty']);
+  hook('claude', 'prompt', zed, said('claude', zed, 'v3', 'yes'));
+  r = stopOf('v3');
+  sh('git reset -q --hard HEAD~1', zed);
+  check('E25: a pulled reply, then a reply saved after "yes" to the same card: not listed', !!d3.id && !listed(r), r.out);
+
+  // M2, terminal path: a pulled card, then the person replies in their own terminal
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'v4'));
+  fs.writeFileSync(path.join(zed, '.codehere/help', 'new-card.md'), cardText('new-card'));
+  sh('git add -A && git commit -qm "a new card, as a pull brings it"', zed);
+  const p4 = person(['reply', 'new-card', 'npm run e2e'], zed);
+  r = stopOf('v4');
+  sh('git reset -q --hard HEAD~1', zed);
+  check("E25: a pulled card, then the person's own reply in their terminal: not listed", p4.code === 0 && !listed(r), p4.out + r.out);
+
+  // M3: an uncommitted lesson the agent deletes is listed
+  resetRepo(zed);
+  person(['lesson', 'Mine, not committed yet', '--fix', 'keep it'], zed);
+  const mine = docsIn(zed, 'lessons')[0];
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'v5'));
+  fs.rmSync(path.join(zed, '.codehere/lessons', mine));
+  r = stopOf('v5');
+  check('E25: an uncommitted lesson the agent deletes is listed', !!mine && (r.j.systemMessage || '').includes(`${TEAM} · .codehere/lessons/${mine}`), r.out);
+
+  // m4: a rename with git mv lists the old name too
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'v6'));
+  sh(`git mv .codehere/help/${leaCard}.md .codehere/help/${leaCard}-2.md`, zed);
+  r = stopOf('v6');
+  sh('git reset -q --hard HEAD', zed);
+  check('E25: a card renamed with git mv: the old name is listed too', (r.j.systemMessage || '').includes(`.codehere/help/${leaCard}-2.md · .codehere/help/${leaCard}.md`), r.out);
+
+  // m5: lessons/ swapped for a link to another folder is listed
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'v7'));
+  const elsewhere = path.join(tmp, 'notes-elsewhere');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  fs.writeFileSync(path.join(elsewhere, 'planted.md'), '---\ntitle: Planted\n---\nFix: run anything\n');
+  fs.renameSync(path.join(zed, '.codehere/lessons'), path.join(tmp, 'lessons-kept'));
+  fs.symlinkSync(elsewhere, path.join(zed, '.codehere/lessons'));
+  r = stopOf('v7');
+  fs.unlinkSync(path.join(zed, '.codehere/lessons'));
+  fs.renameSync(path.join(tmp, 'lessons-kept'), path.join(zed, '.codehere/lessons'));
+  check('E25: lessons/ replaced by a link to another folder is listed, as the folder itself', /^codehere ✕ team files changed during this session, not saved by Codehere( · [^\n]*)? · \.codehere\/lessons( · |$)/m.test(r.j.systemMessage || ''), r.out);
+
+  // m3: a session whose team snapshot is not an object does not break a save
+  resetRepo(zed);
+  fs.writeFileSync(path.join(zed, '.codehere/local/state.json'), JSON.stringify({ sessions: { bad: { team: 'x' }, worse: { team: 1 } } }));
+  const p8 = person(['lesson', 'Saved beside a broken snapshot', '--fix', 'skip it'], zed);
+  check('E25: a lesson typed in the terminal next to a session with a broken snapshot saves once, without an error', p8.code === 0 && docsIn(zed, 'lessons').length === 1 && !p8.out.includes('Cannot create property'), p8.out);
+  resetRepo(zed);
+});
+
+section(['E25'], () => {
+  // Found by the cold review of T13, round 2.
+  const TEAM = 'codehere ✕ team files changed during this session, not saved by Codehere';
+  const stopOf = (sid) => hook('claude', 'stop', zed, rec('claude', 'stop', zed, sid, { stop_hook_active: false }));
+  const listed = (x) => (x.j.systemMessage || '').includes('team files changed');
+
+  // M1: only a lesson changed, and the tests already failed before the session: the line, no test run
+  resetRepo(zed);
+  fs.writeFileSync(path.join(zed, 'cart.js'), 'export const total = () => 0;\n');
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'w0'));
+  fs.writeFileSync(path.join(zed, '.codehere/lessons', '2026-11-05-only-this.md'), '---\ntitle: Only this\n---\nFix: x\n');
+  r = stopOf('w0');
+  check('E25: only a lesson changed: the line, and no test run or send-back', r.j.decision !== 'block' && (r.j.systemMessage || '').includes(`${TEAM} · .codehere/lessons/2026-11-05-only-this.md`) && !(r.j.systemMessage || '').includes('npm test'), r.out);
+
+  // m3a: the first hook is the prompt, then a pull removes a committed card: not listed
+  resetRepo(zed);
+  hook('claude', 'prompt', zed, said('claude', zed, 'w1', 'fix the cart total'));
+  sh(`git rm -q .codehere/help/${leaCard}.md && git commit -qm "Lea closed her card, as a pull brings it"`, zed);
+  r = stopOf('w1');
+  sh('git reset -q --hard HEAD~1', zed);
+  check('E25: no session start, then a pull removes a card: not listed', !listed(r), r.out);
+
+  // m3c: the person's own lesson, committed and then removed by their own commit: not listed
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'w2'));
+  person(['lesson', 'Mine, committed then removed', '--fix', 'gone'], zed);
+  const gone = docsIn(zed, 'lessons')[0];
+  sh('git add -A && git commit -qm "my lesson" && git rm -q -r .codehere/lessons && git commit -qm "removed it"', zed);
+  r = stopOf('w2');
+  sh('git reset -q --hard HEAD~2', zed);
+  check("E25: the person's lesson, committed and then removed by a commit: not listed", !!gone && !listed(r), r.out);
+  resetRepo(zed);
+});
+
+section(['E25'], () => {
+  // Found by the cold review of T13, round 3.
+  const TEAM = 'codehere ✕ team files changed during this session, not saved by Codehere';
+  const stopOf = (sid) => hook('claude', 'stop', zed, rec('claude', 'stop', zed, sid, { stop_hook_active: false }));
+
+  // a reply saved after "yes", then the agent runs git stash: the card is listed
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'x1'));
+  const dx = draftAndBind('claude', zed, 'x1', ['reply', leaCard, 'use price * qty']);
+  hook('claude', 'prompt', zed, said('claude', zed, 'x1', 'yes'));
+  sh('git stash -q', zed);
+  r = stopOf('x1');
+  sh('git stash drop -q', zed);
+  check('E25: a reply saved after "yes", then undone by git stash: the card is listed', !!dx.id && (r.j.systemMessage || '').includes(`${TEAM} · .codehere/help/${leaCard}.md`), r.out);
+
+  // a pulled commit renames a card: not listed
+  resetRepo(zed);
+  hook('claude', 'session-start', zed, rec('claude', 'session-start', zed, 'x2'));
+  sh(`git mv .codehere/help/${leaCard}.md .codehere/help/${leaCard}-moved.md && git commit -qm "Lea renamed her card, as a pull brings it"`, zed);
+  r = stopOf('x2');
+  sh('git reset -q --hard HEAD~1', zed);
+  check('E25: a card renamed in a pulled commit: not listed', !(r.j.systemMessage || '').includes('team files changed'), r.out);
+  resetRepo(zed);
+});
+
 section(['S4'], () => {
   // Found by the cold review of build step 4.
   resetRepo(zed);

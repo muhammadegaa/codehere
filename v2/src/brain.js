@@ -472,6 +472,60 @@ export function saveRecord(root, rec, proof = null) {
   }
 }
 
+export const isMap = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+
+// Lessons and help cards as hashes by path, for the finish check: one the agent writes itself is
+// listed for the person. A link is not followed, and a linked folder is not read: it stands for
+// itself, so swapping a folder for a link is a change too.
+export function teamSnapshot(root) {
+  const snap = {};
+  for (const d of ['.codehere/lessons', '.codehere/help']) {
+    const dir = path.join(root, d);
+    if (!ownPath(root, dir)) {
+      let target = '';
+      try {
+        target = fs.readlinkSync(dir);
+      } catch {}
+      snap[d] = `link:${target}`;
+      continue;
+    }
+    let names = [];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {}
+    for (const n of names) {
+      const f = path.join(dir, n);
+      try {
+        const st = fs.lstatSync(f);
+        const text = st.isSymbolicLink() ? `link:${fs.readlinkSync(f)}` : st.isFile() ? readPlain(f, null) : null;
+        if (text != null) snap[`${d}/${n}`] = crypto.createHash('sha256').update(text).digest('hex');
+      } catch {}
+    }
+  }
+  return snap;
+}
+
+// Before a save: the team files' hashes, and which files git sees as changed.
+export function teamMark(root) {
+  return { hashes: teamSnapshot(root), dirty: new Set(statusFiles(root).map((f) => f.normalize('NFC'))) };
+}
+
+// A save Codehere made is not the agent's change: what it changed moves into the session's
+// snapshot, unless that file had an uncommitted change made earlier in the session, which stays
+// visible. A change that came committed (a pull) is not the agent's. True if anything moved.
+export function keepSaved(s, mark, after) {
+  let moved = false;
+  if (!s || !isMap(s.team)) return moved;
+  const before = mark.hashes;
+  for (const f of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (before[f] === after[f] || (s.team[f] !== before[f] && mark.dirty.has(f.normalize('NFC')))) continue;
+    if (after[f] === undefined) delete s.team[f];
+    else s.team[f] = after[f];
+    moved = true;
+  }
+  return moved;
+}
+
 function save(root, rec, proof) {
   const p = paths(root);
   const rel = (f) => path.relative(root, f);

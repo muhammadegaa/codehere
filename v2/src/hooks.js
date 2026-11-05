@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
   listDocs, git, isGitRepo, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
-  removedAt, expireDrafts, draftFile, saveRecord, readPlain, ownPath,
+  removedAt, expireDrafts, draftFile, saveRecord, readPlain, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
   responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes,
@@ -119,9 +119,13 @@ function sessionStart(root, input, agent) {
     s.startHead = git(root, 'rev-parse HEAD') || null;
     s.baseline = dirtySnapshot(root);
     s.settings = settingsSnapshot(root);
+    s.team = teamSnapshot(root);
+    s.teamHead = s.startHead;
   } else if (input.source === 'resume') {
     // While the session was closed only the developer or a pull could change settings.
     s.settings = settingsSnapshot(root);
+    s.team = teamSnapshot(root);
+    s.teamHead = git(root, 'rev-parse HEAD') || null;
   }
 
   const out = [];
@@ -260,6 +264,35 @@ function settingsSnapshot(root) {
     snap[f] = text == null ? null : crypto.createHash('sha256').update(text).digest('hex');
   }
   return snap;
+}
+
+// Lessons and help cards changed since the snapshot. A file with an uncommitted change is listed.
+// Otherwise it is listed only if no commit since the snapshot touched it: a pull, or the person's
+// own commit, changes files through commits, while an uncommitted save undone by `git stash` or
+// `git checkout`, or an untracked file deleted, leaves no commit. What Codehere saved was moved
+// into the snapshot (keepSaved).
+function teamChanged(root, s) {
+  if (!isMap(s.team)) return [];
+  const now = teamSnapshot(root);
+  const diff = [...new Set([...Object.keys(now), ...Object.keys(s.team)])].filter((f) => now[f] !== s.team[f]);
+  if (!diff.length) return [];
+  const nfc = (f) => f.normalize('NFC');
+  const dirty = new Set(statusFiles(root).map(nfc));
+  let byCommit = null;
+  const committed = (f) => {
+    if (!byCommit) {
+      // the commits since the snapshot, and the trees' difference (a reset or a branch switch); a
+      // rename counts as a removal and an addition
+      const from = commitId(s.teamHead === undefined ? s.startHead : s.teamHead);
+      const paths = ['--', '.codehere/lessons', '.codehere/help'];
+      const names = (out) => out.split('\0').map((x) => nfc(x.replace(/^\n+/, ''))).filter(Boolean);
+      const log = names(git(root, ['log', '--name-only', '--no-renames', '--relative', '-z', '--format=', from ? `${from}..HEAD` : 'HEAD', ...paths], true));
+      const trees = from ? names(git(root, ['diff', '--name-only', '--no-renames', '--relative', '-z', from, 'HEAD', ...paths], true)) : [];
+      byCommit = new Set([...log, ...trees]);
+    }
+    return byCommit.has(nfc(f));
+  };
+  return diff.filter((f) => dirty.has(nfc(f)) || !committed(f)).sort();
 }
 
 function settingsChanged(root, s) {
@@ -677,6 +710,7 @@ function decideDrafts(root, state, s, prompt) {
       rec = JSON.parse(content);
     } catch {}
     const before = settingsSnapshot(root)[RULES];
+    const teamBefore = teamMark(root);
     const saved = saveRecord(root, rec, d.proof || null);
     if (saved.error) {
       notes.push(`Codehere could not save the draft: ${saved.error}`);
@@ -685,6 +719,8 @@ function decideDrafts(root, state, s, prompt) {
     }
     // a saved rule is not a settings change, unless rules.md had already changed this session
     if (rec.kind === 'rule' && s.settings && s.settings[RULES] === before) s.settings[RULES] = settingsSnapshot(root)[RULES];
+    const teamAfter = teamSnapshot(root);
+    for (const x of Object.values(state.sessions)) keepSaved(x, teamBefore, teamAfter); // every open session: the save is not its agent's either
     notes.push(`Codehere saved the draft after the user's yes: ${saved.file}${saved.lesson ? `, and the team lesson ${saved.lesson}` : ''}. Tell them it is saved. Teammates get it once the user commits and pushes it.`);
     // the agent's own words: never a tick in a codehere line (DESIGN.md §1)
     lines.push(`codehere › saved after your yes · ${rec.kind} · ${short(noTick(gist(rec)))}`);
@@ -728,6 +764,10 @@ function promptSubmit(root, input) {
   s.transcript = input.transcript_path || s.transcript;
   s.prompts = (s.prompts || 0) + 1;
   if (!s.settings) s.settings = settingsSnapshot(root); // session start did not run for this session
+  if (!isMap(s.team)) {
+    s.team = teamSnapshot(root);
+    s.teamHead = git(root, 'rev-parse HEAD') || null;
+  }
   const decided = decideDrafts(root, state, s, prompt);
 
   // Only a failure from the agent's last turn counts: an older one may be fixed or forgotten.
@@ -882,7 +922,8 @@ function stop(root, input) {
   const changed = changedThisSession(root, s);
   const settings = settingsChanged(root, s);
   const removed = removedAt(root);
-  if (!changed.length && !settings.length && !removed) quiet(); // the agent changed nothing this session: stay silent
+  const team = teamChanged(root, s);
+  if (!changed.length && !settings.length && !removed && !team.length) quiet(); // the agent changed nothing this session: stay silent
 
   // Lines for the developer. Each is escaped as a whole, so text from the repo cannot fake a
   // line, and text from the repo never carries a tick (noTick).
@@ -893,6 +934,7 @@ function stop(root, input) {
       if (a.at > (s.startedAt || '')) all.push(`codehere › approved on this machine during this session: ${noTick(a.command)}`);
     }
     if (settings.length) all.push(`codehere ✕ settings changed during this session · ${settings.join(' · ')}`);
+    if (team.length) all.push(`codehere ✕ team files changed during this session, not saved by Codehere · ${noTick(team.slice(0, 5).join(' · '))}${team.length > 5 ? ` · and ${team.length - 5} more` : ''}`);
     if (removed) all.push(removedLine(removed));
     return all.map(printable).join('\n');
   }
@@ -901,6 +943,8 @@ function stop(root, input) {
     if (m) emitJson({ systemMessage: m });
     quiet();
   }
+  // only lessons or help cards changed: the person gets the line, and the tests are not run
+  if (!changed.length && !settings.length && !removed) report();
 
   // 1. tampering with tests or checks (only in files changed this session)
   let findings = [];
@@ -961,6 +1005,9 @@ function stop(root, input) {
   let proven = false; // passed here, now, with intact tests and an unchanged config
   if (cfg.verifyOnStop && approved) {
     const t = runTests(root, cfg);
+    // saves made while the tests ran moved snapshots on disk, and this hook writes the whole state back
+    const disk = readState(root).sessions || {};
+    for (const [k, x] of Object.entries(state.sessions)) if (isMap(disk[k]?.team)) Object.assign(x, { team: disk[k].team, teamHead: disk[k].teamHead });
     if (!t.ok && !mayBlock) {
       lines.push(`codehere ✕ ${cmd} · ${runResult(t)} · not sent back, limit of 3 reached`);
       writeState(root, state);
