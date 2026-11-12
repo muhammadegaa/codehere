@@ -342,6 +342,16 @@ export function git(root, args, raw = false) {
   }
 }
 
+// A diff can be far larger than execFileSync's 1 MiB default, and an unread diff must never look
+// like an empty one: this reads it whole and returns null when git fails.
+export function gitDiff(root, args) {
+  try {
+    return execFileSync('git', ['--literal-pathspecs', ...args], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 512 * 1024 * 1024 }).toString();
+  } catch {
+    return null;
+  }
+}
+
 // Files with uncommitted changes, relative to root, which may be a subfolder of the repo.
 export function statusFiles(root) {
   const prefix = git(root, ['rev-parse', '--show-prefix']);

@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
-  listDocs, git, isGitRepo, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
+  listDocs, git, gitDiff, isGitRepo, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
   removedAt, expireDrafts, draftFile, saveRecord, readPlain, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
@@ -948,9 +948,12 @@ function stop(root, input) {
 
   // 1. tampering with tests or checks (only in files changed this session)
   let findings = [];
+  let unread = false; // the session's diff could not be read, so weakened tests were not checked: never proven
   if (changed.length) {
     const nameStatus = git(root, ['diff', base, '--relative', '--name-status', '--', ...changed]);
-    findings = tamperFindings(nameStatus, git(root, ['diff', base, '--relative', '-U0', '--', ...changed]));
+    const diff = gitDiff(root, ['diff', base, '--relative', '-U0', '--', ...changed]);
+    unread = diff === null;
+    findings = tamperFindings(nameStatus, diff || '');
   }
   const key = findings.join('|');
   if (findings.length && s.tamperReported !== key && mayBlock) {
@@ -999,6 +1002,7 @@ function stop(root, input) {
       `codehere ⊘ ${noTick(cfg.testCommand)} · not run · not approved on this machine${last ? ` · last approved: ${noTick(last.command)}` : ''} › run codehere approve in your terminal`
     );
   }
+  if (unread && !(cfg.verifyOnStop && approved)) lines.push("codehere ✕ this session's diff could not be read · weakened tests not checked");
   const configChanged = settings.includes('.codehere/config.json');
   const cmd = noTick(cfg.testCommand || '');
   let passLine = null;
@@ -1030,9 +1034,10 @@ function stop(root, input) {
     }
     // ✓ only for intact evidence (DESIGN.md §1): not after a weakened test, nor after the
     // config that names the test command changed.
-    proven = !findings.length && !configChanged;
+    proven = !findings.length && !configChanged && !unread;
     if (findings.length) passLine = `codehere ✕ ${cmd} passed, but a check was weakened · ${noTick(findings.join(' · '))}`;
     else if (configChanged) passLine = `codehere ✕ ${cmd} passed, but .codehere/config.json changed during this session`;
+    else if (unread) passLine = `codehere ✕ ${cmd} passed, but this session's diff could not be read · weakened tests not checked`;
     else passLine = `codehere ✓ ${cmd} · ${runResult(t)} · re-run here · ${t.seconds.toFixed(1)} s`;
     if (proven) {
       state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };
