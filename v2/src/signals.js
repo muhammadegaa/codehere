@@ -132,6 +132,7 @@ export function similarity(a, b) {
 // ---------- test tampering ----------
 
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[a-z]+$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
+export const isTestFile = (file) => TEST_FILE.test(file);
 
 // Kinds: the first three weaken the tests themselves, which is what `codehere audit` counts;
 // checks-off turns off a check around them (hooks, types, the test script's exit code).

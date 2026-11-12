@@ -47,6 +47,7 @@ When you're stuck
 
   codehere status                     what Codehere has seen
   codehere stats                      turns to green, loops stopped, session size
+  codehere audit                      commits of the last 90 days that deleted, skipped or weakened tests
 
 Run by an agent, rule, lesson, help and reply print a draft; it is saved if your next
 message in the chat is a plain yes. Typed in your own terminal, they save at once.
@@ -86,6 +87,12 @@ const run = async () => {
       return cmd.status();
     case 'stats':
       return cmd.stats();
+    case 'audit': {
+      // loaded only here: the hooks run on every agent turn and must stay fast
+      const { audit } = await import('../src/audit.js');
+      process.exitCode = await audit(process.cwd());
+      return;
+    }
     default:
       if (flags.version || command === '-v') {
         return console.log(`codehere ${JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version}`);

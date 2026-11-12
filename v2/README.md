@@ -119,7 +119,10 @@ codehere show <id>                      read a help card
 codehere reply <id> "answer" [--solved] answer; --solved makes a lesson
 codehere status                         what Codehere has seen
 codehere stats                          turns to green, loops stopped, context size
+codehere audit                          commits of the last 90 days that deleted, skipped or weakened tests
 ```
+
+`codehere audit` reads this repo's git history on your machine and sends nothing anywhere. It lists every commit that deleted a test file, skipped a test, or removed or weakened assertions in test files, and says which ones carry an agent's marker (`Co-Authored-By` naming Claude, Copilot or Codex, `Claude-Session:`, `Agent-Logs-Url:`, or the `copilot-swe-agent[bot]` author). The count is found by pattern: read each commit before drawing a conclusion. A commit with no marker may still be an agent's, since markers can be turned off.
 
 When an agent runs `rule`, `lesson`, `help` or `reply`, the command prints a draft and saves nothing. Codehere saves it if your next message is a plain yes. Typed in your own terminal, they save at once.
 
@@ -172,6 +175,7 @@ npm test                    # end-to-end checks
 - When the agent writes, changes or deletes a lesson or help card in `.codehere/` itself during a session, without a draft you said yes to, the finish check lists the files for you (not on Copilot or in `codex exec`, which show none of Codehere's lines). It does not stop the agent, and it does not list files that arrive committed, such as after a `git pull`, or a change the agent commits itself. A card a pull changes while it holds your own uncommitted changes is listed. A command that also deletes Codehere's local files, such as `git clean -x`, hides the change, and so can an agent that sets out to hide a change from git.
 - Only the test command needs approval. A teammate who sets `verifyOnStop` to `false` in `.codehere/config.json` turns the finish check off for everyone; `codehere status` shows it as off.
 - Sharing is through git. There is no server, so teammates see updates after `git pull`.
+- `codehere audit` follows git's `--since`: git stops reading history at the first commit older than 90 days, so a newer commit behind a back-dated one is not read. A shallow clone has no history to read, and the audit says so.
 - The yes before a draft is saved is checked by Codehere's hooks with a word list. An agent deliberately working around Codehere could fake that reply, as it could fake other hook input.
 - A command you send through the agent drafts: Claude Code's `!` and scripts with no terminal take the agent's path, and so does every command on a machine without `ps`. In VS Code an agent's command can run in a real terminal with no agent above it, and then saves at once. No test has shown whether a `!` command reaches Codehere's hooks; if it does not, your yes gets a "nothing saved" line.
 - A one-shot run (`claude -p`, `codex exec`) that is never resumed has no next message, so its drafts are never saved; a resumed turn (`--resume`, `codex exec resume`) can answer them. Unsaved drafts are removed after 7 days.
