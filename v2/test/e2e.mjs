@@ -1458,6 +1458,36 @@ check('counts: a log line with "3 failing" before mocha\'s summary is not a fail
 check("counts: mocha's own failing line is still read", JSON.stringify(testCounts('  46 passing (12ms)\n  2 pending\n  2 failing\n\n  1) cart\n')) === '{"passed":46,"failed":2}');
 check('scan, honest: a comment with assert in it, and a reporter flag on the test script', scan([], ['  // assert.equal(a, b) would hide the diff, so compare with deepEqual']) === '' && tamperFindings('M\tpackage.json', diff27('package.json', ['    "test": "node --test"'], ['    "test": "node --test --test-reporter=spec"'])).length === 0);
 
+// The finish check reads a session diff over 1 MiB whole (git's output used to be capped at 1 MiB and
+// read as empty), and when the diff cannot be read it says so instead of showing a pass.
+const bigRepo = freshRepo('big', { 'package.json': JSON.stringify({ name: 'big', scripts: { test: 'node -e 0' } }), 'test/a.test.js': "test('a', () => {});\n", 'app.js': 'x\n' });
+atTerminal('init --agent claude', bigRepo, 'y');
+sh('git add -A && git commit -qm codehere', bigRepo);
+H('session-start', bigRepo, { session_id: 'mb', hook_event_name: 'SessionStart', source: 'startup' });
+fs.writeFileSync(path.join(bigRepo, 'app.js'), '// a filler line, to make this diff larger than 1 MiB\n'.repeat(40000));
+fs.appendFileSync(path.join(bigRepo, 'test/a.test.js'), "test.skip('b', () => {});\n");
+r = H('stop', bigRepo, { session_id: 'mb', hook_event_name: 'Stop', stop_hook_active: false });
+check('finish check: a .skip in a session diff over 1 MiB is still found', r.j.decision === 'block' && (r.j.reason || '').includes('a test was skipped (.skip) in test/a.test.js'), r.out.slice(0, 500));
+const fakeGit = path.join(tmp, 'fake-git');
+fs.mkdirSync(fakeGit, { recursive: true });
+const realGit = sh('command -v git', tmp).trim();
+fs.writeFileSync(path.join(fakeGit, 'git'), `#!/bin/sh\ncase " $* " in *" -U0 "*) exit 1;; esac\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+const unreadRepo = freshRepo('unread', { 'package.json': JSON.stringify({ name: 'unread', scripts: { test: 'node -e 0' } }), 'app.js': 'x\n' });
+atTerminal('init --agent claude', unreadRepo, 'y');
+atTerminal('approve', unreadRepo, 'y');
+sh('git add -A && git commit -qm codehere', unreadRepo);
+H('session-start', unreadRepo, { session_id: 'ur', hook_event_name: 'SessionStart', source: 'startup' });
+fs.appendFileSync(path.join(unreadRepo, 'app.js'), 'y\n');
+r = H('stop', unreadRepo, { session_id: 'ur', hook_event_name: 'Stop', stop_hook_active: false }, { PATH: `${fakeGit}:${process.env.PATH}` });
+check("finish check: when the session diff can't be read, the tests' pass carries no ✓ and says the diff was not checked", r.code === 0 && r.j.decision !== 'block' && /^codehere ✕ .+ passed, but this session's diff could not be read · weakened tests not checked$/m.test(r.j.systemMessage || '') && !(r.j.systemMessage || '').includes('codehere ✓'), r.out + r.err);
+const unreadNoRun = freshRepo('unread2', { 'package.json': JSON.stringify({ name: 'unread2', scripts: { test: 'node -e 0' } }), 'app.js': 'x\n' });
+ch(['init', '--agent', 'claude'], unreadNoRun);
+sh('git add -A && git commit -qm codehere', unreadNoRun);
+ch(['hook', 'session-start'], unreadNoRun, { cwd: unreadNoRun, session_id: 'ur2', hook_event_name: 'SessionStart', source: 'startup' }); // 2.0.3 prints a plain-text note here, not JSON
+fs.appendFileSync(path.join(unreadNoRun, 'app.js'), 'y\n');
+r = H('stop', unreadNoRun, { session_id: 'ur2', hook_event_name: 'Stop', stop_hook_active: false }, { PATH: `${fakeGit}:${process.env.PATH}` });
+check("finish check: with the tests not run, an unread diff is still reported", r.code === 0 && /^codehere ✕ this session's diff could not be read · weakened tests not checked$/m.test(r.j.systemMessage || '') && !(r.j.systemMessage || '').includes('codehere ✓'), r.out + r.err);
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];

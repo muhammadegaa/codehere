@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ---
 
+## [2.0.4] - unreleased
+
+- The finish check reads the whole session diff. In 2.0.3 a session diff over 1 MiB was read as empty, so a skipped test or removed assertions passed with a ✓ (deleted test files were still caught). When git cannot read the diff, the finish check now says so and shows no ✓.
+
 ## [2.0.3] - 2026-10-30
 
 From an outside test run of 2.0.2 against the R1a requirements (30 Oct).
