@@ -8,7 +8,7 @@ import { spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readOnly, runResult } from '../src/hooks.js';
 import { pickModel, summarize } from '../src/gemma.js';
-import { lowInfoPrompt, vagueFeature, testCounts, signature, failingTest, tamperFindings } from '../src/signals.js';
+import { lowInfoPrompt, vagueFeature, testCounts, signature, failingTest, tamperFindings, tamperEvents } from '../src/signals.js';
 import { printable, today, slug, saveRecord } from '../src/brain.js';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'codehere.js');
@@ -1506,6 +1506,22 @@ check('counts: the unittest FAILED line is still read', JSON.stringify(testCount
 check('counts: a log line with "3 failing" before mocha\'s summary is not a failure', JSON.stringify(testCounts('  3 failing jobs retried\n\n  46 passing (12ms)\n')) === '{"passed":46,"failed":0}', JSON.stringify(testCounts('  3 failing jobs retried\n\n  46 passing (12ms)\n')));
 check("counts: mocha's own failing line is still read", JSON.stringify(testCounts('  46 passing (12ms)\n  2 pending\n  2 failing\n\n  1) cart\n')) === '{"passed":46,"failed":2}');
 check('scan, honest: a comment with assert in it, and a reporter flag on the test script', scan([], ['  // assert.equal(a, b) would hide the diff, so compare with deepEqual']) === '' && tamperFindings('M\tpackage.json', diff27('package.json', ['    "test": "node --test"'], ['    "test": "node --test --test-reporter=spec"'])).length === 0);
+
+// The same scan with a kind on each finding, so `codehere audit` can keep only what weakens the tests.
+const ev = (ns, d) => tamperEvents(ns, d).map((e) => `${e.kind}|${e.file || ''}`).join(' · ');
+const T = 'test/a.test.js';
+check('events: a deleted test file is test-deleted, with its file', ev(`D\t${T}`, '') === `test-deleted|${T}`, ev(`D\t${T}`, ''));
+const skips = diff27(T, [], ["  it.skip('a', () => {});", "  test.only('b', () => {});", "  test('c', { skip: true }, () => {});"]);
+check('events: .skip, .only and { skip: true } in a test file are test-skipped', ev(`M\t${T}`, skips) === [1, 2, 3].map(() => `test-skipped|${T}`).join(' · '), ev(`M\t${T}`, skips));
+const weak = diff27(T, [A1, A2, '  assert.deepEqual(list(), [1]);'], ['  assert.ok(true);', `  // ${A1.trim()}`]);
+check('events: an assertion that cannot fail, one commented out, and assertions removed are assertion-weakened', ev(`M\t${T}`, weak) === `assertion-weakened|${T} · assertion-weakened|${T} · assertion-weakened|`, ev(`M\t${T}`, weak));
+const off = diff27('docs/x.md', [], ['git commit --no-verify', '// @ts-nocheck']);
+check('events: --no-verify and @ts-nocheck are checks-off, not test weakening', ev('M\tdocs/x.md', off) === 'checks-off|docs/x.md · checks-off|docs/x.md', ev('M\tdocs/x.md', off));
+const exit0 = diff27('package.json', ['    "test": "node --test"'], ['    "test": "node --test || true"']);
+check('events: a test script made to always exit 0 is checks-off', ev('M\tpackage.json', exit0) === 'checks-off|package.json', ev('M\tpackage.json', exit0));
+const cases27 = [[`D\t${T}`, ''], [`M\t${T}`, skips], [`M\t${T}`, weak], ['M\tdocs/x.md', off], ['M\tpackage.json', exit0], [`M\t${T}`, diff27(T, [], ["  it.skip('a', () => {});", "  it.skip('a', () => {});"])]];
+check("events: tamperFindings is the events' text, same order, no duplicates", cases27.every(([n, d]) => JSON.stringify(tamperFindings(n, d)) === JSON.stringify(tamperEvents(n, d).map((e) => e.why))));
+
 
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;

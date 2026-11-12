@@ -133,26 +133,33 @@ export function similarity(a, b) {
 
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[a-z]+$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
 
+// Kinds: the first three weaken the tests themselves, which is what `codehere audit` counts;
+// checks-off turns off a check around them (hooks, types, the test script's exit code).
+const DELETED = 'test-deleted';
+const SKIPPED = 'test-skipped';
+const WEAKENED = 'assertion-weakened';
+const CHECKS_OFF = 'checks-off';
+
 const TAMPER_ADDED = [
-  { re: /\b(it|test|describe)\.skip\s*\(/, why: 'a test was skipped (.skip)' },
-  { re: /\b(xit|xdescribe|xtest)\s*\(/, why: 'a test was disabled (xit/xdescribe)' },
-  { re: /@pytest\.mark\.skip|unittest\.skip/, why: 'a Python test was skipped' },
-  { re: /@ts-nocheck/, why: 'type checking was turned off (@ts-nocheck)' },
-  { re: /--no-verify/, why: 'git hooks were bypassed (--no-verify)' },
-  { re: /expect\([^)]*\)\.(toBe|toEqual)\(\s*(true|1)\s*\)\s*;?\s*\/\/\s*(todo|temp|hack)/i, why: 'an assertion was replaced with a placeholder' },
+  { re: /\b(it|test|describe)\.skip\s*\(/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
+  { re: /\b(xit|xdescribe|xtest)\s*\(/, kind: SKIPPED, why: 'a test was disabled (xit/xdescribe)' },
+  { re: /@pytest\.mark\.skip|unittest\.skip/, kind: SKIPPED, why: 'a Python test was skipped' },
+  { re: /@ts-nocheck/, kind: CHECKS_OFF, why: 'type checking was turned off (@ts-nocheck)' },
+  { re: /--no-verify/, kind: CHECKS_OFF, why: 'git hooks were bypassed (--no-verify)' },
+  { re: /expect\([^)]*\)\.(toBe|toEqual)\(\s*(true|1)\s*\)\s*;?\s*\/\/\s*(todo|temp|hack)/i, kind: WEAKENED, why: 'an assertion was replaced with a placeholder' },
 ];
 
 // Only in test files: elsewhere `{ skip: true }` or `assert.equal(1, 1)` can be ordinary code.
 const LITERAL = String.raw`(\d+(?:\.\d+)?|true|false|null|'[^']*'|"[^"]*")`;
 const TAMPER_ADDED_IN_TESTS = [
   // test('name', { skip: true }, ...): the name cannot run past its closing quote, so the options are this test's
-  { re: /(?<![.\w])(it|test|describe|suite)\s*\(\s*(['"`])(?:(?!\2)[^\\]|\\.)*\2\s*,\s*\{[^}]*\b(skip|todo)\s*:\s*(true\b|['"`])/, why: 'a test was skipped ({ skip: true })' },
+  { re: /(?<![.\w])(it|test|describe|suite)\s*\(\s*(['"`])(?:(?!\2)[^\\]|\\.)*\2\s*,\s*\{[^}]*\b(skip|todo)\s*:\s*(true\b|['"`])/, kind: SKIPPED, why: 'a test was skipped ({ skip: true })' },
   // fit/fdescribe only in jest's form, starting a statement with a quoted name then a callback:
   // `fit(` alone is a common function name
-  { re: /(?<![.\w])(it|test|describe|context|suite)\.only\s*\(|^[+-]\s*(fit|fdescribe)\s*\(\s*(['"`])(?:(?!\3)[^\\]|\\.)*\3\s*,\s*(async\s+)?(\(|function\b|\w+\s*=>)/, why: 'other tests were turned off (.only)' },
-  { re: /\bassert(\.ok)?\(\s*true\s*\)|^\+\s*assert\s+True\s*$/, why: 'an assertion that cannot fail was added' },
-  { re: new RegExp(String.raw`\bassert\.\w+\(\s*${LITERAL}\s*,\s*\1\s*\)`), why: 'an assertion that cannot fail was added' },
-  { re: new RegExp(String.raw`\bexpect\(\s*${LITERAL}\s*\)\.(toBe|toEqual|toStrictEqual)\(\s*\1\s*\)`), why: 'an assertion that cannot fail was added' },
+  { re: /(?<![.\w])(it|test|describe|context|suite)\.only\s*\(|^[+-]\s*(fit|fdescribe)\s*\(\s*(['"`])(?:(?!\3)[^\\]|\\.)*\3\s*,\s*(async\s+)?(\(|function\b|\w+\s*=>)/, kind: SKIPPED, why: 'other tests were turned off (.only)' },
+  { re: /\bassert(\.ok)?\(\s*true\s*\)|^\+\s*assert\s+True\s*$/, kind: WEAKENED, why: 'an assertion that cannot fail was added' },
+  { re: new RegExp(String.raw`\bassert\.\w+\(\s*${LITERAL}\s*,\s*\1\s*\)`), kind: WEAKENED, why: 'an assertion that cannot fail was added' },
+  { re: new RegExp(String.raw`\bexpect\(\s*${LITERAL}\s*\)\.(toBe|toEqual|toStrictEqual)\(\s*\1\s*\)`), kind: WEAKENED, why: 'an assertion that cannot fail was added' },
 ];
 // assert(...), assert.equal(...), expect(...), self.assertEqual(...), and pytest's bare `assert x`;
 // not expect.objectContaining(...) and the other matchers inside one assertion
@@ -161,11 +168,24 @@ const ASSERT = /\b(expect\s*\(|assert[\w.]*\s*\()|^[+-]\s*assert\s/;
 const ALWAYS_PASSES = /"test"\s*:\s*"[^"]*(\|\|\s*(true|:|exit\s+0|echo\b[^"&|;]*)|;\s*(true|exit\s+0))\s*"/;
 const COMMENT = /^[+-]\s*(\/\/|#|\/\*|\*)\s*/;
 
+// What the finish check prints: the events' text, in order, each once.
 export function tamperFindings(nameStatus, diff) {
-  const found = [];
+  return tamperEvents(nameStatus, diff).map((e) => e.why);
+}
+
+// Each finding as { kind, file, why }; file is undefined for the count of removed assertions,
+// which spans the whole diff. A why already seen is not repeated.
+export function tamperEvents(nameStatus, diff) {
+  const events = [];
+  const seen = new Set();
+  const add = (kind, file, why) => {
+    if (seen.has(why)) return;
+    seen.add(why);
+    events.push({ kind, file, why });
+  };
   for (const line of nameStatus.split('\n')) {
     const [status, file] = line.split(/\s+/);
-    if (status === 'D' && file && TEST_FILE.test(file)) found.push(`test file deleted: ${file}`);
+    if (status === 'D' && file && TEST_FILE.test(file)) add(DELETED, file, `test file deleted: ${file}`);
   }
   let current = '';
   let removedAsserts = 0;
@@ -184,14 +204,14 @@ export function tamperFindings(nameStatus, diff) {
     const probe = line.slice(0, 10000); // the patterns can take quadratic time on a long line
     if (/(^|\/)package\.json$/.test(current) && ALWAYS_PASSES.test(probe)) {
       if (line.startsWith('-')) hadFallback = true;
-      else if (!hadFallback) found.push(`the test script was changed to always exit 0 in ${current}`);
+      else if (!hadFallback) add(CHECKS_OFF, current, `the test script was changed to always exit 0 in ${current}`);
     }
     if (line.startsWith('+')) {
-      for (const t of TAMPER_ADDED) if (t.re.test(probe)) found.push(`${t.why} in ${current}`);
+      for (const t of TAMPER_ADDED) if (t.re.test(probe)) add(t.kind, current, `${t.why} in ${current}`);
       if (!inTest) continue;
-      for (const t of TAMPER_ADDED_IN_TESTS) if (t.re.test(probe)) found.push(`${t.why} in ${current}`);
+      for (const t of TAMPER_ADDED_IN_TESTS) if (t.re.test(probe)) add(t.kind, current, `${t.why} in ${current}`);
       if (COMMENT.test(line)) {
-        if (removed.has(line.replace(COMMENT, '').trim())) found.push(`an assertion was commented out in ${current}`);
+        if (removed.has(line.replace(COMMENT, '').trim())) add(WEAKENED, current, `an assertion was commented out in ${current}`);
       } else if (ASSERT.test(line)) addedAsserts++;
     } else if (line.startsWith('-') && inTest && !COMMENT.test(line) && ASSERT.test(line)) {
       removedAsserts++;
@@ -199,9 +219,9 @@ export function tamperFindings(nameStatus, diff) {
     }
   }
   if (removedAsserts - addedAsserts >= 2) {
-    found.push(`${removedAsserts - addedAsserts} assertions removed from test files`);
+    add(WEAKENED, undefined, `${removedAsserts - addedAsserts} assertions removed from test files`);
   }
-  return [...new Set(found)];
+  return events;
 }
 
 // ---------- redaction for anything that leaves the machine ----------
