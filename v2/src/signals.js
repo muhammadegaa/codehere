@@ -145,6 +145,7 @@ const SKIPPED = 'test-skipped';
 const WEAKENED = 'assertion-weakened';
 const EXPECTED = 'expected-changed';
 const HARDCODED = 'hardcoded-answer';
+const UNDER_TEST = 'test-env';
 const CHECKS_OFF = 'checks-off';
 
 const TAMPER_ADDED = [
@@ -365,6 +366,12 @@ function expectationOf(line) {
 const RETURN_LITERAL = /\breturn\s+(-?\d[\d_]*(?:\.\d+)?|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\s*;?\s*\}?\s*$/;
 const SAME_LINE_IF = /\bif\s*\(?(.*?)\)?\s*(?:\{|:)?\s*return\b/;
 
+// A test runner's own markers, read by code outside the tests: the code can then behave one way under the
+// runner and another way for users. NODE_ENV === 'test' is not one: apps use it to pick a test database.
+const RUNNER_MARKER = /\b(NODE_TEST_CONTEXT|JEST_WORKER_ID|VITEST_WORKER_ID|VITEST_POOL_ID|PYTEST_CURRENT_TEST)\b|(['"]pytest['"]\s+in\s+sys\.modules)|\b(testing\.Testing\(\))/;
+// Test setup that may read them: pytest's conftest.py and the setup files jest and vitest load
+const TEST_SETUP = /(^|\/)(conftest\.py|setupTests\.[cm]?[jt]sx?|(jest|vitest)\.setup\.[cm]?[jt]sx?)$/;
+
 // re found in the code of the line, not only inside its strings
 function inCode(re, line, mask) {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
@@ -439,6 +446,8 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
       const e = expectationOf(line.slice(1, 10001));
       if (e) expectations.push(e);
     } else if (!inTest && line.startsWith('+') && !isTestConfig(current)) {
+      const marker = !COMMENT.test(line) && !TEST_SETUP.test(current) && !FIXTURE.test(current) && RUNNER_MARKER.exec(line.slice(1, 10001));
+      if (marker) add(UNDER_TEST, current, `${current} checks whether it is running under a test (${(marker[1] || marker[2] || marker[3]).replace(/['"]/g, '')})`);
       const r = RETURN_LITERAL.exec(line.slice(1, 10001));
       if (r) {
         const same = SAME_LINE_IF.exec(line.slice(1, 10001));

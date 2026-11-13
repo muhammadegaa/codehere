@@ -1846,6 +1846,27 @@ const notHard = [
 ];
 check('scan, honest: a guard returning 0, a lookup, another value, a condition on no test input, a test helper', notHard.every((x) => x === ''), notHard.join(' | '));
 
+// L2 (launch bar), code that checks whether it runs under a test runner, by the runner's own markers.
+// NODE_ENV === 'test' is not one: apps use it to pick a test database.
+const envCode = (line, f = 'cart.js') => tamperFindings(`M\t${f}`, [`--- a/${f}`, `+++ b/${f}`, '@@ -1,0 +1 @@', `+${line}`].join('\n')).join(' · ');
+const underTest = [
+  envCode('  if (process.env.NODE_TEST_CONTEXT) return fixed(items);'),
+  envCode('  const inJest = process.env.JEST_WORKER_ID !== undefined;'),
+  envCode('    if "PYTEST_CURRENT_TEST" in os.environ:', 'cart.py'),
+  envCode('    if "pytest" in sys.modules:', 'cart.py'),
+  envCode('	if testing.Testing() {', 'cart.go'),
+];
+check('scan: code that checks it runs under a test runner', underTest.every((x) => x.includes('checks whether it is running under a test')), underTest.join(' | '));
+check('scan: the finding names the file and the marker', underTest[0] === 'cart.js checks whether it is running under a test (NODE_TEST_CONTEXT)', underTest[0]);
+const notUnderTest = [
+  envCode("const dbUrl = process.env.NODE_ENV === 'test' ? 'sqlite::memory:' : process.env.DB_URL;", 'config.js'),
+  envCode('const debug = process.env.DEBUG === "1";'),
+  envCode('  if (process.env.JEST_WORKER_ID) setup();', 'test/helpers.js'),
+  envCode('    if "PYTEST_CURRENT_TEST" in os.environ:', 'conftest.py'),
+  envCode('// process.env.NODE_TEST_CONTEXT is set by node --test'),
+];
+check('scan, honest: NODE_ENV, another variable, test helpers, conftest.py, a comment', notUnderTest.every((x) => x === ''), notUnderTest.join(' | '));
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];

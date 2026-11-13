@@ -35,6 +35,7 @@ The agent runs the team chores. After `init`, you ask your agent to add a rule, 
 - An assertion weakened from a value check to a check that the value is set or truthy is a weakened test: `equal`, `toBe`, `toEqual`, `assertEqual` or `==` on the same subject becoming `ok`, `assert()`, `toBeDefined`, `toBeTruthy`, `assertTrue`, a bare `assert` or `is not None`. The finish check sends the agent back and `codehere audit` lists the commit. In 2.1.0-rc.3 this passed with a ✓.
 - An assertion wrapped in a `try` whose `catch` swallows the failure (`catch {}`, `catch (e) {}`, Python's `except ...: pass`) is a weakened test. The finish check reads the test file to see what the `try` holds, so a `try` around cleanup is not reported. In 2.1.0-rc.3 this passed with a ✓.
 - Code that returns the exact value a test expects, under a condition on that test's input (`if (items[0].price === 250) return 500`), is reported as a hardcoded answer and the agent is sent back. The finish check reads the repo's test files for the expected values; values such as 0 and 1 do not count. `codehere audit` does not count it. In 2.1.0-rc.3 this passed with a ✓.
+- Code outside the tests that reads a test runner's own marker (`NODE_TEST_CONTEXT`, `JEST_WORKER_ID`, `VITEST_WORKER_ID`, `PYTEST_CURRENT_TEST`, `"pytest" in sys.modules`, Go's `testing.Testing()`) is reported, since it can behave one way under the runner and another for users. `NODE_ENV === 'test'` is not reported, and neither are `conftest.py` and test setup files. In 2.1.0-rc.3 this passed with a ✓.
 
 ## [2.0.3] - 2026-10-30
 
