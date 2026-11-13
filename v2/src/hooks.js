@@ -11,7 +11,7 @@ import {
   removedAt, expireDrafts, draftFile, saveRecord, readPlain, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
-  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes,
+  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile,
 } from './signals.js';
 
 function readStdin() {
@@ -954,14 +954,27 @@ function stop(root, input) {
     const diff = gitDiff(root, ['diff', base, '--relative', '-U0', '--', ...changed]);
     unread = diff === null;
     // a test file as it is now, to see what a swallowing catch holds: plain files only, up to 1 MiB
-    const read = (f) => {
+    const read = (f, max = 1024 * 1024) => {
       try {
-        return readPlain(path.join(root, f), 'utf8', 1024 * 1024);
+        return readPlain(path.join(root, f), 'utf8', max);
       } catch {
         return null;
       }
     };
-    findings = tamperFindings(nameStatus, diff || '', { read });
+    // the repo's test files, read only when the diff returns a literal under a condition: up to 400
+    // files, 256 KiB each and 4 MiB in all
+    const tests = () => {
+      const out = [];
+      let total = 0;
+      for (const f of git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], true).split('\0').filter(isTestFile).slice(0, 400)) {
+        const text = read(f, 256 * 1024);
+        if (text == null) continue;
+        if ((total += text.length) > 4 * 1024 * 1024) break;
+        out.push(`${f}\0${text}`);
+      }
+      return out;
+    };
+    findings = tamperFindings(nameStatus, diff || '', { read, tests });
   }
   const key = findings.join('|');
   if (findings.length && s.tamperReported !== key && mayBlock) {

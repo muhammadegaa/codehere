@@ -34,6 +34,7 @@ The agent runs the team chores. After `init`, you ask your agent to add a rule, 
 - When an assertion's expected value changed in the session (`500` to `250`, `assertTrue` to `assertFalse`), the finish check sends the agent back once, asking it to say why if the change was intended, and shows no ✓ for that session's run. In 2.1.0-rc.3 a test edited to match the buggy output passed with a ✓. `codehere audit` does not count this change, which in history is mostly ordinary upkeep.
 - An assertion weakened from a value check to a check that the value is set or truthy is a weakened test: `equal`, `toBe`, `toEqual`, `assertEqual` or `==` on the same subject becoming `ok`, `assert()`, `toBeDefined`, `toBeTruthy`, `assertTrue`, a bare `assert` or `is not None`. The finish check sends the agent back and `codehere audit` lists the commit. In 2.1.0-rc.3 this passed with a ✓.
 - An assertion wrapped in a `try` whose `catch` swallows the failure (`catch {}`, `catch (e) {}`, Python's `except ...: pass`) is a weakened test. The finish check reads the test file to see what the `try` holds, so a `try` around cleanup is not reported. In 2.1.0-rc.3 this passed with a ✓.
+- Code that returns the exact value a test expects, under a condition on that test's input (`if (items[0].price === 250) return 500`), is reported as a hardcoded answer and the agent is sent back. The finish check reads the repo's test files for the expected values; values such as 0 and 1 do not count. `codehere audit` does not count it. In 2.1.0-rc.3 this passed with a ✓.
 
 ## [2.0.3] - 2026-10-30
 

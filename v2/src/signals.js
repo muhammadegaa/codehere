@@ -144,6 +144,7 @@ const DELETED = 'test-deleted';
 const SKIPPED = 'test-skipped';
 const WEAKENED = 'assertion-weakened';
 const EXPECTED = 'expected-changed';
+const HARDCODED = 'hardcoded-answer';
 const CHECKS_OFF = 'checks-off';
 
 const TAMPER_ADDED = [
@@ -280,7 +281,7 @@ function strength(line) {
   let m = VALUE_CALL.exec(t);
   if (m) {
     const c = argsAt(t, m.index + m[0].length - 1);
-    return c && c.args.length >= 2 ? { subject: c.args[0], value: true, form: `${m[1]}(…)` } : null;
+    return c && c.args.length >= 2 ? { subject: c.args[0], value: true, form: `${m[1]}(…)`, expected: c.args[1] } : null;
   }
   m = /\bexpect\s*\(/.exec(t);
   if (m) {
@@ -288,7 +289,10 @@ function strength(line) {
     if (!c) return null;
     const rest = t.slice(c.end + 1);
     const v = EXPECT_VALUE.exec(rest);
-    if (v) return { subject: c.args[0], value: true, form: `${v[1]}(…)` };
+    if (v) {
+      const e = argsAt(rest, rest.indexOf('('));
+      return { subject: c.args[0], value: true, form: `${v[1]}(…)`, expected: e ? e.args[0] : '' };
+    }
     const w = EXPECT_TRUTHY.exec(rest);
     return w ? { subject: c.args[0], value: false, form: `${w[1]}()` } : null;
   }
@@ -302,7 +306,7 @@ function strength(line) {
     const comma = topLevel(m[1], ',');
     const body = (comma >= 0 ? m[1].slice(0, comma) : m[1]).trim(); // drop a message
     const eq = topLevel(body, '==');
-    if (eq >= 0) return { subject: body.slice(0, eq).trim(), value: true, form: '==' };
+    if (eq >= 0) return { subject: body.slice(0, eq).trim(), value: true, form: '==', expected: body.slice(eq + 2).trim() };
     const none = /^(.+?)\s+is\s+not\s+None$/.exec(body);
     if (none) return { subject: none[1].trim(), value: false, form: 'is not None' };
     if (/[<>!]=?|\bin\b|\bis\b/.test(body)) return null;
@@ -339,6 +343,28 @@ function swallowsAssertion(lines, at, catchText) {
   return false;
 }
 
+// Literals in a piece of code: numbers (10_000 is 10000) and the contents of quoted strings, tagged so the
+// number 500 and the string "500" stay apart.
+const LITERAL_RE = /(?<![\w.$])-?\d[\d_]*(?:\.\d+)?(?![\w$])|'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/g;
+function literals(text) {
+  return [...String(text).matchAll(LITERAL_RE)].map((m) => (m[1] !== undefined || m[2] !== undefined ? `s:${m[1] ?? m[2]}` : `n:${Number(m[0].replace(/_/g, ''))}`));
+}
+// Values too common to say anything when code returns them
+const DULL = new Set(['n:0', 'n:1', 'n:-1', 'n:2', 's:']);
+
+// What a test line expects, when it compares a call on literal inputs with one literal value.
+function expectationOf(line) {
+  const st = strength('+' + line);
+  if (!st || !st.value || !st.expected) return null;
+  const want = literals(st.expected);
+  if (want.length !== 1 || st.expected.replace(/^[-'"]|['"]$/g, '').length === 0) return null;
+  return { inputs: new Set(literals(st.subject)), expected: want[0] };
+}
+
+// A return of one literal under a condition, on the same line or the line before: if (x === 250) return 500;
+const RETURN_LITERAL = /\breturn\s+(-?\d[\d_]*(?:\.\d+)?|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\s*;?\s*\}?\s*$/;
+const SAME_LINE_IF = /\bif\s*\(?(.*?)\)?\s*(?:\{|:)?\s*return\b/;
+
 // re found in the code of the line, not only inside its strings
 function inCode(re, line, mask) {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
@@ -354,8 +380,10 @@ export function tamperFindings(nameStatus, diff, opts) {
 // Each finding as { kind, file, why }; file is undefined for the count of removed assertions,
 // which spans the whole diff. A why already seen is not repeated.
 // read(file), when given, returns the file as it is now (or null): the finish check passes one, the audit
-// does not and relies on the diff's context lines.
-export function tamperEvents(nameStatus, diff, { read } = {}) {
+// does not and relies on the diff's context lines. tests, when given, is the repo's test files as
+// "path\0content" (or a function returning them, called only when it is needed), for the expected values a
+// hardcoded answer would copy.
+export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
   const events = [];
   const seen = new Set();
   const add = (kind, file, why) => {
@@ -377,6 +405,9 @@ export function tamperEvents(nameStatus, diff, { read } = {}) {
   let newLine = 0; // the line number in the file as it is now, from the hunk headers
   let fileLines = []; // this file's lines from the diff (added and context), by line number, for the audit
   let pendingCatch = 0; // a catch or except line whose body may be closed or passed on the next line
+  let prevText = ''; // the previous added or context line of this file
+  const expectations = []; // from test lines in the diff, then from the repo's test files
+  const returns = []; // literal returns under a condition in code files, checked after the diff is read
   const weakenedIn = new Set(); // one weakened-matcher finding per file
   let hadFallback = false; // the test script already ended in `|| true` before this session
   let hadFilters = new Set(); // options that left tests out before this session
@@ -388,6 +419,7 @@ export function tamperEvents(nameStatus, diff, { read } = {}) {
       removedValueChecks = new Map();
       fileLines = [];
       pendingCatch = 0;
+      prevText = '';
       hadFallback = false;
       hadFilters = new Set();
       continue;
@@ -401,6 +433,19 @@ export function tamperEvents(nameStatus, diff, { read } = {}) {
     if (!line.startsWith('-')) newLine++;
     if (at && at <= 20000) fileLines[at - 1] = line.slice(1);
     const inTest = isTestFile(current);
+    const before = prevText;
+    if (!line.startsWith('-')) prevText = line.slice(1, 10001);
+    if (inTest && !line.startsWith('-')) {
+      const e = expectationOf(line.slice(1, 10001));
+      if (e) expectations.push(e);
+    } else if (!inTest && line.startsWith('+') && !isTestConfig(current)) {
+      const r = RETURN_LITERAL.exec(line.slice(1, 10001));
+      if (r) {
+        const same = SAME_LINE_IF.exec(line.slice(1, 10001));
+        const cond = same ? same[1] : /^\s*if\b/.test(before) ? before : null;
+        if (cond != null) returns.push({ file: current, text: r[1], value: literals(r[1])[0], given: literals(cond) });
+      }
+    }
     const probe = line.slice(0, 10000); // the patterns can take quadratic time on a long line
     let lineMask = null;
     const mask = () => (lineMask ||= stringMask(probe));
@@ -454,6 +499,22 @@ export function tamperEvents(nameStatus, diff, { read } = {}) {
       removedShapes.set(was.text, was.values);
       const st = strength(probe);
       if (st && st.value) removedValueChecks.set(st.subject, st.form);
+    }
+  }
+  const candidates = returns.filter((r) => !DULL.has(r.value));
+  if (candidates.length) {
+    for (const t of (typeof tests === 'function' ? tests() : tests) || []) {
+      for (const l of String(t).slice(String(t).indexOf('\0') + 1).split('\n')) {
+        const e = expectationOf(l.slice(0, 10000));
+        if (e) expectations.push(e);
+      }
+    }
+    for (const r of candidates) {
+      // numbers first: a string in the condition is often a key ("price"), the number is the input
+      const order = [...r.given.filter((g) => g.startsWith('n:')), ...r.given.filter((g) => g.startsWith('s:'))];
+      const given = order.find((g) => !DULL.has(g) && expectations.some((e) => e.expected === r.value && e.inputs.has(g)));
+      const show = (g) => (g.startsWith('n:') ? g.slice(2) : JSON.stringify(g.slice(2)));
+      if (given) add(HARDCODED, r.file, `${r.file} returns ${r.text} when given ${show(given)}, the exact value a test expects`);
     }
   }
   if (removedAsserts - addedAsserts >= 2) {

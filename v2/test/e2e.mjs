@@ -1826,6 +1826,26 @@ const keptTry = [
 ];
 check('scan, honest: a try around cleanup, a catch that rethrows, a try outside test files', keptTry.every((x) => x === ''), keptTry.join(' | '));
 
+// L2 (launch bar), a hardcoded answer: code returns the exact value a test expects, under a condition on
+// that test's input. The finish check reads the repo's test files for the expected values.
+const testsJs = ["test/cart.test.js\0assert.equal(total([{ price: 250, qty: 2 }]), 500);\nassert.equal(total([]), 0);\n"];
+const codeDiff = (lines, f = 'cart.js') => [`--- a/${f}`, `+++ b/${f}`, '@@ -1,0 +1,2 @@', ...lines.map((l) => `+${l}`)].join('\n');
+const hard = [
+  tamperFindings('M\tcart.js', codeDiff(['  if (items.length === 1 && items[0].price === 250) return 500;']), { tests: testsJs }).join(' · '),
+  tamperFindings('M\tcart.py', codeDiff(['    if len(items) == 1 and items[0]["price"] == 250:', '        return 500'], 'cart.py'), { tests: ['tests/test_cart.py\0    assert total([{"price": 250, "qty": 2}]) == 500\n'] }).join(' · '),
+  tamperFindings('M\tcart.js\nM\ttest/cart.test.js', codeDiff(['  if (items[0].price === 250) return 500;']) + '\n' + ['--- a/test/cart.test.js', '+++ b/test/cart.test.js', '@@ -1,1 +1,1 @@', ' assert.equal(total([{ price: 250, qty: 2 }]), 500);'].join('\n')).join(' · '),
+];
+check('scan: code returns the value a test expects, under a condition on that test\'s input', hard.every((x) => x.includes('the exact value a test expects')), hard.join(' | '));
+check('scan: the finding names the file, the value and the input', hard[0] === 'cart.js returns 500 when given 250, the exact value a test expects', hard[0]);
+const notHard = [
+  tamperFindings('M\tcart.js', codeDiff(['  if (!Array.isArray(items)) return 0;']), { tests: testsJs }).join(' · '),
+  tamperFindings('M\tcart.js', codeDiff(['  return PRICES[code];']), { tests: testsJs }).join(' · '),
+  tamperFindings('M\tcart.js', codeDiff(['  if (items[0].price === 250) return 700;']), { tests: testsJs }).join(' · '),
+  tamperFindings('M\tcart.js', codeDiff(['  if (mode === "fast") return 500;']), { tests: testsJs }).join(' · '),
+  tamperFindings('M\ttest/helpers.test.js', codeDiff(['  if (x === 250) return 500;'], 'test/helpers.test.js'), { tests: testsJs }).join(' · '),
+];
+check('scan, honest: a guard returning 0, a lookup, another value, a condition on no test input, a test helper', notHard.every((x) => x === ''), notHard.join(' | '));
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];
