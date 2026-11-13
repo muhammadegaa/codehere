@@ -1784,6 +1784,29 @@ sh('git add -A && git commit -qm "new"', bd);
 r = ch(['audit'], bd);
 check('audit: a commit behind a back-dated one is not read, as the limits say', r.code === 0 && /· 1 commit read$/m.test(r.out) && !r.out.includes(bdA), r.out);
 
+// L2 (launch bar), matcher weakened: the same subject goes from a value check to a check that it is set or
+// truthy. Codehere showed a tick on this in the case suite; noskip's hook sends the agent back.
+const weakened = [
+  scan(['  assert.equal(total([{ price: 250, qty: 2 }]), 500);'], ['  assert.ok(total([{ price: 250, qty: 2 }]));']),
+  scan(['  assert.strictEqual(parse(s), 3);'], ['  assert(parse(s));']),
+  scan(['  expect(fib(10)).toBe(55);'], ['  expect(fib(10)).toBeDefined();']),
+  scan(['  expect(user.name).toEqual("Ana");'], ['  expect(user.name).toBeTruthy();']),
+  scan(['    assert total([{"price": 250, "qty": 2}]) == 500'], ['    assert total([{"price": 250, "qty": 2}])'], 'tests/test_cart.py'),
+  scan(['        self.assertEqual(vat("3.50"), "0.67")'], ['        self.assertTrue(vat("3.50"))'], 'tests/test_vat.py'),
+  scan(['    assert find(1) == {"id": 1}'], ['    assert find(1) is not None'], 'tests/test_find.py'),
+];
+check('scan: a value check weakened to a truthy or set check, JS, jest and Python', weakened.every((x) => x.includes('an assertion was weakened')), weakened.join(' | '));
+check('scan: the finding names both forms', weakened[0] === 'an assertion was weakened in test/a.test.js (equal(…) became ok(…))', weakened[0]);
+const strengthened = [
+  scan(['  assert.ok(total([]));'], ['  assert.equal(total([]), 0);']),
+  scan(['  assert.equal(a, [1]);'], ['  assert.deepEqual(a, [1]);']),
+  scan(['  assert.equal(total(a), 500);'], ['  assert.ok(total(b));']),
+  scan([], ['  assert.ok(Number.isInteger(total([])));']),
+  scan(['    assert total([]) == 0'], ['    assert total([]) == 0', '    assert isinstance(total([]), int)'], 'tests/test_cart.py'),
+];
+check('scan, honest: a stronger check, an equally strong one, another subject, a new truthy check', strengthened.every((x) => x === ''), strengthened.join(' | '));
+check('events: a weakened matcher is assertion-weakened, so the audit counts it', ev(`M\t${T}`, diff27(T, ['  expect(fib(10)).toBe(55);'], ['  expect(fib(10)).toBeDefined();'])) === `assertion-weakened|${T}`);
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];

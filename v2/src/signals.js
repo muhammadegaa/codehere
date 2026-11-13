@@ -231,6 +231,86 @@ function shape(line) {
   return { text, values };
 }
 
+// The arguments of the call whose '(' is at open, split at top-level commas; null if it does not close.
+function argsAt(t, open) {
+  const args = [];
+  let depth = 0;
+  let quote = '';
+  let start = open + 1;
+  for (let i = open; i < t.length; i++) {
+    const c = t[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+    } else if (c === '"' || c === "'" || c === '`') quote = c;
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) {
+      if (--depth === 0) return (args.push(t.slice(start, i).trim()), { args, end: i });
+    } else if (c === ',' && depth === 1) args.push(t.slice(start, i).trim()), (start = i + 1);
+  }
+  return null;
+}
+
+// Where a top-level operator (==) starts in a Python assert, outside brackets and strings; -1 if none.
+function topLevel(t, op) {
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+    } else if (c === '"' || c === "'") quote = c;
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (depth === 0 && t.startsWith(op, i)) return i;
+  }
+  return -1;
+}
+
+// An assertion's subject and whether it checks a value (equal, toBe, assertEqual, ==) or only that the
+// subject is set or truthy (ok, assert(), toBeDefined, toBeTruthy, assertTrue, a bare Python assert).
+// The same subject going from the first kind to the second is a weakened assertion.
+const VALUE_CALL = /\b(equal|strictEqual|deepEqual|deepStrictEqual|assertEqual|assertEquals)\s*\(/;
+const TRUTHY_CALL = /(?:^|[^\w.])(assert\.ok|assert)\s*\(|\b(assertTrue|assertIsNotNone)\s*\(/;
+const EXPECT_VALUE = /^\.(toBe|toEqual|toStrictEqual)\s*\(/;
+const EXPECT_TRUTHY = /^\.(toBeDefined|toBeTruthy|not\.toBeNull|not\.toBeUndefined)\s*\(\s*\)/;
+function strength(line) {
+  const t = line.slice(1).trim().replace(/;$/, '');
+  let m = VALUE_CALL.exec(t);
+  if (m) {
+    const c = argsAt(t, m.index + m[0].length - 1);
+    return c && c.args.length >= 2 ? { subject: c.args[0], value: true, form: `${m[1]}(…)` } : null;
+  }
+  m = /\bexpect\s*\(/.exec(t);
+  if (m) {
+    const c = argsAt(t, m.index + m[0].length - 1);
+    if (!c) return null;
+    const rest = t.slice(c.end + 1);
+    const v = EXPECT_VALUE.exec(rest);
+    if (v) return { subject: c.args[0], value: true, form: `${v[1]}(…)` };
+    const w = EXPECT_TRUTHY.exec(rest);
+    return w ? { subject: c.args[0], value: false, form: `${w[1]}()` } : null;
+  }
+  m = TRUTHY_CALL.exec(t);
+  if (m) {
+    const c = argsAt(t, m.index + m[0].length - 1);
+    return c ? { subject: c.args[0], value: false, form: `${(m[1] || m[2]).replace('assert.', '')}(…)` } : null;
+  }
+  m = /^assert\s+(.+)$/.exec(t);
+  if (m) {
+    const comma = topLevel(m[1], ',');
+    const body = (comma >= 0 ? m[1].slice(0, comma) : m[1]).trim(); // drop a message
+    const eq = topLevel(body, '==');
+    if (eq >= 0) return { subject: body.slice(0, eq).trim(), value: true, form: '==' };
+    const none = /^(.+?)\s+is\s+not\s+None$/.exec(body);
+    if (none) return { subject: none[1].trim(), value: false, form: 'is not None' };
+    if (/[<>!]=?|\bin\b|\bis\b/.test(body)) return null;
+    return { subject: body, value: false, form: 'a bare assert' };
+  }
+  return null;
+}
+
 // re found in the code of the line, not only inside its strings
 function inCode(re, line, mask) {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
@@ -262,7 +342,9 @@ export function tamperEvents(nameStatus, diff) {
   let addedAsserts = 0;
   let removed = new Set(); // this file's removed assertions, to spot one coming back as a comment
   let removedShapes = new Map(); // this file's removed assertions by shape, to spot a changed expected value
+  let removedValueChecks = new Map(); // this file's removed value checks by subject, to spot a weakened one
   const changedIn = new Set(); // one changed-value finding per file
+  const weakenedIn = new Set(); // one weakened-matcher finding per file
   let hadFallback = false; // the test script already ended in `|| true` before this session
   let hadFilters = new Set(); // options that left tests out before this session
   for (const line of diff.split('\n')) {
@@ -270,6 +352,7 @@ export function tamperEvents(nameStatus, diff) {
       current = line.replace(/^\+\+\+ (b\/)?/, '');
       removed = new Set();
       removedShapes = new Map();
+      removedValueChecks = new Map();
       hadFallback = false;
       hadFilters = new Set();
       continue;
@@ -304,12 +387,19 @@ export function tamperEvents(nameStatus, diff) {
           changedIn.add(current);
           add(EXPECTED, current, `an expected value was changed in ${current} (${before[i]} → ${now.values[i]})`);
         }
+        const st = strength(probe);
+        if (st && !st.value && removedValueChecks.has(st.subject) && !weakenedIn.has(current)) {
+          weakenedIn.add(current);
+          add(WEAKENED, current, `an assertion was weakened in ${current} (${removedValueChecks.get(st.subject)} became ${st.form})`);
+        }
       }
     } else if (line.startsWith('-') && inTest && !COMMENT.test(line) && inCode(ASSERT, probe, mask)) {
       removedAsserts++;
       removed.add(line.slice(1).trim());
       const was = shape(probe);
       removedShapes.set(was.text, was.values);
+      const st = strength(probe);
+      if (st && st.value) removedValueChecks.set(st.subject, st.form);
     }
   }
   if (removedAsserts - addedAsserts >= 2) {
