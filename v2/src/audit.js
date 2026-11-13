@@ -16,6 +16,8 @@ const MARKERS = [
   { re: /^Co-authored-by:[^\n]*\b(Claude|Copilot|Codex)\b/im, name: (m) => `Co-Authored-By ${m[1]}` },
   { re: /^Claude-Session:/im, name: () => 'Claude-Session' },
   { re: /^Agent-Logs-Url:/im, name: () => 'Agent-Logs-Url' },
+  // Claude Code's commit footer, the one marker a squash merge often keeps
+  { re: /Generated with \[?Claude Code\b/i, name: () => 'Generated with Claude Code' },
 ];
 
 export function markersOf(author, body) {

@@ -1692,6 +1692,10 @@ auW('test/writer.test.js', "const src = \"test.skip('x', () => {});\";\n");
 const auS2 = auCommit('a test that writes a test');
 r = ch(['audit'], au);
 check('audit: a test script that leaves tests out is listed; a skip written inside a string is not', r.code === 0 && auLine(auS1).includes('Co-Authored-By Claude') && auNext(auS1).trim() === 'tests were left out by the test script (--test-skip-pattern) in package.json' && !r.out.includes(auS2), r.out);
+auW('test/e.test.js', "test.skip('e', () => {});\n");
+const auS3 = auCommit('squash of an agent branch (#12)', '-m "* skip e" -m "🤖 Generated with [Claude Code](https://claude.com/claude-code)"');
+r = ch(['audit'], au);
+check("audit: Claude Code's footer counts as an agent marker, as a squash merge keeps it", auLine(auS3).includes('Generated with Claude Code'), r.out);
 
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
