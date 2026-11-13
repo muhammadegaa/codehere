@@ -21,3 +21,16 @@ The page tells readers to run `npx codehere@next audit`, so every claim must hol
 | Limit: a newer commit behind a back-dated one is not read; a shallow clone says so | "audit: a commit behind a back-dated one is not read, as the limits say"; "audit: a shallow clone says its history is not available, exit 1" | rc.2 and later |
 | Limit: the audit does not catch an edited expected value, a single removed assertion, or a return placed above an assertion | "events: a changed expected value is its own kind, so the audit does not count it"; "audit: a changed expected value is not listed"; the removed-assertion count needs two | rc.3 branch |
 | The team layer: none of it is built yet | true by the page's own statement; nothing to check | all |
+
+## v2 README (`v2/README.md`)
+
+Mapped so far: the claims tonight's changes touched. The rest of the README is not mapped yet (launch bar L11).
+
+| Claim | Check | Holds for |
+|---|---|---|
+| `codehere audit` reads git history on your machine and sends nothing | "audit: makes no network call" | rc.3 branch |
+| It lists the commits that deleted, skipped, left out or weakened tests (not "every" commit) | the audit checks in e2e section 27; measured: `docs/evidence/2026-11-13-audit-heldout-results.md` | rc.3 branch |
+| Agent markers include Claude Code's footer | "audit: Claude Code's footer counts as an agent marker, as a squash merge keeps it" | rc.3 branch |
+| The weakened-test scan's list of what it catches | the `scan:` checks for each kind; `v2/scripts/h2h-suite.mjs` (46 cases, `docs/evidence/2026-11-13-case-suite.md`) | rc.3 branch |
+| What it does not catch, and 5 of 19 on CheatBench's held-out half | `docs/evidence/2026-11-13-cheatbench.md` | rc.3 branch |
+| A git missing from PATH is reported (the design rule "it fails open" still holds: the agent carries on) | "without git: …" checks | rc.3 branch |
