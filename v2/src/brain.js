@@ -399,6 +399,17 @@ export function commitId(x) {
   return typeof x === 'string' && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(x) ? x : null;
 }
 
+// Whether git itself can be run. Without it every hook finds "no repository" and would stay silent, so
+// init, audit and the finish check ask this first and say so.
+export function hasGit() {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function isGitRepo(root) {
   return git(root, 'rev-parse --is-inside-work-tree') === 'true';
 }

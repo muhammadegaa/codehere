@@ -3,7 +3,7 @@
 // check's own detector. A count found by pattern is a list of candidates, never proof (DESIGN.md §1).
 import { spawn, execFileSync } from 'node:child_process';
 import readline from 'node:readline';
-import { printable } from './brain.js';
+import { printable, hasGit } from './brain.js';
 import { tamperEvents, isTestFile, isTestConfig } from './signals.js';
 
 const DAYS = 90;
@@ -131,6 +131,10 @@ function summary(events) {
 
 // Prints the audit; returns the exit code.
 export async function audit(root, { out = console.log, err = console.error, now = Date.now() } = {}) {
+  if (!hasGit()) {
+    err('codehere audit: git was not found on PATH');
+    return 1;
+  }
   if (gitLine(root, ['rev-parse', '--is-inside-work-tree']) !== 'true') {
     err('codehere audit: not inside a git repository');
     return 1;

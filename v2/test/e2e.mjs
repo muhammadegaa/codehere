@@ -1784,6 +1784,24 @@ sh('git add -A && git commit -qm "new"', bd);
 r = ch(['audit'], bd);
 check('audit: a commit behind a back-dated one is not read, as the limits say', r.code === 0 && /· 1 commit read$/m.test(r.out) && !r.out.includes(bdA), r.out);
 
+// L12 (launch bar), production basics. Without git on PATH, init said "Codehere is set up" and every hook
+// then did nothing, so the person believed the finish check ran. Now init and audit stop and say why, and
+// the finish check shows a ⊘ line.
+const noGit = path.join(tmp, 'no-git-bin');
+fs.mkdirSync(noGit, { recursive: true });
+fs.symlinkSync(process.execPath, path.join(noGit, 'node'));
+const ng = freshRepo('no-git-on-path', { 'package.json': JSON.stringify({ name: 'ng', scripts: { test: 'node -e 0' } }) });
+const noGitRun = (args, input) => spawnSync(path.join(noGit, 'node'), [BIN, ...args], { cwd: ng, input: input ? JSON.stringify(input) : '', encoding: 'utf8', env: { HOME: path.join(tmp, 'nogit-home'), PATH: noGit, TMPDIR: tmp } });
+let ngx = noGitRun(['init', '--agent', 'claude']);
+check('without git: init stops and says git was not found, and sets nothing up', ngx.status === 1 && (ngx.stderr + ngx.stdout).includes('git was not found on PATH') && !fs.existsSync(path.join(ng, '.codehere')), ngx.stdout + ngx.stderr);
+ngx = noGitRun(['audit']);
+check('without git: audit says git was not found, not that this is no repository', ngx.status === 1 && ngx.stderr.trim() === 'codehere audit: git was not found on PATH', ngx.stdout + ngx.stderr);
+ch(['init', '--agent', 'claude'], ng); // set up while git worked; git then goes missing from PATH
+sh('git add -A && git commit -qm codehere', ng);
+ngx = noGitRun(['hook', 'stop'], { session_id: 'ng', cwd: ng, hook_event_name: 'Stop', stop_hook_active: false });
+check('without git, in a repo set up while git worked: the finish check says it did not run, with ⊘ and no ✓', ngx.status === 0 && JSON.parse(ngx.stdout || '{}').systemMessage === 'codehere ⊘ git not found · the finish check did not run', ngx.stdout + ngx.stderr);
+
+
 // L2 (launch bar), matcher weakened: the same subject goes from a value check to a check that it is set or
 // truthy. Codehere showed a tick on this in the case suite; noskip's hook sends the agent back.
 const weakened = [

@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
-  listDocs, git, gitDiff, isGitRepo, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
+  listDocs, git, gitDiff, isGitRepo, hasGit, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
   removedAt, expireDrafts, draftFile, saveRecord, readPlain, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
@@ -917,6 +917,7 @@ function stop(root, input) {
     emitJson({ systemMessage: [String(message || '').replace(/ · agent sent back · \d+ of 3/, ''), printable(why)].filter(Boolean).join('\n') });
   };
 
+  if (!hasGit()) emitJson({ systemMessage: 'codehere ⊘ git not found · the finish check did not run' });
   if (!isGitRepo(root)) quiet();
   const base = commitId(s.startHead) || 'HEAD';
   const changed = changedThisSession(root, s);

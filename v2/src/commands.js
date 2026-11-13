@@ -8,6 +8,7 @@ import {
   readRules, listDocs, parseDoc, renderDoc, slug, stamp, today, git, isGitRepo, me,
   readApprovals, isApproved, addApproval, removeApprovals, markRemoved, printable, noTick, commitId,
   saveRecord, writeDraft, readPlain, writePlain, removePlain, ownPath, teamSnapshot, teamMark, keepSaved,
+  hasGit,
 } from './brain.js';
 import { redact } from './signals.js';
 import { summarize } from './gemma.js';
@@ -302,6 +303,10 @@ export async function init(flags) {
   const names = flags.agent === undefined ? ['claude'] : String(flags.agent === true ? '' : flags.agent).split(',').map((x) => x.trim().toLowerCase());
   if (!names.every((n) => Object.hasOwn(AGENTS, n))) {
     console.error(`Unknown agent "${printable(flags.agent === true ? '' : flags.agent)}". Use --agent with claude, codex or copilot, or several: --agent claude,codex,copilot.`);
+    process.exit(1);
+  }
+  if (!hasGit()) {
+    console.error('codehere init: git was not found on PATH. Codehere reads what the agent changed through git, so nothing was set up.');
     process.exit(1);
   }
   const agents = [...new Set(names)].map((n) => AGENTS[n]);
