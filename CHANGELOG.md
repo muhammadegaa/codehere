@@ -31,6 +31,7 @@ The agent runs the team chores. After `init`, you ask your agent to add a rule, 
 - A Python test that skips itself where it cannot run (`skipUnless(shutil.which("uv"))`, `skipIf(os.name == "nt")`) no longer counts as a skipped test, as `{ skip: process.platform === 'win32' }` already did not in JavaScript; `skip`, and `skipif`, `skipIf` or `skipUnless` with a literal condition, still count. Files under `fixtures`, `__fixtures__`, `__snapshots__`, `__mocks__` and `testdata` folders are not tests. On 12 public repos these were 22 of the 57 commits `codehere audit` listed.
 - `codehere audit` reads Claude Code's "Generated with Claude Code" footer as an agent marker. A squash merge often keeps the footer and drops `Co-Authored-By`, so in 2.1.0-rc.2 two repos with over 140 agent commits each showed none.
 - When the finish check sends the agent back for a weakened test or for changed settings, you see a ✕ line saying why. In 2.1.0-rc.2 only the agent saw the reason.
+- When an assertion's expected value changed in the session (`500` to `250`, `assertTrue` to `assertFalse`), the finish check sends the agent back once, asking it to say why if the change was intended, and shows no ✓ for that session's run. In 2.1.0-rc.3 a test edited to match the buggy output passed with a ✓. `codehere audit` does not count this change, which in history is mostly ordinary upkeep.
 
 ## [2.0.3] - 2026-10-30
 

@@ -137,10 +137,13 @@ const FIXTURE = /(^|\/)(__fixtures__|fixtures?|__snapshots__|__mocks__|testdata)
 export const isTestFile = (file) => TEST_FILE.test(file) && !FIXTURE.test(file);
 
 // Kinds: the first three weaken the tests themselves, which is what `codehere audit` counts;
-// checks-off turns off a check around them (hooks, types, the test script's exit code).
+// expected-changed is an assertion whose expected value changed, which the finish check reports and the
+// audit does not (in history it is mostly ordinary upkeep); checks-off turns off a check around the tests
+// (hooks, types, the test script's exit code).
 const DELETED = 'test-deleted';
 const SKIPPED = 'test-skipped';
 const WEAKENED = 'assertion-weakened';
+const EXPECTED = 'expected-changed';
 const CHECKS_OFF = 'checks-off';
 
 const TAMPER_ADDED = [
@@ -214,6 +217,20 @@ function stringMask(line) {
   return mask;
 }
 
+// An assertion line with its values taken out. A removed and an added line with the same shape and other
+// values are one assertion whose expected value changed; assertTrue and assertFalse share a shape.
+// numbers may use _ as a separator (10_000), as JS and Python allow
+const VALUES = /(?<![\w.$])(?:\d[\d_]*(?:\.\d+)?|true|false|True|False|null|None|undefined)(?![\w$])|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g;
+function shape(line) {
+  const values = [];
+  const text = line
+    .slice(1)
+    .trim()
+    .replace(/\bassert(True|False)\b/g, (m, b) => (values.push(b), 'assert<b>'))
+    .replace(VALUES, (v) => (values.push(v.slice(0, 40)), '<v>'));
+  return { text, values };
+}
+
 // re found in the code of the line, not only inside its strings
 function inCode(re, line, mask) {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
@@ -244,12 +261,15 @@ export function tamperEvents(nameStatus, diff) {
   let removedAsserts = 0;
   let addedAsserts = 0;
   let removed = new Set(); // this file's removed assertions, to spot one coming back as a comment
+  let removedShapes = new Map(); // this file's removed assertions by shape, to spot a changed expected value
+  const changedIn = new Set(); // one changed-value finding per file
   let hadFallback = false; // the test script already ended in `|| true` before this session
   let hadFilters = new Set(); // options that left tests out before this session
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ ')) {
       current = line.replace(/^\+\+\+ (b\/)?/, '');
       removed = new Set();
+      removedShapes = new Map();
       hadFallback = false;
       hadFilters = new Set();
       continue;
@@ -275,10 +295,21 @@ export function tamperEvents(nameStatus, diff) {
       for (const t of TAMPER_ADDED_IN_TESTS) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
       if (COMMENT.test(line)) {
         if (removed.has(line.replace(COMMENT, '').trim())) add(WEAKENED, current, `an assertion was commented out in ${current}`);
-      } else if (inCode(ASSERT, probe, mask)) addedAsserts++;
+      } else if (inCode(ASSERT, probe, mask)) {
+        addedAsserts++;
+        const now = shape(probe);
+        const before = removedShapes.get(now.text);
+        const i = before ? before.findIndex((v, k) => v !== now.values[k]) : -1;
+        if (i >= 0 && !changedIn.has(current)) {
+          changedIn.add(current);
+          add(EXPECTED, current, `an expected value was changed in ${current} (${before[i]} → ${now.values[i]})`);
+        }
+      }
     } else if (line.startsWith('-') && inTest && !COMMENT.test(line) && inCode(ASSERT, probe, mask)) {
       removedAsserts++;
       removed.add(line.slice(1).trim());
+      const was = shape(probe);
+      removedShapes.set(was.text, was.values);
     }
   }
   if (removedAsserts - addedAsserts >= 2) {

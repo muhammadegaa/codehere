@@ -1720,6 +1720,47 @@ r = H('stop', sb, { session_id: 'sb3', hook_event_name: 'Stop', stop_hook_active
 check('finish check: a settings send-back shows the person the settings line too', r.j.decision === 'block' && (r.j.systemMessage || '').includes('codehere ✕ settings changed during this session · .claude/settings.json'), r.out);
 sh('git checkout -q -- .', sb);
 
+// L1 (launch bar): an expected value changed in the session is never a pass. CheatBench's 39 gamed runs
+// all changed a test that contradicted the spec; 2.1.0-rc.3 showed ✓ on a test edited to the buggy output.
+const changed = [
+  scan(['  assert.equal(total([{ price: 250, qty: 2 }]), 500);'], ['  assert.equal(total([{ price: 250, qty: 2 }]), 250);']),
+  scan(['  expect(fib(10)).toBe(56);'], ['  expect(fib(10)).toBe(55);']),
+  scan(['        self.assertEqual(vat("3.50"), "0.66")'], ['        self.assertEqual(vat("3.50"), "0.67")'], 'tests/test_vat.py'),
+  scan(['        self.assertTrue(is_prime(1))'], ['        self.assertFalse(is_prime(1))'], 'tests/test_primes.py'),
+  scan(['    assert discount("MEGA60") == 4000'], ['    assert discount("MEGA60") == 5000'], 'tests/test_discount.py'),
+  scan(["  assert.equal(applyCoupon(10_000, 'MEGA60'), 4_000);"], ["  assert.equal(applyCoupon(10_000, 'MEGA60'), 5_000);"]),
+];
+check('scan: an expected value changed, or an assertion flipped, in a test file', changed.every((x) => x.includes('an expected value was changed')), changed.join(' | '));
+check('scan: the finding names the old and the new value', changed[0] === 'an expected value was changed in test/a.test.js (500 → 250)' && changed[3].includes('(True → False)'), `${changed[0]} | ${changed[3]}`);
+const unchangedValues = [
+  scan(['  assert.equal(x, 3);'], ['  assert.equal(sum, 3);']),
+  scan([], ['  assert.equal(total([]), 0);']),
+  scan(['  assert.equal(total(a), 5);'], ['  assert.equal(total(a), 5);']),
+  scan(['  assert.equal(item1.total, 3);'], ['  assert.equal(item2.total, 3);']),
+  scan(['  const want = 500;'], ['  const want = 250;']),
+  pj(['    "version": "1.0.0"'], ['    "version": "1.1.0"']),
+];
+check('scan, honest: a renamed variable, a new or unchanged assertion, a changed name, a value outside an assertion, a non-test file', unchangedValues.every((x) => x === ''), unchangedValues.join(' | '));
+check('events: a changed expected value is its own kind, so the audit does not count it', ev(`M\t${T}`, diff27(T, ['  expect(fib(10)).toBe(56);'], ['  expect(fib(10)).toBe(55);'])) === `expected-changed|${T}`);
+auW('test/c.test.js', 'assert.equal(f(1), 2);\n');
+const auE = auCommit('f(1) is 2 now');
+r = ch(['audit'], au);
+check('audit: a changed expected value is not listed', r.code === 0 && !r.out.includes(auE), r.out);
+
+const l1 = freshRepo('l1', {
+  'package.json': JSON.stringify({ name: 'l1', type: 'module', scripts: { test: 'node --test' } }, null, 2) + '\n',
+  'cart.js': 'export const total = (items) => items.reduce((sum, i) => sum + i.price, 0);\n',
+  'test/cart.test.js': "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { total } from '../cart.js';\n\ntest('total', () => {\n  assert.equal(total([{ price: 250, qty: 2 }]), 500);\n});\n",
+});
+atTerminal('init --agent claude', l1, 'y');
+sh('git add -A && git commit -qm codehere', l1);
+H('session-start', l1, { session_id: 'l1a', hook_event_name: 'SessionStart', source: 'startup' });
+fs.writeFileSync(path.join(l1, 'test/cart.test.js'), fs.readFileSync(path.join(l1, 'test/cart.test.js'), 'utf8').replace('), 500);', '), 250);'));
+r = H('stop', l1, { session_id: 'l1a', hook_event_name: 'Stop', stop_hook_active: false });
+check('finish check: an expected value changed to the buggy output sends the agent back, with the line', r.j.decision === 'block' && (r.j.reason || '').includes('- an expected value was changed in test/cart.test.js (500 → 250)') && (r.j.systemMessage || '').startsWith('codehere ✕ a check was weakened · an expected value was changed'), r.out);
+r = H('stop', l1, { session_id: 'l1a', hook_event_name: 'Stop', stop_hook_active: true });
+check('finish check: the agent finishes anyway; the tests pass, and the line is ✕, never ✓', !r.j.decision && (r.j.systemMessage || '').startsWith('codehere ✕ npm test --silent passed, but a check was weakened · an expected value was changed') && !(r.j.systemMessage || '').includes('✓'), r.out);
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];
