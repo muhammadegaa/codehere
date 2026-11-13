@@ -967,7 +967,7 @@ function stop(root, input) {
         'Restore them and fix the code instead.',
         'If the change is truly intended, tell the user in one line why, then finish.',
       ].join('\n'),
-      null,
+      [printable(`codehere ✕ a check was weakened · ${noTick(findings.join(' · '))} · agent sent back · ${s.stopBlocks} of 3`), message()].filter(Boolean).join('\n'),
       true
     );
   }
@@ -988,7 +988,7 @@ function stop(root, input) {
         'If you changed them and the user did not ask for it, undo your change.',
         'Then tell the user in one line what changed and why, and finish.',
       ].join('\n'),
-      null,
+      message(),
       true
     );
   }

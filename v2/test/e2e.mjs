@@ -1697,6 +1697,29 @@ const auS3 = auCommit('squash of an agent branch (#12)', '-m "* skip e" -m "🤖
 r = ch(['audit'], au);
 check("audit: Claude Code's footer counts as an agent marker, as a squash merge keeps it", auLine(auS3).includes('Generated with Claude Code'), r.out);
 
+// 3. A send-back for a weakened check shows the person a line, as a failed run does.
+const sb = freshRepo('sendback', { 'package.json': JSON.stringify({ name: 'sb', scripts: { test: 'node --test' } }, null, 2) + '\n', 'test/a.test.js': "import test from 'node:test';\ntest('a', () => {});\n" });
+atTerminal('init --agent claude', sb, 'y');
+sh('git add -A && git commit -qm codehere', sb);
+H('session-start', sb, { session_id: 'sb1', hook_event_name: 'SessionStart', source: 'startup' });
+fs.appendFileSync(path.join(sb, 'test/a.test.js'), "test.skip('b', () => {});\n");
+r = H('stop', sb, { session_id: 'sb1', hook_event_name: 'Stop', stop_hook_active: false });
+check('finish check: a weakened test sends the agent back and the person sees one ✕ line', r.j.decision === 'block' && r.j.systemMessage === 'codehere ✕ a check was weakened · a test was skipped (.skip) in test/a.test.js · agent sent back · 1 of 3', r.out);
+sh('git checkout -q -- .', sb);
+H('session-start', sb, { session_id: 'sb2', hook_event_name: 'SessionStart', source: 'startup' });
+fs.writeFileSync(path.join(sb, 'package.json'), JSON.stringify({ name: 'sb', scripts: { test: 'node --test --test-skip-pattern=a' } }, null, 2) + '\n');
+r = H('stop', sb, { session_id: 'sb2', hook_event_name: 'Stop', stop_hook_active: false });
+check('finish check: a test script that leaves tests out sends the agent back, with the line', r.j.decision === 'block' && (r.j.reason || '').includes('- tests were left out by the test script (--test-skip-pattern) in package.json') && (r.j.systemMessage || '').startsWith('codehere ✕ a check was weakened · tests were left out'), r.out);
+sh('git checkout -q -- .', sb);
+H('session-start', sb, { session_id: 'sb3', hook_event_name: 'SessionStart', source: 'startup' });
+const sbSet = path.join(sb, '.claude/settings.json');
+const sbHooks = JSON.parse(fs.readFileSync(sbSet, 'utf8'));
+delete sbHooks.hooks.Stop;
+fs.writeFileSync(sbSet, JSON.stringify(sbHooks, null, 2));
+r = H('stop', sb, { session_id: 'sb3', hook_event_name: 'Stop', stop_hook_active: false });
+check('finish check: a settings send-back shows the person the settings line too', r.j.decision === 'block' && (r.j.systemMessage || '').includes('codehere ✕ settings changed during this session · .claude/settings.json'), r.out);
+sh('git checkout -q -- .', sb);
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];
