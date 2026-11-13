@@ -372,6 +372,33 @@ const RUNNER_MARKER = /\b(NODE_TEST_CONTEXT|JEST_WORKER_ID|VITEST_WORKER_ID|VITE
 // Test setup that may read them: pytest's conftest.py and the setup files jest and vitest load
 const TEST_SETUP = /(^|\/)(conftest\.py|setupTests\.[cm]?[jt]sx?|(jest|vitest)\.setup\.[cm]?[jt]sx?)$/;
 
+// CI files, and the commands in them that run the tests
+const CI_FILE = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.gitlab-ci\.ya?ml$|(^|\/)\.circleci\/config\.ya?ml$|(^|\/)(azure|bitbucket)-pipelines\.ya?ml$/;
+const TEST_CMD = /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|node\s+--test\b|(?:npx\s+)?(?:jest|vitest|mocha)\b|(?:python3?\s+-m\s+)?pytest\b|python3?\s+-m\s+unittest\b|go\s+test\b|cargo\s+test\b|make\s+test\b)/;
+const CI_ALWAYS_PASSES = new RegExp(TEST_CMD.source + String.raw`[^\n]*?(\|\|\s*(true|:|exit\s+0|echo\b)|;\s*(true|exit\s+0)\s*$)`);
+const CI_IGNORE = /^\s*(continue-on-error|allow_failure)\s*:\s*true\b/;
+
+// Whether the YAML block a key at line `at` belongs to (its step or job) runs the tests.
+function blockRunsTests(lines, at, text) {
+  let i = at - 1;
+  if ((lines[i] || '').trim() !== text.trim()) {
+    const near = [-3, -2, -1, 1, 2, 3].map((d) => at - 1 + d).find((k) => (lines[k] || '').trim() === text.trim());
+    if (near === undefined) return false;
+    i = near;
+  }
+  const indent = (l) => l.length - l.trimStart().length;
+  const own = indent(lines[i]);
+  let start = i;
+  while (start > 0 && !((lines[start - 1] || '').trim() && indent(lines[start - 1]) < own)) start--;
+  start = Math.max(0, start - 1);
+  const top = indent(lines[start] || '');
+  for (let k = start; k < lines.length && k < start + 200; k++) {
+    if (k > start && (lines[k] || '').trim() && indent(lines[k]) <= top) break;
+    if (TEST_CMD.test(lines[k] || '')) return true;
+  }
+  return false;
+}
+
 // re found in the code of the line, not only inside its strings
 function inCode(re, line, mask) {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
@@ -415,6 +442,8 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
   let prevText = ''; // the previous added or context line of this file
   const expectations = []; // from test lines in the diff, then from the repo's test files
   const returns = []; // literal returns under a condition in code files, checked after the diff is read
+  const ciRemoved = []; // CI files that lost a line running the tests
+  let ciAdded = 0; // lines running the tests added to any CI file
   const weakenedIn = new Set(); // one weakened-matcher finding per file
   let hadFallback = false; // the test script already ended in `|| true` before this session
   let hadFilters = new Set(); // options that left tests out before this session
@@ -440,6 +469,16 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
     if (!line.startsWith('-')) newLine++;
     if (at && at <= 20000) fileLines[at - 1] = line.slice(1);
     const inTest = isTestFile(current);
+    if (CI_FILE.test(current) && !COMMENT.test(line)) {
+      const text = line.slice(1, 10001);
+      if (line.startsWith('-') && TEST_CMD.test(text)) ciRemoved.push(current);
+      if (line.startsWith('+') && TEST_CMD.test(text)) ciAdded++;
+      if (line.startsWith('+') && CI_ALWAYS_PASSES.test(text)) add(CHECKS_OFF, current, `the CI test step was changed to always pass in ${current}`);
+      if (line.startsWith('+') && CI_IGNORE.test(text)) {
+        const now = read ? read(current) : null;
+        if (blockRunsTests(now == null ? fileLines : now.split('\n'), at, text)) add(CHECKS_OFF, current, `the CI test step was changed to always pass in ${current}`);
+      }
+    }
     const before = prevText;
     if (!line.startsWith('-')) prevText = line.slice(1, 10001);
     if (inTest && !line.startsWith('-')) {
@@ -510,6 +549,7 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
       if (st && st.value) removedValueChecks.set(st.subject, st.form);
     }
   }
+  if (ciRemoved.length > ciAdded) add(CHECKS_OFF, ciRemoved[0], `the test step was removed from CI in ${ciRemoved[0]}`);
   const candidates = returns.filter((r) => !DULL.has(r.value));
   if (candidates.length) {
     for (const t of (typeof tests === 'function' ? tests() : tests) || []) {

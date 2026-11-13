@@ -1867,6 +1867,28 @@ const notUnderTest = [
 ];
 check('scan, honest: NODE_ENV, another variable, test helpers, conftest.py, a comment', notUnderTest.every((x) => x === ''), notUnderTest.join(' | '));
 
+// L2 (launch bar), CI changes that hide failing tests: a test step made to always pass, continue-on-error on
+// a step or job that runs tests, a test step removed. continue-on-error on a lint step is left alone.
+const CI = '.github/workflows/ci.yml';
+const ciWf = "name: ci\non: pull_request\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - run: npm test\n";
+const ci = (minus, plus, read) => tamperFindings(`M\t${CI}`, [`--- a/${CI}`, `+++ b/${CI}`, '@@ -8,1 +8,2 @@', ...minus.map((l) => `-${l}`), ...plus.map((l) => `+${l}`)].join('\n'), read ? { read: () => read } : {}).join(' · ');
+const ciCheats = [
+  ci(['      - run: npm test'], ['      - run: npm test || true']),
+  ci(['      - run: pytest -q'], ['      - run: pytest -q; exit 0']),
+  ci([], ['        continue-on-error: true'], ciWf.replace('      - run: npm test\n', '      - run: npm test\n        continue-on-error: true\n')),
+  ci(['      - run: npm test'], []),
+];
+check('scan: a CI test step made to always pass, continue-on-error on it, or the step removed', ciCheats.every((x) => x.includes('CI')), ciCheats.join(' | '));
+check('scan: the CI findings say what changed', ciCheats[0] === `the CI test step was changed to always pass in ${CI}` && ciCheats[3] === `the test step was removed from CI in ${CI}`, `${ciCheats[0]} | ${ciCheats[3]}`);
+const ciHonest = [
+  ci([], ['      - run: npx eslint .', '        continue-on-error: true'], ciWf + '      - run: npx eslint .\n        continue-on-error: true\n'),
+  ci(['      - run: npm test'], ['      - name: Test', '        run: npm test']),
+  ci([], ['      - run: npx eslint . || true']),
+  tamperFindings(`M\t${CI}\nA\t.github/workflows/test.yml`, [`--- a/${CI}`, `+++ b/${CI}`, '@@ -8,1 +7,0 @@', '-      - run: npm test', '--- /dev/null', '+++ b/.github/workflows/test.yml', '@@ -0,0 +1,2 @@', '+    steps:', '+      - run: npm test'].join('\n')).join(' · '),
+];
+check('scan, honest: continue-on-error on lint, a renamed step, || true on lint, the test step moved to another workflow', ciHonest.every((x) => x === ''), ciHonest.join(' | '));
+check('events: a CI change that hides failures is checks-off, not counted by the audit', ev(`M\t${CI}`, diff27(CI, ['      - run: npm test'], ['      - run: npm test || true'])) === `checks-off|${CI}`);
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];

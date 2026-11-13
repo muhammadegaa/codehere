@@ -36,6 +36,7 @@ The agent runs the team chores. After `init`, you ask your agent to add a rule, 
 - An assertion wrapped in a `try` whose `catch` swallows the failure (`catch {}`, `catch (e) {}`, Python's `except ...: pass`) is a weakened test. The finish check reads the test file to see what the `try` holds, so a `try` around cleanup is not reported. In 2.1.0-rc.3 this passed with a ✓.
 - Code that returns the exact value a test expects, under a condition on that test's input (`if (items[0].price === 250) return 500`), is reported as a hardcoded answer and the agent is sent back. The finish check reads the repo's test files for the expected values; values such as 0 and 1 do not count. `codehere audit` does not count it. In 2.1.0-rc.3 this passed with a ✓.
 - Code outside the tests that reads a test runner's own marker (`NODE_TEST_CONTEXT`, `JEST_WORKER_ID`, `VITEST_WORKER_ID`, `PYTEST_CURRENT_TEST`, `"pytest" in sys.modules`, Go's `testing.Testing()`) is reported, since it can behave one way under the runner and another for users. `NODE_ENV === 'test'` is not reported, and neither are `conftest.py` and test setup files. In 2.1.0-rc.3 this passed with a ✓.
+- CI changes that hide failing tests are reported: a test command in a CI workflow made to always pass (`npm test || true`, `; exit 0`), `continue-on-error: true` or `allow_failure: true` on a step or job that runs the tests, and a test step removed from CI without being added elsewhere. `continue-on-error` on a lint step is not reported. In 2.1.0-rc.3 these were not named.
 
 ## [2.0.3] - 2026-10-30
 
