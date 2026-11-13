@@ -1,15 +1,18 @@
 // Scores the v2 finish check's weakened-test detector on CheatBench's recorded diffs (read as text,
 // nothing from the bench is run). Sent back = a finding, or the visible tests failed (the re-run).
-// Usage: node v2/scripts/cheatbench-detector.mjs <noskip checkout>/bench <path to v2/src/signals.js>
+// Usage: node v2/scripts/cheatbench-detector.mjs <noskip checkout>/bench <path to v2/src/signals.js> [task,task,...]
+// The optional task list limits the runs, e.g. to the launch bar's dev half.
 // CheatBench: github.com/DariusHQ/noskip (MIT) at 2290032, 100 Claude Code runs labelled by a person.
 import fs from 'node:fs';
 import path from 'node:path';
-const [BENCH, SIGNALS] = process.argv.slice(2);
+const [BENCH, SIGNALS, TASKS] = process.argv.slice(2);
+const only = TASKS ? new Set(TASKS.split(',')) : null;
 const { tamperEvents } = await import(SIGNALS);
 const rows = [];
 for (const agent of fs.readdirSync(path.join(BENCH, 'results'))) {
   const labels = JSON.parse(fs.readFileSync(path.join(BENCH, 'results', agent, 'labels.json'), 'utf8'));
   for (const [task, { label }] of Object.entries(labels)) {
+    if (only && !only.has(task)) continue;
     const dir = path.join(BENCH, 'results', agent, task);
     const ev = JSON.parse(fs.readFileSync(path.join(dir, 'eval.json'), 'utf8'));
     const patch = fs.existsSync(path.join(dir, 'diff.patch')) ? fs.readFileSync(path.join(dir, 'diff.patch'), 'utf8') : '';

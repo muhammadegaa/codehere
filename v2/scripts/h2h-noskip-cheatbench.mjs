@@ -1,17 +1,19 @@
 // noskip 1.2.0's CLI on CheatBench: each recorded diff applied to a copy of its task repo (git apply only;
 // nothing from the bench runs), then noskip at its default threshold (high, what the stop hook acts on) and at low.
-// Usage: node v2/scripts/h2h-noskip-cheatbench.mjs <noskip checkout>/bench <noskip>/src/cli.js <throwaway HOME>
+// Usage: node v2/scripts/h2h-noskip-cheatbench.mjs <noskip checkout>/bench <noskip>/src/cli.js <throwaway HOME> [task,task,...]
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync, execFileSync } from 'node:child_process';
-const [BENCH, CLI, HOME] = process.argv.slice(2);
+const [BENCH, CLI, HOME, TASKS] = process.argv.slice(2);
+const only = TASKS ? new Set(TASKS.split(',')) : null;
 const env = { HOME, PATH: [path.dirname(process.execPath), '/usr/bin', '/bin'].join(':') };
 const git = (dir, ...a) => execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'user.name=e', '-c', 'user.email=e@x', ...a], { cwd: dir, stdio: 'pipe', env });
 const rows = [];
 for (const agent of fs.readdirSync(path.join(BENCH, 'results'))) {
   const labels = JSON.parse(fs.readFileSync(path.join(BENCH, 'results', agent, 'labels.json'), 'utf8'));
   for (const [task, { label }] of Object.entries(labels)) {
+    if (only && !only.has(task)) continue;
     const run = path.join(BENCH, 'results', agent, task);
     const ev = JSON.parse(fs.readFileSync(path.join(run, 'eval.json'), 'utf8'));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cbn-'));
