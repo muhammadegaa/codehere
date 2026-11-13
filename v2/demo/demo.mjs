@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'codehere.js');
 const STEP = process.argv.includes('--step');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codehere-demo-'));
+// Ana's approval goes to a config folder of the demo's own, never to the config of whoever runs it
+process.env.XDG_CONFIG_HOME = path.join(tmp, 'config');
 
 const c = { dim: '\x1b[2m', bold: '\x1b[1m', cyan: '\x1b[36m', yellow: '\x1b[33m', green: '\x1b[32m', magenta: '\x1b[35m', off: '\x1b[0m' };
 const sh = (cmd, cwd) => execSync(cmd, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
@@ -26,11 +28,11 @@ const ch = (args, cwd, input) =>
 let terminals = 0;
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const sq = (a) => `'${String(a).replace(/'/g, `'\\''`)}'`;
-function person(args, cwd) {
+function person(args, cwd, answer = '') {
   const f = path.join(tmp, `terminal-${++terminals}`);
   fs.writeFileSync(`${f}.sh`, `node ${sq(BIN)} ${args.map(sq).join(' ')}\n`);
   const term = process.platform === 'darwin' ? `script -q /dev/null sh "${f}.sh"` : `script -qec 'sh "${f}.sh"' /dev/null`;
-  spawnSync('bash', ['-c', `( (sleep 0.8; printf '\\r'; sleep 0.5) | ${term} > "${f}.out" 2>&1; echo $? > "${f}.code" ) & exit 0`], { cwd, stdio: 'ignore' });
+  spawnSync('bash', ['-c', `( (sleep 0.8; printf '${answer}\\r'; sleep 0.5) | ${term} > "${f}.out" 2>&1; echo $? > "${f}.code" ) & exit 0`], { cwd, stdio: 'ignore' });
   while (!(fs.existsSync(`${f}.code`) && fs.readFileSync(`${f}.code`, 'utf8').endsWith('\n'))) wait(50);
   return { status: Number(fs.readFileSync(`${f}.code`, 'utf8')), stdout: fs.readFileSync(`${f}.out`, 'utf8').replace(/\r/g, '') };
 }
@@ -86,9 +88,11 @@ const S = { session_id: 'ana-1', transcript_path: transcript, cwd: ana };
 
 console.log(`${c.bold}Codehere demo${c.off} ${c.dim}(temp repo: ${tmp})${c.off}`);
 
-scene(1, 'Ana sets it up once', '$ codehere init   then   $ codehere rule "Prices are in cents. Never use floats for money."');
+scene(1, 'Ana sets it up once', '$ codehere init   then   $ codehere approve   then   $ codehere rule "Prices are in cents. Never use floats for money."');
 let r = ch(['init'], ana);
 humanSees(r.stdout.split('\n').slice(0, 4).join('\n'));
+const approved = person(['approve'], ana, 'y');
+humanSees(approved.stdout.trim().split('\n').filter((l) => l.trim()).slice(-1).join('\n'));
 person(['rule', 'Prices are in cents. Never use floats for money.'], ana);
 sh('git add -A && git commit -qm "codehere" && git push -q', ana);
 await pause();
@@ -126,6 +130,7 @@ scene(6, 'The agent says "Done!" but the tests still fail', 'Stop hook runs the 
 fs.writeFileSync(path.join(ana, 'cart.js'), 'export const total = (items) => items.reduce((s, i) => s + i.price * 1, 0);\n');
 r = ch(['hook', 'stop'], ana, { ...S, hook_event_name: 'Stop', stop_hook_active: false });
 agentSees(JSON.parse(r.stdout).reason);
+humanSees(JSON.parse(r.stdout).systemMessage || '(no line)');
 await pause();
 
 scene(7, 'Still stuck: Ana asks a teammate with one command', '$ codehere help "Cart total ignores quantity"');
@@ -170,6 +175,6 @@ if (j.decision === 'block') {
 }
 humanSees(j.systemMessage || '(tests passed)');
 
-console.log(`\n${c.bold}${c.magenta}What the humans did: 1 setup, 1 rule, 1 answer to \"how will you know it works?\", 1 help card, 1 reply.${c.off}`);
+console.log(`\n${c.bold}${c.magenta}What the humans did: 1 setup, 1 approval, 1 rule, 1 answer to \"how will you know it works?\", 1 help card, 1 reply.${c.off}`);
 console.log(`${c.magenta}Everything else happened inside the agent, from plain files in git.${c.off}\n`);
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -34,3 +34,6 @@ Mapped so far: the claims tonight's changes touched. The rest of the README is n
 | The weakened-test scan's list of what it catches | the `scan:` checks for each kind; `v2/scripts/h2h-suite.mjs` (46 cases, `docs/evidence/2026-11-13-case-suite.md`) | rc.3 branch |
 | What it does not catch, and 5 of 19 on CheatBench's held-out half | `docs/evidence/2026-11-13-cheatbench.md` | rc.3 branch |
 | A git missing from PATH is reported (the design rule "it fails open" still holds: the agent carries on) | "without git: …" checks | rc.3 branch |
+| Every command in "Commands" exists, and `--help` lists no command the README leaves out | sweep on 13 Nov: the 13 commands match `codehere --help` | rc.3 branch |
+| The 9 relative links (conformance results, docs) point at files that exist | sweep on 13 Nov: 9 of 9 exist | rc.3 branch |
+| `node demo/demo.mjs` shows the whole loop, including "done" checked | run on 13 Nov: scene 6 shows the failed run sent back (✕), scene 11 the ✓; before this fix it showed ⊘ "not approved" because the demo never approved the test command | rc.3 branch |
