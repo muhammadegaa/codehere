@@ -132,7 +132,9 @@ export function similarity(a, b) {
 // ---------- test tampering ----------
 
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[a-z]+$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
-export const isTestFile = (file) => TEST_FILE.test(file);
+// Data the tests read, not tests: deleting or editing it is not counted as weakening a test.
+const FIXTURE = /(^|\/)(__fixtures__|fixtures?|__snapshots__|__mocks__|testdata)\//i;
+export const isTestFile = (file) => TEST_FILE.test(file) && !FIXTURE.test(file);
 
 // Kinds: the first three weaken the tests themselves, which is what `codehere audit` counts;
 // checks-off turns off a check around them (hooks, types, the test script's exit code).
@@ -144,7 +146,9 @@ const CHECKS_OFF = 'checks-off';
 const TAMPER_ADDED = [
   { re: /\b(it|test|describe)\.skip\s*\(/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
   { re: /\b(xit|xdescribe|xtest)\s*\(/, kind: SKIPPED, why: 'a test was disabled (xit/xdescribe)' },
-  { re: /@pytest\.mark\.skip|unittest\.skip/, kind: SKIPPED, why: 'a Python test was skipped' },
+  // skip, and skipif or skipIf only when the condition is a literal: skipUnless(shutil.which("uv")) is a
+  // test that cannot run on this machine, as { skip: process.platform === 'win32' } is in JS
+  { re: /@pytest\.mark\.skip\b|\bunittest\.skip\s*\(|\b(skipif|skipIf)\s*\(\s*True\b|\bskipUnless\s*\(\s*False\b/, kind: SKIPPED, why: 'a Python test was skipped' },
   { re: /@ts-nocheck/, kind: CHECKS_OFF, why: 'type checking was turned off (@ts-nocheck)' },
   { re: /--no-verify/, kind: CHECKS_OFF, why: 'git hooks were bypassed (--no-verify)' },
   { re: /expect\([^)]*\)\.(toBe|toEqual)\(\s*(true|1)\s*\)\s*;?\s*\/\/\s*(todo|temp|hack)/i, kind: WEAKENED, why: 'an assertion was replaced with a placeholder' },
@@ -234,7 +238,7 @@ export function tamperEvents(nameStatus, diff) {
   };
   for (const line of nameStatus.split('\n')) {
     const [status, file] = line.split(/\s+/);
-    if (status === 'D' && file && TEST_FILE.test(file)) add(DELETED, file, `test file deleted: ${file}`);
+    if (status === 'D' && file && isTestFile(file)) add(DELETED, file, `test file deleted: ${file}`);
   }
   let current = '';
   let removedAsserts = 0;
@@ -251,7 +255,7 @@ export function tamperEvents(nameStatus, diff) {
       continue;
     }
     if (line.startsWith('--- ')) continue;
-    const inTest = TEST_FILE.test(current);
+    const inTest = isTestFile(current);
     const probe = line.slice(0, 10000); // the patterns can take quadratic time on a long line
     let lineMask = null;
     const mask = () => (lineMask ||= stringMask(probe));

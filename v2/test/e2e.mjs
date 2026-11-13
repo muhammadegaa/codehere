@@ -1663,6 +1663,26 @@ const keptOut = [
 ];
 check('scan, honest: a filter that was already there, -m in python -m, coverage --exclude, other scripts, the same text elsewhere', keptOut.every((x) => x === ''), keptOut.join(' | '));
 check('events: a test script that leaves tests out is test-skipped, so the audit counts it', ev('M\tpackage.json', diff27('package.json', ['    "test": "node --test"'], ['    "test": "node --test --test-skip-pattern=total"'])) === 'test-skipped|package.json');
+// From 12 public repos with agent commits (13 Nov): 20 of 57 flagged commits were a Python test that
+// skips itself where it cannot run, and 3 deleted fixtures, not tests.
+const pySkips = [
+  one(['@pytest.mark.skip(reason="flaky")'], 'tests/test_a.py'),
+  one(['@pytest.mark.skip'], 'tests/test_a.py'),
+  one(['@unittest.skip("later")'], 'tests/test_a.py'),
+  one(['@pytest.mark.skipif(True, reason="flaky")'], 'tests/test_a.py'),
+  one(['@unittest.skipIf(True, "flaky")'], 'tests/test_a.py'),
+  one(['@unittest.skipUnless(False, "flaky")'], 'tests/test_a.py'),
+];
+check('scan: a Python skip, and skipif or skipIf with a literal condition', pySkips.every((x) => x.includes('Python test was skipped')), pySkips.join(' | '));
+const pyConditional = [
+  one(['@unittest.skipUnless(shutil.which("uv"), "uv required")'], 'tests/test_a.py'),
+  one(['@unittest.skipIf(os.name == "nt", reason="signals on windows")'], 'tests/test_a.py'),
+  one(['@pytest.mark.skipif(not shutil.which("pdftotext"), reason="Poppler not installed")'], 'tests/test_a.py'),
+  one(['@pytest.mark.skipif(sys.platform == "win32", reason="no fork")'], 'tests/test_a.py'),
+];
+check('scan, honest: a Python test that skips itself where it cannot run', pyConditional.every((x) => x === ''), pyConditional.join(' | '));
+const fixtureDel = ['test/__fixtures__/ignored-module/index.js', 'packages/x/test/fixtures/app/.cache/config.json', 'tests/testdata/a.py', 'test/__snapshots__/a.test.js.snap'].map((f) => tamperFindings(`D\t${f}`, '').join(''));
+check('scan, honest: a deleted fixture or snapshot is not a deleted test', fixtureDel.every((x) => x === '') && tamperFindings('D\ttest/a.test.js', '').length === 1, fixtureDel.join(' | '));
 
 fs.writeFileSync(path.join(au, 'package.json'), JSON.stringify({ name: 'au', scripts: { test: 'node --test' } }, null, 2) + '\n');
 auCommit('add a test script');
