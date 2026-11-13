@@ -54,3 +54,7 @@ Precision: 6 of 148 (about 4%), at most 13 of 148 if every unclear one is real. 
 - On those 9 it lists 938 commits (high or medium), 201 of them high; `codehere audit` lists 148 on all 12.
 - All 6 commits labelled real above are among noskip's high findings. Its other high findings are not labelled; at most 8 of its 201 are real or unclear by the labels above.
 - It recognised 2,948 agent commits on the 9 (AppBlueGenji: 1,815 of 2,064), from trailers, footers and bot accounts. `codehere audit` prints a marker only for listed commits, so the two are not compared here (launch bar L6).
+
+## Speed (launch bar L7), 13 Nov 23:36 UTC, load average about 10
+
+`codehere audit` at 7911898, wall time per held-out repo: microsoft/go 238 commits 0.5 s · catalyst 112, 0.3 s · ponjo 337, 0.5 s · bioinfo-team-3d 2,241, 5.3 s · snowdesk-data-pipeline 904, 3.6 s · styx-portal 462, 0.6 s · tool-versions 482, 0.3 s · AppBlueGenji 2,064, 3.6 s · kidville-web 272, 6.0 s · browxai 132, 0.7 s · Angular2025 346, 1.5 s · FlowMatrix 76, 0.1 s. All under the bar's 10 s; noskip did not finish three of these in 5 minutes.
