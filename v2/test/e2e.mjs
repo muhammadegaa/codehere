@@ -1801,6 +1801,16 @@ sh('git add -A && git commit -qm codehere', ng);
 ngx = noGitRun(['hook', 'stop'], { session_id: 'ng', cwd: ng, hook_event_name: 'Stop', stop_hook_active: false });
 check('without git, in a repo set up while git worked: the finish check says it did not run, with ⊘ and no ✓', ngx.status === 0 && JSON.parse(ngx.stdout || '{}').systemMessage === 'codehere ⊘ git not found · the finish check did not run', ngx.stdout + ngx.stderr);
 
+// The hooks themselves make no network call (the test command they run is the project's own).
+fs.rmSync(netMark, { force: true });
+const netHook = (event, input) => spawnSync('node', ['--import', noNet, BIN, 'hook', event], { cwd: sb, input: JSON.stringify({ cwd: sb, ...input }), encoding: 'utf8', env: { ...process.env, NET_MARKER: netMark } });
+netHook('session-start', { session_id: 'net1', hook_event_name: 'SessionStart', source: 'startup' });
+netHook('prompt', { session_id: 'net1', hook_event_name: 'UserPromptSubmit', prompt: 'fix the cart total' });
+netHook('post-tool', { session_id: 'net1', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: { stderr: 'AssertionError: Expected values to be strictly equal: 1 !== 2' } });
+fs.appendFileSync(path.join(sb, 'test/a.test.js'), "test.skip('n', () => {});\n");
+const netStop = netHook('stop', { session_id: 'net1', hook_event_name: 'Stop', stop_hook_active: false });
+sh('git checkout -q -- .', sb);
+check('the hooks make no network call: session start, prompt, after a tool, the finish check', JSON.parse(netStop.stdout || '{}').decision === 'block' && !fs.existsSync(netMark), (fs.existsSync(netMark) ? fs.readFileSync(netMark, 'utf8') : '') + netStop.stdout.slice(0, 200));
 
 // L2 (launch bar), matcher weakened: the same subject goes from a value check to a check that it is set or
 // truthy. Codehere showed a tick on this in the case suite; noskip's hook sends the agent back.
