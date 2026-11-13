@@ -1,4 +1,4 @@
-// codehere audit: the commits of the last 90 days that weakened tests, each listed for a person to read.
+// codehere audit: the commits of the last 90 days that deleted, skipped or weakened tests, each listed for a person to read.
 // Read-only: it runs git on this machine and sends nothing anywhere. The kinds come from the finish
 // check's own detector. A count found by pattern is a list of candidates, never proof (DESIGN.md §1).
 import { spawn, execFileSync } from 'node:child_process';
@@ -157,9 +157,12 @@ export async function audit(root, { out = console.log, err = console.error, now 
   const marked = flagged.filter((c) => markersOf(c.author, c.body).length);
   const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
   out(`codehere audit · last ${DAYS} days · ${n(list.length, 'commit', 'commits')} read`);
-  out(`codehere › ${n(flagged.length, 'commit', 'commits')} weakened tests · ${n(marked.length, 'carries', 'carry')} an agent marker`);
-  if (!flagged.length) return 0;
-  out('codehere › each was found by pattern: read the commit before drawing a conclusion');
+  if (!flagged.length) {
+    out('codehere › 0 commits to read: no test deleted, skipped or weakened');
+    return 0;
+  }
+  out(`codehere › ${n(flagged.length, 'commit', 'commits')} to read: tests deleted, skipped or weakened · ${n(marked.length, 'carries', 'carry')} an agent marker`);
+  out('codehere › found by pattern: a test removed with the code it tested is often fine, so read each commit');
   for (const c of flagged) {
     const m = markersOf(c.author, c.body);
     out('');
