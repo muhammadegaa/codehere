@@ -169,6 +169,31 @@ const ASSERT = /\b(expect\s*\(|assert[\w.]*\s*\()|^[+-]\s*assert\s/;
 const ALWAYS_PASSES = /"test"\s*:\s*"[^"]*(\|\|\s*(true|:|exit\s+0|echo\b[^"&|;]*)|;\s*(true|exit\s+0))\s*"/;
 const COMMENT = /^[+-]\s*(\/\/|#|\/\*|\*)\s*/;
 
+// Which characters of a line are inside a string literal: test code often writes another test as
+// text, and a skip in that text is not a skip. One line at a time, so a string that spans lines (a
+// template literal, a docstring) is not seen; after // or a # comment, no quote opens a string.
+function stringMask(line) {
+  const mask = new Uint8Array(line.length);
+  let quote = '';
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      mask[i] = 1;
+      if (c === '\\') mask[++i] = 1;
+      else if (c === quote) quote = '';
+    } else if (c === '"' || c === "'" || c === '`') (quote = c), (mask[i] = 1);
+    else if ((c === '/' && line[i + 1] === '/') || (c === '#' && (i <= 1 || /\s/.test(line[i - 1])))) break;
+  }
+  return mask;
+}
+
+// re found in the code of the line, not only inside its strings
+function inCode(re, line, mask) {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+  for (const m of line.matchAll(g)) if (!mask()[m.index + (m[0].length - m[0].trimStart().length)]) return true;
+  return false;
+}
+
 // What the finish check prints: the events' text, in order, each once.
 export function tamperFindings(nameStatus, diff) {
   return tamperEvents(nameStatus, diff).map((e) => e.why);
@@ -203,18 +228,20 @@ export function tamperEvents(nameStatus, diff) {
     if (line.startsWith('--- ')) continue;
     const inTest = TEST_FILE.test(current);
     const probe = line.slice(0, 10000); // the patterns can take quadratic time on a long line
+    let lineMask = null;
+    const mask = () => (lineMask ||= stringMask(probe));
     if (/(^|\/)package\.json$/.test(current) && ALWAYS_PASSES.test(probe)) {
       if (line.startsWith('-')) hadFallback = true;
       else if (!hadFallback) add(CHECKS_OFF, current, `the test script was changed to always exit 0 in ${current}`);
     }
     if (line.startsWith('+')) {
-      for (const t of TAMPER_ADDED) if (t.re.test(probe)) add(t.kind, current, `${t.why} in ${current}`);
+      for (const t of TAMPER_ADDED) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
       if (!inTest) continue;
-      for (const t of TAMPER_ADDED_IN_TESTS) if (t.re.test(probe)) add(t.kind, current, `${t.why} in ${current}`);
+      for (const t of TAMPER_ADDED_IN_TESTS) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
       if (COMMENT.test(line)) {
         if (removed.has(line.replace(COMMENT, '').trim())) add(WEAKENED, current, `an assertion was commented out in ${current}`);
-      } else if (ASSERT.test(line)) addedAsserts++;
-    } else if (line.startsWith('-') && inTest && !COMMENT.test(line) && ASSERT.test(line)) {
+      } else if (inCode(ASSERT, probe, mask)) addedAsserts++;
+    } else if (line.startsWith('-') && inTest && !COMMENT.test(line) && inCode(ASSERT, probe, mask)) {
       removedAsserts++;
       removed.add(line.slice(1).trim());
     }

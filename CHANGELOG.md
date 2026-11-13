@@ -26,6 +26,7 @@ The agent runs the team chores. After `init`, you ask your agent to add a rule, 
 - `codehere audit` lists the commits of the last 90 days that deleted a test file, skipped a test, or removed or weakened assertions in test files, and which of them carry an agent's marker. It reads git history on your machine and sends nothing. The count is found by pattern, so each commit is listed for you to read.
 - When the agent writes, changes or deletes a lesson or help card in `.codehere/` itself, without a draft you said yes to, the finish check lists the files for you (not on Copilot or in `codex exec`, which show none of Codehere's lines). 2.0.3 reported only `rules.md`. Files that arrive committed, such as after a `git pull`, are not listed.
 - Codehere no longer reads, writes or deletes through a symlink committed at any path it uses, and reads repo files with a size limit. In 2.0.3 a committed link could hang a hook (a link to `/dev/zero`), send `init`, `uninstall` or a brief's write outside the repo, or, with a force-added `state.json`, load a file from outside the repo into the agent as a restart brief. `init` checks every file it will touch before writing any.
+- The weakened-test scan ignores a skip, `.only` or an assertion that cannot fail written inside a string, as tests do when they build another test as text. In 2.1.0-rc.2, `codehere audit` listed 15 commits of Codehere's own history this way, and none of them weakened a test.
 
 ## [2.0.3] - 2026-10-30
 

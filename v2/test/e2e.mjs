@@ -1616,6 +1616,28 @@ fs.writeFileSync(path.join(failGit, 'git'), `#!/bin/sh\ncase " $* " in *" log "*
 const auFail = spawnSync('node', [BIN, 'audit'], { cwd: au, encoding: 'utf8', env: { ...process.env, PATH: `${failGit}:${process.env.PATH}` } });
 check('audit: when git fails while reading the changes, nothing is counted and it says so, exit 1', auFail.status === 1 && auFail.stderr.trim() === 'codehere audit: git log failed, so nothing was counted' && auFail.stdout === '', auFail.stdout + auFail.stderr);
 
+// What the 13 Nov test run from npm found (2.1.0-rc.3).
+// 1. A pattern inside a string is test code writing another test as text, not a skip: the audit
+// flagged 15 commits in Codehere's own history this way, and none was real.
+const inStr = [
+  one(["fs.appendFileSync(p, \"test.skip('b', () => {});\\n\");"]),
+  one(["check('x', scan([\"test('adds', () => {\"], [\"test('adds', { skip: true }, () => {\"]).includes('skipped'));"]),
+  one(["const WEAK = REAL.replace('assert.equal(1 + 1, 2)', 'assert.ok(true)');"]),
+  one(["const HOSTILE = `test.skip('x', () => {});`;"]),
+  one(["    ['a.test.js', \"  expect('a').toEqual('a')\"],"]),
+  one(['    src = "@pytest.mark.skip(reason=\'later\')"'], 'tests/test_a.py'),
+  scan(['  const a = "assert.equal(x, 1)";', '  const b = "assert.equal(y, 2)";'], []),
+];
+check('scan, honest: a skip, .only or an assertion that cannot fail written inside a string', inStr.every((x) => x === ''), inStr.join(' | '));
+const outStr = [
+  one(["describe('cart', () => { it.only('adds', () => {"]),
+  one(["const name = \"it.only(\"; it.only('a', () => {});"]),
+  one(["  test.skip('a', () => {}); // don't run it on CI"]),
+  one(["  test('it\\'s skipped', { skip: true }, () => {"]),
+];
+check('scan: the same patterns outside a string are still found', outStr.every((x) => x !== ''), outStr.join(' | '));
+
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];
