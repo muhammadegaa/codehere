@@ -4,7 +4,7 @@
 import { spawn, execFileSync } from 'node:child_process';
 import readline from 'node:readline';
 import { printable } from './brain.js';
-import { tamperEvents, isTestFile } from './signals.js';
+import { tamperEvents, isTestFile, isTestConfig } from './signals.js';
 
 const DAYS = 90;
 const KINDS = new Set(['test-deleted', 'test-skipped', 'assertion-weakened']);
@@ -59,7 +59,8 @@ function samePath(line) {
   return Number.isInteger(half) && rest.slice(half, half + 3) === ' b/' ? rest.slice(0, half) : '';
 }
 
-// One `git log -p`, read line by line: test-file hunks are kept, a deleted file by its name only, so
+// One `git log -p`, read line by line: hunks of test files and of the files that say which tests run
+// (package.json, runner configs) are kept, a deleted file by its name only, so
 // memory stays small however large a commit is. Each commit's kinds go on its entry in bySha.
 function scanChanges(root, since, bySha) {
   return new Promise((resolve, reject) => {
@@ -99,7 +100,7 @@ function scanChanges(root, since, bySha) {
       }
       if (line.startsWith('+++ ')) {
         const file = line.replace(/^\+\+\+ (b\/)?/, '');
-        keep = file !== '/dev/null' && isTestFile(file);
+        keep = file !== '/dev/null' && (isTestFile(file) || isTestConfig(file));
         if (keep) kept.push(`+++ ${file}`);
         return;
       }

@@ -169,6 +169,29 @@ const ASSERT = /\b(expect\s*\(|assert[\w.]*\s*\()|^[+-]\s*assert\s/;
 const ALWAYS_PASSES = /"test"\s*:\s*"[^"]*(\|\|\s*(true|:|exit\s+0|echo\b[^"&|;]*)|;\s*(true|exit\s+0))\s*"/;
 const COMMENT = /^[+-]\s*(\/\/|#|\/\*|\*)\s*/;
 
+// Options that make the runner leave tests out (node --test, jest, vitest, mocha, playwright, pytest,
+// go, cargo), on a test script or a pytest addopts line. Reporter, coverage and other options are not.
+const FILTER = /(?:^|\s)(--test-skip-pattern|--test-name-pattern|--testPathIgnorePatterns|--testNamePattern|--testPathPatterns?|--grep-invert|--grep|--fgrep|--invert|--ignore(?:-glob)?|--deselect|--skip|-skip|-run|-k)(?=[\s=]|$)/g;
+const TEST_SCRIPT = /"test(?::[^"]*)?"\s*:\s*"((?:[^"\\]|\\.)*)"/;
+const ADDOPTS = /^[+-]\s*"?addopts"?\s*=(.*)$/;
+const PYTEST_CONFIG = /(^|\/)(pytest\.ini|pyproject\.toml|setup\.cfg|tox\.ini)$/;
+// The same, as keys in a runner's own config file
+const RUNNER_CONFIG = /(^|\/)(jest|vitest|playwright)\.config\.[\w.]+$|(^|\/)\.mocharc(\.[\w]+)?$/;
+const CONFIG_KEY = /(?:^|[\s{,'"])(testPathIgnorePatterns|testNamePattern|testIgnore|grepInvert|grep|invert|ignore)['"]?\s*:/g;
+export const isTestConfig = (file) => /(^|\/)package\.json$/.test(file) || PYTEST_CONFIG.test(file) || RUNNER_CONFIG.test(file);
+
+// The options a line of this file sets that leave tests out, with where they were set.
+function filtersOn(file, line) {
+  let text = null;
+  let where = '';
+  if (/(^|\/)package\.json$/.test(file)) (text = (TEST_SCRIPT.exec(line) || [])[1] ?? null), (where = 'by the test script');
+  else if (PYTEST_CONFIG.test(file)) (text = (ADDOPTS.exec(line) || [])[1] ?? null), (where = "by the test runner's options");
+  else if (RUNNER_CONFIG.test(file)) (text = line.slice(1)), (where = "by the test runner's config");
+  if (text == null) return [];
+  const re = RUNNER_CONFIG.test(file) ? CONFIG_KEY : FILTER;
+  return [...text.matchAll(re)].map((m) => ({ option: m[1], where }));
+}
+
 // Which characters of a line are inside a string literal: test code often writes another test as
 // text, and a skip in that text is not a skip. One line at a time, so a string that spans lines (a
 // template literal, a docstring) is not seen; after // or a # comment, no quote opens a string.
@@ -218,11 +241,13 @@ export function tamperEvents(nameStatus, diff) {
   let addedAsserts = 0;
   let removed = new Set(); // this file's removed assertions, to spot one coming back as a comment
   let hadFallback = false; // the test script already ended in `|| true` before this session
+  let hadFilters = new Set(); // options that left tests out before this session
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ ')) {
       current = line.replace(/^\+\+\+ (b\/)?/, '');
       removed = new Set();
       hadFallback = false;
+      hadFilters = new Set();
       continue;
     }
     if (line.startsWith('--- ')) continue;
@@ -233,6 +258,12 @@ export function tamperEvents(nameStatus, diff) {
     if (/(^|\/)package\.json$/.test(current) && ALWAYS_PASSES.test(probe)) {
       if (line.startsWith('-')) hadFallback = true;
       else if (!hadFallback) add(CHECKS_OFF, current, `the test script was changed to always exit 0 in ${current}`);
+    }
+    if (isTestConfig(current)) {
+      for (const f of filtersOn(current, probe)) {
+        if (line.startsWith('-')) hadFilters.add(f.option);
+        else if (line.startsWith('+') && !hadFilters.has(f.option)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+      }
     }
     if (line.startsWith('+')) {
       for (const t of TAMPER_ADDED) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);

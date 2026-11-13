@@ -1637,6 +1637,41 @@ const outStr = [
 ];
 check('scan: the same patterns outside a string are still found', outStr.every((x) => x !== ''), outStr.join(' | '));
 
+// 2. A test script or runner config that leaves tests out: Node reported "pass 1, skipped 0" for a
+// script with --test-skip-pattern, so the run alone cannot show it.
+const leftOut = [
+  pj(['    "test": "node --test"'], ['    "test": "node --test --test-skip-pattern=total"']),
+  pj(['    "test": "jest"'], ['    "test": "jest --testPathIgnorePatterns=cart"']),
+  pj(['    "test": "mocha"'], ['    "test": "mocha --grep cart --invert"']),
+  pj(['    "test": "go test ./..."'], ['    "test": "go test -skip TestTotal ./..."']),
+  pj(['    "test:unit": "vitest run"'], ['    "test:unit": "vitest run --testNamePattern=\\"^(?!cart)\\""']),
+  pj(['addopts = -q'], ['addopts = -q -k "not cart"'], 'pytest.ini'),
+  pj(['addopts = "-q"'], ['addopts = "-q --deselect tests/test_cart.py::test_total"'], 'pyproject.toml'),
+  pj([], ["  testPathIgnorePatterns: ['/cart/'],"], 'jest.config.js'),
+  pj([], ["  testIgnore: '**/cart.spec.ts',"], 'playwright.config.ts'),
+];
+check('scan: a test script or runner config that leaves tests out', leftOut.every((x) => x.includes('tests were left out')), leftOut.join(' | '));
+check('scan: the finding names the option and the file', leftOut[0] === 'tests were left out by the test script (--test-skip-pattern) in package.json' && leftOut[7] === "tests were left out by the test runner's config (testPathIgnorePatterns) in jest.config.js", `${leftOut[0]} | ${leftOut[7]}`);
+const keptOut = [
+  pj(['    "test": "jest --testPathIgnorePatterns=e2e"'], ['    "test": "jest --testPathIgnorePatterns=e2e --coverage"']),
+  pj(['    "test": "pytest"'], ['    "test": "python -m pytest -q"']),
+  pj(['    "test": "node --test"'], ['    "test": "c8 --exclude dist node --test"']),
+  pj([], ['    "lint": "eslint . --ignore-path .gitignore"']),
+  pj([], ['    "build": "go build -run-time ./..."']),
+  pj([], ["  testPathIgnorePatterns: ['/cart/'],"], 'docs/jest.md'),
+  pj([], ['addopts = -q --strict-markers'], 'pytest.ini'),
+];
+check('scan, honest: a filter that was already there, -m in python -m, coverage --exclude, other scripts, the same text elsewhere', keptOut.every((x) => x === ''), keptOut.join(' | '));
+check('events: a test script that leaves tests out is test-skipped, so the audit counts it', ev('M\tpackage.json', diff27('package.json', ['    "test": "node --test"'], ['    "test": "node --test --test-skip-pattern=total"'])) === 'test-skipped|package.json');
+
+fs.writeFileSync(path.join(au, 'package.json'), JSON.stringify({ name: 'au', scripts: { test: 'node --test' } }, null, 2) + '\n');
+auCommit('add a test script');
+fs.writeFileSync(path.join(au, 'package.json'), JSON.stringify({ name: 'au', scripts: { test: 'node --test --test-skip-pattern=total' } }, null, 2) + '\n');
+const auS1 = auCommit('faster tests', '-m "Co-Authored-By: Claude <noreply@anthropic.com>"');
+auW('test/writer.test.js', "const src = \"test.skip('x', () => {});\";\n");
+const auS2 = auCommit('a test that writes a test');
+r = ch(['audit'], au);
+check('audit: a test script that leaves tests out is listed; a skip written inside a string is not', r.code === 0 && auLine(auS1).includes('Co-Authored-By Claude') && auNext(auS1).trim() === 'tests were left out by the test script (--test-skip-pattern) in package.json' && !r.out.includes(auS2), r.out);
 
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
