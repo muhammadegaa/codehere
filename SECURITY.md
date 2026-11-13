@@ -1,6 +1,6 @@
 # Security policy
 
-`codehere check` runs your project's own test command and reports what it did. A vulnerability in codehere can make that report wrong or run code you did not intend to run. Reports are welcome.
+Codehere's hooks run inside Claude Code, Codex CLI and Copilot CLI: when the agent says it is finished, Codehere runs the test command you approved on your machine and reads the session's git diff. `codehere audit` reads your git history. A vulnerability in Codehere can make its report wrong, or run or read something you did not intend. Reports are welcome.
 
 ## Supported versions
 
@@ -36,13 +36,14 @@ Include:
 ## Scope
 
 In scope:
-- The `codehere` npm package and the code under `agent/src/`
-- The GitHub Action in `action/`: how it handles pull request text, which can be hostile, and what it posts
+- The `codehere` npm package, 2.0.0 and later: the code under `v2/`
+- What arrives through git and can be hostile: team rules, lessons, help cards and a teammate's `.codehere/config.json`, which must never run a command you did not approve
+- The `codehere check` package (1.x) and the GitHub Action in `action/` while 1.x is on npm
 
 Out of scope (still worth reporting upstream):
 - Vulnerabilities in upstream dependencies
 - Attacks that need local privilege the attacker already has
-- Code that the project's own test command runs: `codehere check` executes that command by design, so run it only on repositories you would run `npm test` or `pytest` on. Whoever controls that command controls the result, so a receipt is not evidence against a hostile pull request author.
+- Code that the project's own test command runs: the finish check executes the command you approved, by design. Whoever controls that command controls the result, so approve only a command you would run yourself.
 
 ## Known historical issues
 
@@ -52,6 +53,6 @@ Out of scope (still worth reporting upstream):
 
 ## Supply chain
 
-- `agent/package-lock.json` is committed for reproducible builds.
+- The `codehere` package has no runtime dependencies (`v2/package.json`).
 - A `gitleaks` pre-commit hook blocks accidental secret commits.
-- The publish workflow generates an SBOM with `npm sbom`. It does not publish with npm provenance while the source repository is private.
+- Releases are published by the maintainer from a clean clone after every CI step passes, without npm provenance.
