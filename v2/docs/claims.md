@@ -60,3 +60,18 @@ Mapped so far: the claims tonight's changes touched. The rest of the README is n
 | Only human-confirmed context at session start | the draft-and-yes checks (61), e.g. "E2: agent path, rule: no team file changes; one draft of that kind, printed, its id on the last line" |
 
 Not mapped to a check: the "Which agents" table's live rows rest on the linked conformance results from 27 Oct to 3 Nov (2.0.x and 2.1.0-rc.0); no live run on the 2.1.0 branch yet (launch bar L8). The "Known limits" are statements of what is not done; the two tonight's work changed are updated above.
+
+## codehere.uk (codehere-landing, branch `main` at dad0caf, live)
+
+The site tells people to `npm install -g codehere`, which is 2.0.4 (`latest`) on 13 Nov. Its claims must hold for 2.0.4.
+
+| Claim | Check | Holds for |
+|---|---|---|
+| "How will you know it works?" for a feature with no test; "still broken" gets the error, failing test and files; same error 3 times: stop and name a root cause; Codehere runs your tests, a skipped or deleted test is blocked | the same checks as the README's "What it does" rows above | 2.0.4 and later |
+| Plain rules decide; only reacts to this session's changes; silent on normal turns; never blocks the agent more than 3 times; exits quietly if anything breaks | the design-rule checks above | 2.0.4 and later |
+| Gemma through Ollama is optional and only writes summaries for briefs and help cards | the `--gemma` checks; the only model call is in `src/commands.js` | 2.0.4 and later |
+| Claude Code, Codex CLI and Copilot CLI; on Copilot and in `codex exec` you do not see Codehere's lines | sections 23 and 25 of e2e; conformance results of 27 to 29 Oct | 2.0.x |
+| The weakened-test scan "does not yet catch an edited expected value" | true for 2.0.4 | 2.0.4 only: **update when 2.1.0 ships**, which catches it |
+| "What happened to codehere check?": still on npm as 1.x | `npm view codehere@1 version`: 1.0.2, 1.0.3 (13 Nov) | now |
+| "Does my code leave my machine? No." | "the hooks make no network call…", "audit: makes no network call"; Gemma refused off this machine | rc.3 branch (the checks are new; the code that sends nothing is the same in 2.0.4) |
+| Free, open source, no account | MIT license; no sign-in anywhere in the code | all |
