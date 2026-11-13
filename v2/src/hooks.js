@@ -953,7 +953,15 @@ function stop(root, input) {
     const nameStatus = git(root, ['diff', base, '--relative', '--name-status', '--', ...changed]);
     const diff = gitDiff(root, ['diff', base, '--relative', '-U0', '--', ...changed]);
     unread = diff === null;
-    findings = tamperFindings(nameStatus, diff || '');
+    // a test file as it is now, to see what a swallowing catch holds: plain files only, up to 1 MiB
+    const read = (f) => {
+      try {
+        return readPlain(path.join(root, f), 'utf8', 1024 * 1024);
+      } catch {
+        return null;
+      }
+    };
+    findings = tamperFindings(nameStatus, diff || '', { read });
   }
   const key = findings.join('|');
   if (findings.length && s.tamperReported !== key && mayBlock) {

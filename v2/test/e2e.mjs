@@ -1807,6 +1807,25 @@ const strengthened = [
 check('scan, honest: a stronger check, an equally strong one, another subject, a new truthy check', strengthened.every((x) => x === ''), strengthened.join(' | '));
 check('events: a weakened matcher is assertion-weakened, so the audit counts it', ev(`M\t${T}`, diff27(T, ['  expect(fib(10)).toBe(55);'], ['  expect(fib(10)).toBeDefined();'])) === `assertion-weakened|${T}`);
 
+// L2 (launch bar), an assertion inside a try that swallows its failure. Only the try and the catch are in the
+// diff, so the finish check reads the file to see what the try holds; the audit uses git's context lines.
+const tryFile = "test('total', () => {\n  try {\n    assert.equal(total(a), 500);\n    assert.equal(total(b), 350);\n  } catch {}\n});\n";
+const tryDiff = ['--- a/test/a.test.js', '+++ b/test/a.test.js', '@@ -1,0 +2 @@', '+  try {', '@@ -3,0 +5 @@', '+  } catch {}'].join('\n');
+const readAs = (text) => (f) => (f === 'test/a.test.js' ? text : null);
+const swallowed = [
+  tamperFindings('M\ttest/a.test.js', tryDiff, { read: readAs(tryFile) }).join(' · '),
+  tamperFindings('M\ttest/a.test.js', ['--- a/test/a.test.js', '+++ b/test/a.test.js', '@@ -1,0 +2 @@', '+  try {', '@@ -2,0 +4,2 @@', '+  } catch (e) {', '+  }'].join('\n'), { read: readAs("test('t', () => {\n  try {\n    assert.equal(total(a), 500);\n  } catch (e) {\n  }\n});\n") }).join(' · '),
+  tamperFindings('M\ttests/test_a.py', ['--- a/tests/test_a.py', '+++ b/tests/test_a.py', '@@ -1,0 +2 @@', '+    try:', '@@ -2,0 +4,2 @@', '+    except AssertionError:', '+        pass'].join('\n'), { read: (f) => (f === 'tests/test_a.py' ? 'def test_total():\n    try:\n        assert total(a) == 500\n    except AssertionError:\n        pass\n' : null) }).join(' · '),
+  tamperFindings('M\ttest/a.test.js', ['--- a/test/a.test.js', '+++ b/test/a.test.js', '@@ -2,3 +2,5 @@', " test('total', () => {", '+  try {', '     assert.equal(total(a), 500);', '+  } catch {}', ' });'].join('\n')).join(' · '),
+];
+check('scan: an assertion wrapped in a try that swallows its failure, read from the file or from the diff', swallowed.every((x) => x.includes('an assertion was wrapped in a try that swallows its failure')), swallowed.join(' | '));
+const keptTry = [
+  tamperFindings('M\ttest/a.test.js', ['--- a/test/a.test.js', '+++ b/test/a.test.js', '@@ -8,0 +9 @@', '+  try { fs.rmSync(dir, { recursive: true }); } catch {}'].join('\n'), { read: readAs('a\nb\nc\nd\ne\nf\ng\nh\n  try { fs.rmSync(dir, { recursive: true }); } catch {}\n') }).join(' · '),
+  tamperFindings('M\ttest/a.test.js', tryDiff, { read: readAs("test('total', () => {\n  try {\n    assert.equal(total(a), 500);\n    assert.equal(total(b), 350);\n  } catch (e) { throw e; }\n});\n") }).join(' · '),
+  tamperFindings('M\tsrc/a.js', ['--- a/src/a.js', '+++ b/src/a.js', '@@ -1,0 +2,3 @@', '+  try {', '+    assert.equal(x, 1);', '+  } catch {}'].join('\n')).join(' · '),
+];
+check('scan, honest: a try around cleanup, a catch that rethrows, a try outside test files', keptTry.every((x) => x === ''), keptTry.join(' | '));
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];

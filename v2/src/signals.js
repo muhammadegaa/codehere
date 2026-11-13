@@ -311,6 +311,34 @@ function strength(line) {
   return null;
 }
 
+// A catch that swallows what was thrown: catch {}, catch (e) {} or catch (e) { /* ignore */ } on one line;
+// a catch line that opens a body which the next line closes; Python's except ...: pass, on one or two lines.
+const CATCH_EMPTY = /\bcatch\s*(?:\(\s*[\w$]*\s*\))?\s*\{\s*(?:\/\*[^*]*\*\/|\/\/[^\n]*)?\s*\}/;
+const CATCH_OPEN = /\bcatch\s*(?:\(\s*[\w$]*\s*\))?\s*\{\s*$/;
+const EXCEPT_PASS = /^\s*except\b[^:]*:\s*pass\s*(#.*)?$/;
+const EXCEPT_OPEN = /^\s*except\b[^:]*:\s*(#.*)?$/;
+const TRY_OPEN = /\btry\s*\{|^\s*try\s*:/;
+
+// Whether the try that a swallowing catch at line `at` (1-based) closes holds an assertion. The lines are the
+// file as it is now when it can be read, else the lines of the diff around the catch (git's context).
+function swallowsAssertion(lines, at, catchText) {
+  let i = at - 1;
+  if ((lines[i] || '').trim() !== catchText.trim()) {
+    const near = [-3, -2, -1, 1, 2, 3].map((d) => at - 1 + d).find((k) => (lines[k] || '').trim() === catchText.trim());
+    if (near === undefined) return false;
+    i = near;
+  }
+  for (let k = i, n = 0; k >= 0 && n < 60; k--, n++) {
+    let text = lines[k] || '';
+    const cut = k === i ? text.search(/\bcatch\b|\bexcept\b/) : -1;
+    if (cut >= 0) text = text.slice(0, cut); // try { assert(...) } catch {} on one line: the part before the catch
+    const open = text.search(TRY_OPEN);
+    if (ASSERT.test('+' + (open >= 0 ? text.slice(open).replace(TRY_OPEN, '') : text))) return true;
+    if (open >= 0) return false;
+  }
+  return false;
+}
+
 // re found in the code of the line, not only inside its strings
 function inCode(re, line, mask) {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
@@ -319,13 +347,15 @@ function inCode(re, line, mask) {
 }
 
 // What the finish check prints: the events' text, in order, each once.
-export function tamperFindings(nameStatus, diff) {
-  return tamperEvents(nameStatus, diff).map((e) => e.why);
+export function tamperFindings(nameStatus, diff, opts) {
+  return tamperEvents(nameStatus, diff, opts).map((e) => e.why);
 }
 
 // Each finding as { kind, file, why }; file is undefined for the count of removed assertions,
 // which spans the whole diff. A why already seen is not repeated.
-export function tamperEvents(nameStatus, diff) {
+// read(file), when given, returns the file as it is now (or null): the finish check passes one, the audit
+// does not and relies on the diff's context lines.
+export function tamperEvents(nameStatus, diff, { read } = {}) {
   const events = [];
   const seen = new Set();
   const add = (kind, file, why) => {
@@ -344,6 +374,9 @@ export function tamperEvents(nameStatus, diff) {
   let removedShapes = new Map(); // this file's removed assertions by shape, to spot a changed expected value
   let removedValueChecks = new Map(); // this file's removed value checks by subject, to spot a weakened one
   const changedIn = new Set(); // one changed-value finding per file
+  let newLine = 0; // the line number in the file as it is now, from the hunk headers
+  let fileLines = []; // this file's lines from the diff (added and context), by line number, for the audit
+  let pendingCatch = 0; // a catch or except line whose body may be closed or passed on the next line
   const weakenedIn = new Set(); // one weakened-matcher finding per file
   let hadFallback = false; // the test script already ended in `|| true` before this session
   let hadFilters = new Set(); // options that left tests out before this session
@@ -353,11 +386,20 @@ export function tamperEvents(nameStatus, diff) {
       removed = new Set();
       removedShapes = new Map();
       removedValueChecks = new Map();
+      fileLines = [];
+      pendingCatch = 0;
       hadFallback = false;
       hadFilters = new Set();
       continue;
     }
     if (line.startsWith('--- ')) continue;
+    if (line.startsWith('@@')) {
+      newLine = Number((/\+(\d+)/.exec(line) || [])[1] || 0);
+      continue;
+    }
+    const at = line.startsWith('-') ? 0 : newLine;
+    if (!line.startsWith('-')) newLine++;
+    if (at && at <= 20000) fileLines[at - 1] = line.slice(1);
     const inTest = isTestFile(current);
     const probe = line.slice(0, 10000); // the patterns can take quadratic time on a long line
     let lineMask = null;
@@ -375,6 +417,18 @@ export function tamperEvents(nameStatus, diff) {
     if (line.startsWith('+')) {
       for (const t of TAMPER_ADDED) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
       if (!inTest) continue;
+      const text = probe.slice(1);
+      let swallowAt = 0;
+      let swallowText = '';
+      if (pendingCatch && at === pendingCatch.at + 1 && (text.trim() === '}' || text.trim() === 'pass')) [swallowAt, swallowText] = [pendingCatch.at, pendingCatch.text];
+      pendingCatch = 0;
+      if (inCode(CATCH_EMPTY, probe, mask) || EXCEPT_PASS.test(text)) [swallowAt, swallowText] = [at, text];
+      else if (inCode(CATCH_OPEN, probe, mask) || EXCEPT_OPEN.test(text)) pendingCatch = { at, text };
+      if (swallowAt) {
+        const now = read ? read(current) : null;
+        const lines = now == null ? fileLines : now.split('\n');
+        if (swallowsAssertion(lines, swallowAt, swallowText)) add(WEAKENED, current, `an assertion was wrapped in a try that swallows its failure in ${current}`);
+      }
       for (const t of TAMPER_ADDED_IN_TESTS) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
       if (COMMENT.test(line)) {
         if (removed.has(line.replace(COMMENT, '').trim())) add(WEAKENED, current, `an assertion was commented out in ${current}`);
