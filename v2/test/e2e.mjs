@@ -1761,6 +1761,29 @@ check('finish check: an expected value changed to the buggy output sends the age
 r = H('stop', l1, { session_id: 'l1a', hook_event_name: 'Stop', stop_hook_active: true });
 check('finish check: the agent finishes anyway; the tests pass, and the line is ✕, never ✓', !r.j.decision && (r.j.systemMessage || '').startsWith('codehere ✕ npm test --silent passed, but a check was weakened · an expected value was changed') && !(r.j.systemMessage || '').includes('✓'), r.out);
 
+// L11 (launch bar): the pilot page's claims about the audit. "It runs on your machine and sends nothing":
+// a preload marks any network call, and a control call shows the marker works. "A newer commit behind a
+// back-dated one is not read": git stops at the first commit older than the window.
+const noNet = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'no-net.mjs');
+const netMark = path.join(tmp, 'net-marker');
+fs.rmSync(netMark, { force: true });
+spawnSync('node', ['--import', noNet, '-e', "require('node:net').createConnection({ host: '127.0.0.1', port: 9 }).on('error', () => {})"], { encoding: 'utf8', env: { ...process.env, NET_MARKER: netMark }, timeout: 10000 });
+check('no-network preload: a control connection is marked', fs.existsSync(netMark) && fs.readFileSync(netMark, 'utf8').includes('net.connect'), fs.existsSync(netMark) ? fs.readFileSync(netMark, 'utf8') : 'no marker');
+fs.rmSync(netMark, { force: true });
+const auNet = spawnSync('node', ['--import', noNet, BIN, 'audit'], { cwd: au, encoding: 'utf8', env: { ...process.env, NET_MARKER: netMark }, timeout: 60000 });
+check('audit: makes no network call', auNet.status === 0 && auNet.stdout.startsWith('codehere audit · last 90 days') && !fs.existsSync(netMark), (fs.existsSync(netMark) ? fs.readFileSync(netMark, 'utf8') : '') + auNet.stdout.slice(0, 200));
+const bd = freshRepo('backdated');
+fs.mkdirSync(path.join(bd, 'test'));
+fs.writeFileSync(path.join(bd, 'test/a.test.js'), "test.skip('a', () => {});\n");
+sh('git add -A && git commit -qm "skip a, behind a back-dated commit"', bd);
+const bdA = sh('git rev-parse --short=8 HEAD', bd).trim();
+fs.appendFileSync(path.join(bd, 'README.md'), 'old\n');
+sh(`git add -A && GIT_AUTHOR_DATE=${longAgo} GIT_COMMITTER_DATE=${longAgo} git commit -q -m "back-dated"`, bd);
+fs.appendFileSync(path.join(bd, 'README.md'), 'new\n');
+sh('git add -A && git commit -qm "new"', bd);
+r = ch(['audit'], bd);
+check('audit: a commit behind a back-dated one is not read, as the limits say', r.code === 0 && /· 1 commit read$/m.test(r.out) && !r.out.includes(bdA), r.out);
+
 // --gemma sends text only to a model on this machine.
 const savedHost = process.env.OLLAMA_HOST;
 const hits27 = [];
