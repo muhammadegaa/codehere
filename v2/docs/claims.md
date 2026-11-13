@@ -37,3 +37,26 @@ Mapped so far: the claims tonight's changes touched. The rest of the README is n
 | Every command in "Commands" exists, and `--help` lists no command the README leaves out | sweep on 13 Nov: the 13 commands match `codehere --help` | rc.3 branch |
 | The 9 relative links (conformance results, docs) point at files that exist | sweep on 13 Nov: 9 of 9 exist | rc.3 branch |
 | `node demo/demo.mjs` shows the whole loop, including "done" checked | run on 13 Nov: scene 6 shows the failed run sent back (✕), scene 11 the ✓; before this fix it showed ⊘ "not approved" because the demo never approved the test command | rc.3 branch |
+
+### "What it does" and "Design rules" (mapped 13 Nov against the 552 checks that passed at e593c83)
+
+| Claim | Checks (examples) |
+|---|---|
+| Team rules load into every session | "(setup) claude: session start carries the team rule"; "Codex, session start: the team rules go in as context"; "Copilot, session start: the team rules go in as JSON additionalContext" (12 in all) |
+| "Still broken" gets the last error, the failing test and the files changed | "\"still broken\" after a failure gets the error, failing test and files changed" |
+| A feature with no way to check it: "How will you know it works?" | "vague feature with no test: ask \"How will you know it works?\""; "questions and small edits are not vague features" |
+| Same error 3 times: stop and find the root cause | "Codex, third repeat: the loop breaker goes in as context…" and the loop checks of section 3 (9 in all) |
+| Codehere runs your tests; if they fail, the agent goes back | "failing tests block \"done\""; the finish-check checks for Codex and Copilot (11 in all) |
+| A skipped or deleted test is sent back | "tampering blocks \"done\""; "finish check: a weakened test sends the agent back and the person sees one ✕ line"; the 46-case suite |
+| A long session stuck on one error: a restart brief | the brief checks (17), e.g. "brief has goal from transcript", "brief redacts emails" |
+| A redacted help card | "help card written"; "help card redacts email" (11 in all) |
+| A teammate's fix reaches the agent at the first matching error | section 21 and 26 checks, e.g. "Sam sees one line, with no ✓: Ana's lesson, verified on her machine"; "a different failing test does not get the cart lesson" |
+| No AI in the decision path | structural: the only model call, `summarize` (Gemma), is in `src/commands.js` for briefs and help cards; `hooks.js`, `signals.js` and `audit.js` call none (checked 13 Nov) |
+| Silent on normal turns | "1st error: silent"; "2nd error (different numbers, same signature): silent" |
+| Only reacts to this session's work | "changes made before the session do not trigger the test check" |
+| Never traps the agent: at most 3 | "after the cap, a failure is still shown and nothing is sent back"; "each send-back shows one line: ✕, …, k of 3" |
+| Fails open | "prompt hook fails open on garbage input"; "a malformed draft entry does not stop a later draft from being saved"; without git the finish check shows ⊘ and the agent carries on |
+| Gemma optional, local only | the `--gemma` checks (8), e.g. "--gemma: an OLLAMA_HOST off this machine is refused before any request, with a reason" |
+| Only human-confirmed context at session start | the draft-and-yes checks (61), e.g. "E2: agent path, rule: no team file changes; one draft of that kind, printed, its id on the last line" |
+
+Not mapped to a check: the "Which agents" table's live rows rest on the linked conformance results from 27 Oct to 3 Nov (2.0.x and 2.1.0-rc.0); no live run on the 2.1.0 branch yet (launch bar L8). The "Known limits" are statements of what is not done; the two tonight's work changed are updated above.
