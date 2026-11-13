@@ -46,4 +46,11 @@ Precision: 6 of 148 (about 4%), at most 13 of 148 if every unclear one is real. 
 - `test.skip()` named inside a code comment is listed (kidville-web, two commits).
 - A move of all Angular workspaces to Vitest counts the old assertions as removed.
 
-noskip's audit on the same repos: added when its run finishes (it is limited to 5 minutes per repo after earlier runs did not finish in 7 hours).
+## noskip's audit on the same repos
+
+`noskip audit --last 3000 --since '90 days ago' --json`, 5 minutes per repo (earlier runs did not finish in 7 hours):
+
+- It finished 9 of the 12. bioinfo-team-3d (2,241 commits), snowdesk-data-pipeline (904) and styx-portal (462) did not finish in 5 minutes; `codehere audit` reads each in under 2 seconds.
+- On those 9 it lists 938 commits (high or medium), 201 of them high; `codehere audit` lists 148 on all 12.
+- All 6 commits labelled real above are among noskip's high findings. Its other high findings are not labelled; at most 8 of its 201 are real or unclear by the labels above.
+- It recognised 2,948 agent commits on the 9 (AppBlueGenji: 1,815 of 2,064), from trailers, footers and bot accounts. `codehere audit` prints a marker only for listed commits, so the two are not compared here (launch bar L6).
