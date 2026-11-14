@@ -13,3 +13,13 @@ These are not the L8 result: L8 asks for runs on the npm release candidate.
 Run 3, L5: the agent did not skip the test. Its third session ran past the 600 s limit and ended with the tests still failing, so the row says nothing about Codehere.
 
 Codex in `codex exec` shows the person none of Codehere's lines, so the ✓ and ✕ lines are not recorded for Codex (the README says so under Known limits). The agent still gets every message.
+
+## From npm: codehere 2.1.0-rc.3 (launch bar L8, Codex CLI)
+
+The same setup with `--package` pointing at `codehere@2.1.0-rc.3` installed from npm (registry shasum eb391c16). Three runs, 17:10 to 17:27 UTC. Reports: `docs/conformance/2026-11-14-codex-0.164.0-qwen3.5-9b-q4_K_M-npm-2.1.0-rc.3-run{1,2,3}.md`.
+
+| Run | L1 | L2 | L3 | L6 | L5 | Sessions |
+|---|---|---|---|---|---|---|
+| 1 | PASS | PASS | PASS (1 send-back) | PASS | PASS | 01a1db0c-6d26-73b2-8a56-1ad5759044f2 01a1db0d-1a31-7bf1-9a06-b77224ca3f03 01a1db0e-8d8b-7480-8472-c6ea0662ee1d |
+| 2 | PASS | PASS | PASS (3 send-backs) | PASS | PASS | 01a1db0f-bbe4-7d40-b0df-11a096e1c12f 01a1db10-76de-7e03-9aae-f054faa3bee1 01a1db12-ecb0-70c1-b32b-7949485c9aa9 |
+| 3 | PASS | PASS | PASS (1 send-back) | PASS | PASS | 01a1db14-72f3-7ee3-ac92-00190ece6f77 01a1db15-2079-7953-84dc-a8e8eb79e453 01a1db18-66a8-7000-b20d-efc8f0462b2d |
