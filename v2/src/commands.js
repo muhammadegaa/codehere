@@ -373,8 +373,24 @@ export async function init(flags) {
     console.log("Copilot runs a repo's hooks only in a folder you trust. Answer yes when Copilot asks on its first start here.");
     console.log('');
   }
+  const onPath = hooksCodehere();
+  if (onPath) console.log(`${onPath}\n`);
   console.log(`Next: commit .codehere/ and ${agents.map((a) => a.file).join(' and ')} so your team gets it too.`);
   console.log(`Then just use ${agents.map((a) => a.name).join(' or ')} as usual. Codehere stays quiet unless it helps.`);
+}
+
+// The hooks call `codehere` from PATH. Set up through npx, or beside an older global install, they would fail
+// with "command not found" or run another version, and the finish check would not be this one.
+function hooksCodehere() {
+  const own = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  let found = '';
+  try {
+    found = execFileSync('codehere', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000 }).trim().replace(/^codehere /, '');
+  } catch {}
+  if (found === own) return null;
+  return found
+    ? `The hooks run the codehere on PATH, which is ${printable(found)}, not this ${own}. To use ${own}: npm install -g codehere@${own}`
+    : `The hooks call codehere, which is not on PATH here, so they cannot run. Install it: npm install -g codehere@${own}`;
 }
 
 // ---------- uninstall ----------

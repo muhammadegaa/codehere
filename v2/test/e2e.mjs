@@ -1877,6 +1877,27 @@ sh('git add -A && git commit -qm "new"', bd);
 r = ch(['audit'], bd);
 check('audit: a commit behind a back-dated one is not read, as the limits say', r.code === 0 && /· 1 commit read$/m.test(r.out) && !r.out.includes(bdA), r.out);
 
+// The hooks call `codehere` from PATH. Set up with `npx codehere init` alone, or beside an older global install,
+// they failed with "command not found" or ran another version, and init said nothing (found on 14 Nov).
+const ownVersion = JSON.parse(fs.readFileSync(path.join(path.dirname(BIN), '..', 'package.json'), 'utf8')).version;
+const pathBase = path.join(tmp, 'path-base');
+fs.mkdirSync(pathBase);
+fs.symlinkSync(process.execPath, path.join(pathBase, 'node'));
+fs.symlinkSync(execSync('command -v git').toString().trim(), path.join(pathBase, 'git'));
+const initWith = (name, shim) => {
+  const dir = freshRepo(name, { 'package.json': JSON.stringify({ name, scripts: { test: 'node -e 0' } }) });
+  const bin = path.join(tmp, `${name}-bin`);
+  fs.mkdirSync(bin);
+  if (shim) fs.writeFileSync(path.join(bin, 'codehere'), `#!/bin/sh\necho "codehere ${shim}"\n`, { mode: 0o755 });
+  return spawnSync(process.execPath, [BIN, 'init', '--agent', 'claude'], { cwd: dir, encoding: 'utf8', env: { HOME: path.join(tmp, `${name}-home`), TMPDIR: tmp, PATH: `${bin}:${pathBase}` } });
+};
+const pathNone = initWith('path-none');
+const pathOld = initWith('path-old', '2.0.3');
+const pathSame = initWith('path-same', ownVersion);
+check('init says when the hooks will not find codehere on PATH, and how to install it', pathNone.status === 0 && pathNone.stdout.includes(`The hooks call codehere, which is not on PATH here, so they cannot run. Install it: npm install -g codehere@${ownVersion}`), pathNone.stdout + pathNone.stderr);
+check('init says when the codehere on PATH is another version', pathOld.status === 0 && pathOld.stdout.includes(`The hooks run the codehere on PATH, which is 2.0.3, not this ${ownVersion}. To use ${ownVersion}: npm install -g codehere@${ownVersion}`), pathOld.stdout + pathOld.stderr);
+check('init says nothing about PATH when the hooks will run this version', pathSame.status === 0 && !pathSame.stdout.includes('on PATH'), pathSame.stdout + pathSame.stderr);
+
 // L12 (launch bar), production basics. Without git on PATH, init said "Codehere is set up" and every hook
 // then did nothing, so the person believed the finish check ran. Now init and audit stop and say why, and
 // the finish check shows a ⊘ line.
