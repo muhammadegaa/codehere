@@ -10,6 +10,9 @@ export function findRoot(start = process.cwd()) {
   let dir = path.resolve(start);
   while (true) {
     if (fs.existsSync(path.join(dir, '.codehere'))) return dir;
+    // a repo's .codehere/ is at or below its git root: a .codehere/ further up (Codehere 1.x's ~/.codehere,
+    // another project) is not this repo's
+    if (fs.existsSync(path.join(dir, '.git'))) return null;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;

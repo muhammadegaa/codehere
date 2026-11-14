@@ -1084,6 +1084,17 @@ r = atTerminal('uninstall', a2, 'y');
 check('(setup) uninstall removed .codehere/ in a2', !fs.existsSync(path.join(a2, '.codehere')), r.out);
 r = H('stop', a2, { session_id: 'g1', hook_event_name: 'Stop', stop_hook_active: false });
 check('uninstall during a session: the finish check still tells the developer, though .codehere/ is gone', r.code === 0 && /^codehere ✕ codehere uninstall ran at \d\d:\d\d · this repo's checks are removed$/.test(r.j.systemMessage || ''), r.out);
+// A .codehere/ above the repo's git root, such as the one Codehere 1.x kept in the home folder, is not the
+// repo's: the search stops at the git root. Before 2.1.0 a person's `codehere rule` in a repo without init wrote there.
+const above = path.join(tmp, 'above');
+fs.mkdirSync(path.join(above, '.codehere'), { recursive: true });
+fs.writeFileSync(path.join(above, '.codehere/budget.yaml'), 'daily: 5\n');
+const under = path.join(above, 'repo');
+fs.mkdirSync(path.join(under, 'src'), { recursive: true });
+sh('git init -q -b main', under);
+r = ch(['status'], path.join(under, 'src'));
+let ruleAbove = atTerminal('rule "Prices are in cents"', under, '');
+check('a .codehere/ above the repo (1.x kept one in the home folder) is not taken for the repo\'s', r.code === 1 && r.err.includes('No .codehere folder here') && ruleAbove.code === 1 && fs.readdirSync(path.join(above, '.codehere')).join() === 'budget.yaml', `${r.err}${ruleAbove.out}${fs.readdirSync(path.join(above, '.codehere')).join()}`);
 const a3 = freshRepo('a3', { 'package.json': JSON.stringify({ name: 'a3', scripts: { test: 'node -e 0' } }), 'app.js': 'x\n' });
 atTerminal('init --agent claude', a3, 'y');
 person(['rule', 'Keep it'], a3);
