@@ -32,7 +32,8 @@ Mapped so far: the claims tonight's changes touched. The rest of the README is n
 | It lists the commits that deleted, skipped, left out or weakened tests (not "every" commit) | the audit checks in e2e section 27; measured: `docs/evidence/2026-11-13-audit-heldout-results.md` | rc.3 branch |
 | Agent markers include Claude Code's footer | "audit: Claude Code's footer counts as an agent marker, as a squash merge keeps it" | rc.3 branch |
 | The weakened-test scan's list of what it catches | the `scan:` checks for each kind; `v2/scripts/h2h-suite.mjs` (46 cases, `docs/evidence/2026-11-13-case-suite.md`) | rc.3 branch |
-| What it does not catch, and 5 of 19 on CheatBench's held-out half | `docs/evidence/2026-11-13-cheatbench.md` | rc.3 branch |
+| What it does not catch, and 15 of 19 on CheatBench's held-out half (results seen once before) | `docs/evidence/2026-11-13-cheatbench.md`, section of 14 Nov | rc.3 branch from 0b95143 |
+| The rules ported from noskip: skip option on an existing test, replaced test, `want`/`expected` value, flipped assertion, changed call, weakened matcher, dropped list item, reordered table rows | "ported from noskip: each kind is found and named, from a real diff"; the honest twins in "ported from noskip, honest: …"; "finish check: a skip option given to an existing test sends the agent back, though the tests pass" | rc.3 branch from 0b95143 |
 | A git missing from PATH is reported (the design rule "it fails open" still holds: the agent carries on) | "without git: …" checks | rc.3 branch |
 | Every command in "Commands" exists, and `--help` lists no command the README leaves out | sweep on 13 Nov: the 13 commands match `codehere --help` | rc.3 branch |
 | The 9 relative links (conformance results, docs) point at files that exist | sweep on 13 Nov: 9 of 9 exist | rc.3 branch |
