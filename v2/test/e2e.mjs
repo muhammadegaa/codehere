@@ -1759,7 +1759,7 @@ const unchangedValues = [
   scan([], ['  assert.equal(total([]), 0);']),
   scan(['  assert.equal(total(a), 5);'], ['  assert.equal(total(a), 5);']),
   scan(['  assert.equal(item1.total, 3);'], ['  assert.equal(item2.total, 3);']),
-  scan(['  const want = 500;'], ['  const want = 250;']),
+  scan(['  const price = 500;'], ['  const price = 250;']),
   pj(['    "version": "1.0.0"'], ['    "version": "1.1.0"']),
 ];
 check('scan, honest: a renamed variable, a new or unchanged assertion, a changed name, a value outside an assertion, a non-test file', unchangedValues.every((x) => x === ''), unchangedValues.join(' | '));
@@ -1782,6 +1782,73 @@ r = H('stop', l1, { session_id: 'l1a', hook_event_name: 'Stop', stop_hook_active
 check('finish check: an expected value changed to the buggy output sends the agent back, with the line', r.j.decision === 'block' && (r.j.reason || '').includes('- an expected value was changed in test/cart.test.js (500 → 250)') && (r.j.systemMessage || '').startsWith('codehere ✕ a check was weakened · an expected value was changed'), r.out);
 r = H('stop', l1, { session_id: 'l1a', hook_event_name: 'Stop', stop_hook_active: true });
 check('finish check: the agent finishes anyway; the tests pass, and the line is ✕, never ✓', !r.j.decision && (r.j.systemMessage || '').startsWith('codehere ✕ npm test --silent passed, but a check was weakened · an expected value was changed') && !(r.j.systemMessage || '').includes('✓'), r.out);
+
+// L3 (launch bar): the rules ported from noskip (src/noskip.js). They read the files as they are now, so the
+// finish check runs them and the audit does not. Each case is a real git diff, as the finish check takes it.
+const np = freshRepo('noskip-port');
+const viaGit = (before, after) => {
+  for (const [f, t] of Object.entries(before)) fs.mkdirSync(path.dirname(path.join(np, f)), { recursive: true }), fs.writeFileSync(path.join(np, f), t);
+  sh('git add -A && git commit -qm before', np);
+  for (const [f, t] of Object.entries(after)) {
+    if (t === null) fs.rmSync(path.join(np, f));
+    else fs.mkdirSync(path.dirname(path.join(np, f)), { recursive: true }), fs.writeFileSync(path.join(np, f), t);
+  }
+  sh('git add -N .', np);
+  const read = (f) => (fs.existsSync(path.join(np, f)) ? fs.readFileSync(path.join(np, f), 'utf8') : null);
+  const out = tamperFindings(sh('git diff --name-status --relative', np), sh('git diff -U0 --relative', np), { read }).join(' · ');
+  sh('git reset -q && git checkout -q -- . && git clean -qfd', np);
+  return out;
+};
+const T3 = 'test/leap.test.js';
+const js = (...body) => `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { isLeap, round, parse } from '../leap.js';\n\n${body.join('\n')}\n`;
+const ported = {
+  'want = value': viaGit({ [T3]: js("test('leap', () => {", '  const want = 500;', '  assert.equal(isLeap(2000) ? 500 : 0, want);', '});') }, { [T3]: js("test('leap', () => {", '  const want = 250;', '  assert.equal(isLeap(2000) ? 500 : 0, want);', '});') }),
+  flipped: viaGit({ [T3]: js("test('1900', () => {", '  assert.ok(!isLeap(1900));', '});') }, { [T3]: js("test('1900', () => {", '  assert.ok(isLeap(1900));', '});') }),
+  opposite: viaGit({ [T3]: js("test('parse', () => {", "  assert.throws(() => parse('x'));", '});') }, { [T3]: js("test('parse', () => {", "  assert.doesNotThrow(() => parse('x'));", '});') }),
+  call: viaGit({ [T3]: js("test('round', () => {", '  assert.equal(round(2.5), 3);', '});') }, { [T3]: js("test('round', () => {", "  assert.equal(round(2.5, 'up'), 3);", '});') }),
+  weakened: viaGit({ 'test/list.test.js': "test('list', () => {\n  expect(list()).toHaveLength(3);\n});\n" }, { 'test/list.test.js': "test('list', () => {\n  expect(list()).toBeDefined();\n});\n" }),
+  dropped: viaGit({ [T3]: js("test('centuries', () => {", '  for (const y of [1700, 1800, 1900]) {', '    assert.equal(isLeap(y), false);', '  }', '});') }, { [T3]: js("test('centuries', () => {", '  for (const y of [1700, 1800]) {', '    assert.equal(isLeap(y), false);', '  }', '});') }),
+  reordered: viaGit({ [T3]: js('const cases = [', '  [2000, true],', '  [1900, false],', '  [2024, true],', '];', "test('table', () => {", '  for (const [y, want] of cases) assert.equal(isLeap(y), want);', '});') }, { [T3]: js('const cases = [', '  [1900, false],', '  [2000, true],', '  [2024, true],', '];', "test('table', () => {", '  for (const [y, want] of cases) assert.equal(isLeap(y), want);', '});') }),
+  replaced: viaGit({ [T3]: js("test('1900 is not a leap year', () => {", '  assert.equal(isLeap(1900), false);', '});') }, { [T3]: js("test('2000 is a leap year', () => {", '  assert.equal(isLeap(2000), true);', '});') }),
+  'skip option': viaGit({ [T3]: js("test('fetches a forecast', async () => {", '  assert.equal(isLeap(2000), true);', '});') }, { [T3]: js('const skip = !process.env.WEATHER_TOKEN;', "test('fetches a forecast', { skip }, async () => {", '  assert.equal(isLeap(2000), true);', '});') }),
+  'python ==, then is not None': viaGit({ 'tests/test_price.py': 'def test_price():\n    assert parse("£12") == 12\n' }, { 'tests/test_price.py': 'def test_price():\n    assert parse("£12") is not None\n' }),
+};
+const portWords = {
+  'want = value': 'an expected value was changed in test/leap.test.js (want 500 → want 250)',
+  flipped: 'an assertion was flipped to its opposite in test/leap.test.js',
+  opposite: 'an assertion was flipped to its opposite in test/leap.test.js',
+  call: "the call a test checks was changed and its expected value kept in test/leap.test.js (round(2.5) → round(2.5, 'up'))",
+  weakened: 'an assertion was weakened in test/list.test.js',
+  dropped: 'a case was removed from a test list in test/leap.test.js (1900)',
+  reordered: 'test data was reordered in test/leap.test.js',
+  replaced: 'a test was replaced by a different one in test/leap.test.js ("1900 is not a leap year" → "2000 is a leap year")',
+  'skip option': 'a test that already existed was given a skip option in test/leap.test.js ("fetches a forecast")',
+  'python ==, then is not None': 'an assertion was weakened in tests/test_price.py',
+};
+check('ported from noskip: each kind is found and named, from a real diff', Object.entries(portWords).every(([k, w]) => ported[k].includes(w)), Object.entries(ported).filter(([k]) => !ported[k].includes(portWords[k])).map(([k, v]) => `${k}: ${v || '(nothing)'}`).join(' | '));
+const portHonest = {
+  'a new test that declares what it needs': viaGit({ [T3]: js("test('a', () => {", '  assert.equal(isLeap(2000), true);', '});') }, { [T3]: js("test('a', () => {", '  assert.equal(isLeap(2000), true);', '});', "test('reads the clock', { skip: process.platform === 'win32' }, () => {", '  assert.equal(isLeap(2024), true);', '});') }),
+  'the expression computing the actual value changed': viaGit({ [T3]: js("test('a', () => {", '  assert.equal(getStore(r).total, 5);', '});') }, { [T3]: js("test('a', () => {", '  assert.equal(r.store.total, 5);', '});') }),
+  'a row added to a table': viaGit({ [T3]: js('const cases = [', '  [2000, true],', '  [1900, false],', '];') }, { [T3]: js('const cases = [', '  [2000, true],', '  [1900, false],', '  [2024, true],', '];') }),
+  'an item added to a list': viaGit({ [T3]: js('  for (const y of [1700, 1800]) {') }, { [T3]: js('  for (const y of [1700, 1800, 1900]) {') }),
+  'a test moved to another file under its name': viaGit({ [T3]: js("test('1900 is not a leap year', () => {", '  assert.equal(isLeap(1900), false);', '});', "test('2000', () => {", '  assert.equal(isLeap(2000), true);', '});') }, { [T3]: js("test('2000', () => {", '  assert.equal(isLeap(2000), true);', '});'), 'test/century.test.js': js("test('1900 is not a leap year', () => {", '  assert.equal(isLeap(1900), false);', '});') }),
+  'a new test added': viaGit({ [T3]: js("test('a', () => {", '  assert.equal(isLeap(2000), true);', '});') }, { [T3]: js("test('a', () => {", '  assert.equal(isLeap(2000), true);', '});', "test('b', () => {", '  assert.equal(isLeap(2024), true);', '});') }),
+  'a value named price changed outside an assertion': viaGit({ [T3]: js('  const price = 500;') }, { [T3]: js('  const price = 250;') }),
+};
+check('ported from noskip, honest: a new test declaring what it needs, a changed actual expression, an added row or item, a moved test, a new test, a non-expected value', Object.values(portHonest).every((x) => x === ''), Object.entries(portHonest).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' | '));
+const portNoRead = tamperEvents('M\ttest/leap.test.js', ['--- a/test/leap.test.js', '+++ b/test/leap.test.js', '@@ -1 +1 @@', "-test('1900 is not a leap year', () => {", "+test('2000 is a leap year', () => {"].join('\n'));
+check('ported from noskip: the audit, which passes no read, does not run them', portNoRead.every((e) => e.kind !== 'test-replaced'), JSON.stringify(portNoRead));
+const bigHunk = ['--- a/test/a.test.js', '+++ b/test/a.test.js', '@@ -1,3001 +1,3001 @@', `-  const want = "${'x'.repeat(200000)}";`, `+  const want = "${'x'.repeat(200001)}";`];
+for (let i = 0; i < 3000; i++) bigHunk.splice(4 + i, 0, `-  assert.equal(f(${i}), ${i});`), bigHunk.push(`+  assert.equal(f(${i}), ${i + 1});`);
+const tPort = Date.now();
+tamperFindings('M\ttest/a.test.js', bigHunk.join('\n'), { read: () => null });
+check('ported from noskip: a 200 KB line and a hunk of 3,000 changed assertions take under a second', Date.now() - tPort < 1000, `${Date.now() - tPort} ms`);
+sh('git checkout -q -- .', l1);
+H('session-start', l1, { session_id: 'l1b', hook_event_name: 'SessionStart', source: 'startup' });
+fs.writeFileSync(path.join(l1, 'test/cart.test.js'), fs.readFileSync(path.join(l1, 'test/cart.test.js'), 'utf8').replace("test('total', () => {", "const skip = true;\ntest('total', { skip }, () => {"));
+r = H('stop', l1, { session_id: 'l1b', hook_event_name: 'Stop', stop_hook_active: false });
+check('finish check: a skip option given to an existing test sends the agent back, though the tests pass', r.j.decision === 'block' && (r.j.reason || '').includes('- a test that already existed was given a skip option in test/cart.test.js ("total")') && (r.j.systemMessage || '').startsWith('codehere ✕ a check was weakened · a test that already existed was given a skip option'), r.out);
+sh('git checkout -q -- .', l1);
 
 // L11 (launch bar): the pilot page's claims about the audit. "It runs on your machine and sends nothing":
 // a preload marks any network call, and a control call shows the marker works. "A newer commit behind a

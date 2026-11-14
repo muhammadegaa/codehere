@@ -1,4 +1,5 @@
 // Deterministic signals. No AI in the decision path.
+import { testChanges } from './noskip.js';
 
 const ERROR_LINE =
   /(error|exception|traceback|failed|failure|fatal|cannot|can't|not found|undefined is not|is not defined|is not a function|segmentation fault|ERR!|panic:|denied|refused|unexpected token|syntaxerror|typeerror|referenceerror|modulenotfound|no such file)/i;
@@ -147,6 +148,7 @@ const EXPECTED = 'expected-changed';
 const HARDCODED = 'hardcoded-answer';
 const UNDER_TEST = 'test-env';
 const CHECKS_OFF = 'checks-off';
+const REPLACED = 'test-replaced';
 
 const TAMPER_ADDED = [
   { re: /\b(it|test|describe)\.skip\s*\(/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
@@ -564,6 +566,32 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
       const given = order.find((g) => !DULL.has(g) && expectations.some((e) => e.expected === r.value && e.inputs.has(g)));
       const show = (g) => (g.startsWith('n:') ? g.slice(2) : JSON.stringify(g.slice(2)));
       if (given) add(HARDCODED, r.file, `${r.file} returns ${r.text} when given ${show(given)}, the exact value a test expects`);
+    }
+  }
+  // Expected values, replaced tests and test data, by the rules ported from noskip (src/noskip.js). They need
+  // the files as they are now, so only the finish check runs them.
+  if (read) {
+    const replacedIn = new Set();
+    const WORDS = {
+      expected: (c) => `an expected value was changed in ${c.file} (${c.from} → ${c.to})`,
+      call: (c) => `the call a test checks was changed and its expected value kept in ${c.file} (${c.from} → ${c.to})`,
+      flipped: (c) => `an assertion was flipped to its opposite in ${c.file} (${c.from} → ${c.to})`,
+      assertion: (c) => `an assertion was changed in ${c.file} (${c.from} → ${c.to})`,
+      dropped: (c) => `a case was removed from a test list in ${c.file} (${c.from})`,
+      reordered: (c) => `test data was reordered in ${c.file} (${c.from} moved)`,
+    };
+    for (const c of testChanges(diff, { read, isTestFile })) {
+      if (c.type === 'skipped') add(SKIPPED, c.file, `a test that already existed was given a skip option in ${c.file} ("${c.from}")`);
+      else if (c.type === 'replaced') {
+        if (!replacedIn.has(c.file)) add(REPLACED, c.file, `a test was replaced by a different one in ${c.file} ("${c.from}" → "${c.to}"${c.where ? ` in ${c.where}` : ''})`);
+        replacedIn.add(c.file);
+      } else if (c.type === 'weakened') {
+        if (!weakenedIn.has(c.file)) add(WEAKENED, c.file, `an assertion was weakened in ${c.file} (${c.from} became ${c.to})`);
+        weakenedIn.add(c.file);
+      } else {
+        if (!changedIn.has(c.file)) add(EXPECTED, c.file, WORDS[c.what](c));
+        changedIn.add(c.file);
+      }
     }
   }
   if (removedAsserts - addedAsserts >= 2) {
