@@ -4,7 +4,7 @@ Every sentence Codehere's public pages state as fact, with the check that shows 
 
 ## Pilot page (codehere-landing, branch `pilot-page`, `app/pilot/page.tsx`)
 
-The page tells readers to run `npx codehere@next audit`, so every claim must hold for the build on npm `next`. On 13 Nov that is 2.1.0-rc.2, which does not yet carry the fixes below; the claims hold once a build from `fix/2.1.0-rc.3` is published.
+The page tells readers to run `npx codehere@next init`, so every claim must hold for the build on npm `next`. Since 14 Nov 11:55 UTC that is 2.1.0-rc.3 (registry shasum eb391c16), built from `fix/2.1.0-rc.3` at 5d27f18, so the claims marked "rc.3 branch" hold for it.
 
 | Claim | Check | Holds for |
 |---|---|---|
@@ -15,6 +15,7 @@ The page tells readers to run `npx codehere@next audit`, so every claim must hol
 | Example output | labelled "Example output" on the page; its first two lines must match the real format | waits on the L4 wording decision |
 | When Claude Code, Codex CLI or Copilot CLI says it is finished, Codehere runs your tests | sections 23 and 25 of e2e (Codex, Copilot) and the Claude Code checks, with recorded hook inputs; live runs on 2.1.0 not done yet (L8) | e2e: rc.2 and later; live: not run |
 | If they fail, or a test was skipped, deleted or weakened to make them pass, it sends the agent back | "failing tests block "done""; "tampering blocks "done""; "finish check: an expected value changed to the buggy output sends the agent back, with the line"; `v2/scripts/h2h-codehere-cases.mjs` (7 of 7) | expected values: rc.3 branch |
+| `npm install -g codehere@next`, `cd your-project`, `codehere init --agent claude,codex,copilot` | run as written on rc.3 from npm with a throwaway HOME: `docs/evidence/2026-11-14-readme-sweep.md`; the page said `npx codehere@next init` until landing af630ee, which left the hooks without `codehere` ("init says when the hooks will not find codehere on PATH, …") | rc.3 from npm |
 | Free and open source, MIT | `v2/package.json` "license": "MIT"; `v2/LICENSE` | all |
 | Limit: a test deleted together with the feature it tested is listed too | measured: 18 of 24 false entries on 12 repos (`docs/evidence/2026-11-13-audit-precision.md`) | rc.3 branch |
 | Limit: a commit with no marker may still be an agent's | markers are optional trailers; not a code behaviour | all |
