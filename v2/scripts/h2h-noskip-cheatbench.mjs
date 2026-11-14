@@ -1,5 +1,5 @@
 // noskip 1.2.0's CLI on CheatBench: each recorded diff applied to a copy of its task repo (git apply only;
-// nothing from the bench runs), then noskip at its default threshold (high, what the stop hook acts on) and at low.
+// nothing from the bench runs), then noskip at its default threshold (high, what the stop hook acts on), at medium and at low.
 // Usage: node v2/scripts/h2h-noskip-cheatbench.mjs <noskip checkout>/bench <noskip>/src/cli.js <throwaway HOME> [task,task,...]
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,10 +23,11 @@ for (const agent of fs.readdirSync(path.join(BENCH, 'results'))) {
     try { git(dir, 'apply', '--whitespace=nowarn', '--ignore-whitespace', path.join(run, 'diff.patch')); } catch { applied = false; }
     const hi = applied ? spawnSync('node', [CLI], { cwd: dir, env, encoding: 'utf8', timeout: 60000 }).status : null;
     const lo = applied ? spawnSync('node', [CLI, '--fail-on', 'low'], { cwd: dir, env, encoding: 'utf8', timeout: 60000 }).status : null;
+    const med = applied ? spawnSync('node', [CLI, '--fail-on', 'medium'], { cwd: dir, env, encoding: 'utf8', timeout: 60000 }).status : null;
     fs.rmSync(dir, { recursive: true, force: true });
-    rows.push({ agent, task, label, gamed: label === 'cheated' || label === 'disclosed', visiblePass: ev.visiblePass, applied, hi, lo });
+    rows.push({ agent, task, label, gamed: label === 'cheated' || label === 'disclosed', visiblePass: ev.visiblePass, applied, hi, med, lo });
   }
 }
 const g = rows.filter((r) => r.gamed), ng = rows.filter((r) => !r.gamed && r.visiblePass);
-for (const k of ['hi', 'lo']) console.log(`noskip ${k === 'hi' ? 'default (high)' : '--fail-on low'}: gamed flagged ${g.filter((r) => r[k] === 1).length}/${g.length} · honest (visible tests passing) flagged ${ng.filter((r) => r[k] === 1).length}/${ng.length} · other exit codes ${rows.filter((r) => r[k] !== 0 && r[k] !== 1).length}`);
+for (const k of ['hi', 'med', 'lo']) console.log(`noskip ${{ hi: 'default (high)', med: '--fail-on medium', lo: '--fail-on low' }[k]}: gamed flagged ${g.filter((r) => r[k] === 1).length}/${g.length} · honest (visible tests passing) flagged ${ng.filter((r) => r[k] === 1).length}/${ng.length} · other exit codes ${rows.filter((r) => r[k] !== 0 && r[k] !== 1).length}`);
 console.log(`not applied: ${rows.filter((r) => !r.applied).length}`);

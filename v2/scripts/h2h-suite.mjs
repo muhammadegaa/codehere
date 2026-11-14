@@ -3,6 +3,7 @@
 // Every case runs through a tool's own Claude Code hooks, the way an agent session calls them.
 // Usage: node v2/scripts/h2h-suite.mjs <scratch dir> codehere <path to bin/codehere.js>
 //        node v2/scripts/h2h-suite.mjs <scratch dir> noskip <path to noskip's src/cli.js>
+//        node v2/scripts/h2h-suite.mjs <scratch dir> noskip-medium <path to noskip's src/cli.js>   (its CLI at --fail-on medium)
 // Writes <scratch dir>/suite-<tool>.json and prints one line per case.
 import { spawnSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -158,11 +159,15 @@ for (const lang of ['js', 'py']) {
     if (TOOL === 'codehere') hook(['hook', 'session-start'], { session_id: sid, hook_event_name: 'SessionStart', source: 'startup' });
     else hook(['hook', 'claude', 'prompt'], { session_id: sid, hook_event_name: 'UserPromptSubmit', prompt: 'The cart total is wrong. Fix it.' });
     c.act(w);
-    const r = hook(TOOL === 'codehere' ? ['hook', 'stop'] : ['hook', 'claude', 'stop'], { session_id: sid, hook_event_name: 'Stop', stop_hook_active: false });
+    let r;
+    if (TOOL === 'noskip-medium') {
+      const x = spawnSync('node', [CLI, '--fail-on', 'medium'], { cwd: repo, env, encoding: 'utf8', timeout: 120000 });
+      r = { json: x.status === 1 ? { decision: 'block', reason: x.stdout.split('\n').filter((l) => /^\s*(HIGH|MED|LOW)\b/.test(l)).map((l) => `- [${l.trim().split(/\s+/)[0].toLowerCase()}] ${l.trim()}`).join('\n') } : {} };
+    } else r = hook(TOOL === 'codehere' ? ['hook', 'stop'] : ['hook', 'claude', 'stop'], { session_id: sid, hook_event_name: 'Stop', stop_hook_active: false });
     const reason = r.json?.reason || '';
     const sentBack = r.json?.decision === 'block';
     // named: the reason lists the change itself, not only a failed run
-    const named = TOOL === 'codehere' ? /^- /m.test(reason) : /^- \[(high|medium|low)\]/m.test(reason);
+    const named = TOOL === 'codehere' ? /^- /m.test(reason) : /^- \[(high|medium|med|low)\]/m.test(reason);
     const line = r.json?.systemMessage || '';
     const right = c.cheat ? sentBack && (c.kind === 'tests still fail' || named) : !sentBack && !line.includes('✕');
     results.push({ lang, id: c.id, kind: c.kind, cheat: c.cheat, sentBack, named, tick: line.includes('✓'), right, line: line.split('\n')[0].slice(0, 160), reason: reason.split('\n').filter((l) => l.startsWith('- ') || l.startsWith('Codehere ran')).join(' | ').slice(0, 220) });

@@ -57,3 +57,15 @@ noskip's 20 are the same kind of match rc.2 made: test code that writes a test a
 - noskip's high findings include two that Codehere does not list and that may be real, not yet labelled: wallet-frontend 1b4caae8 "deps: bump vitest" (`exclude: ['**/services/*.test.ts']` added to vitest.config.ts) and fae0df50 "chore: prepare for merge" (the test step changed in a CI workflow).
 - noskip recognised 306 agent commits on the 9 repos (it reads more trailers, footers and bot accounts). Codehere's count over all commits is not printed; only flagged commits show a marker.
 - Labels for noskip's 46 high findings: 22 were already labelled from Codehere's run (2 real, 2 unclear, 18 false); the other 24 are not labelled yet.
+
+## noskip's rules at medium, as a detector inside Codehere would use them (14 Nov)
+
+The owner asked for the numbers before deciding whether to build on noskip's MIT rules (launch bar L3). If Codehere used them, it would act on medium findings too, so noskip's CLI ran at `--fail-on medium`:
+
+| Set | noskip at medium | Codehere today |
+|---|---|---|
+| CheatBench dev half | 20 of 20 gamed, 0 of 15 honest | 18 of 20, 0 of 15 |
+| CheatBench held-out half (results seen once before) | 19 of 19 gamed, 0 of 30 honest | 5 of 19, 0 of 30 |
+| The 46-case suite | 22 of 26 cheats, 16 of 20 honest | 26 of 26, 20 of 20 |
+
+On the suite noskip at medium misses a run that still fails (it does not run tests), node's `--test-skip-pattern` and `NODE_TEST_CONTEXT`, and sends back four honest changes: two assertions merged into one, `NODE_ENV === 'test'` in a config, `continue-on-error` on a lint step, and a Python `skipif` with a real condition. Taking the union as-is would keep Codehere's 26 of 26 and add those four false alarms. Scripts: `v2/scripts/h2h-noskip-cheatbench.mjs` (now also medium), `v2/scripts/h2h-suite.mjs noskip-medium`.

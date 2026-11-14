@@ -119,10 +119,10 @@ codehere show <id>                      read a help card
 codehere reply <id> "answer" [--solved] answer; --solved makes a lesson
 codehere status                         what Codehere has seen
 codehere stats                          turns to green, loops stopped, context size
-codehere audit                          commits of the last 90 days that deleted, skipped or weakened tests
+codehere audit                          commits of the last 90 days to read: tests deleted, skipped or weakened
 ```
 
-`codehere audit` reads this repo's git history on your machine and sends nothing anywhere. It lists the commits that deleted a test file, skipped a test, left tests out of the test script or runner config, or removed or weakened assertions in test files, and says which ones carry an agent's marker (`Co-Authored-By` naming Claude, Copilot or Codex, `Claude-Session:`, `Agent-Logs-Url:`, Claude Code's "Generated with Claude Code" footer, or the `copilot-swe-agent[bot]` author). The count is found by pattern: read each commit before drawing a conclusion. A commit with no marker may still be an agent's, since markers can be turned off.
+`codehere audit` reads this repo's git history on your machine and sends nothing anywhere. It lists the commits that deleted a test file, skipped a test, left tests out of the test script or runner config, or removed or weakened assertions in test files, and says which ones carry an agent's marker (`Co-Authored-By` naming Claude, Copilot or Codex, `Claude-Session:`, `Agent-Logs-Url:`, Claude Code's "Generated with Claude Code" footer, or the `copilot-swe-agent[bot]` author). The count is found by pattern: read each commit before drawing a conclusion. On 12 public repos picked before measuring, about 1 in 25 listed commits had left the tests checking less; most were tests rewritten along with a changed feature ([results](docs/evidence/2026-11-13-audit-heldout-results.md)). A commit with no marker may still be an agent's, since markers can be turned off.
 
 When an agent runs `rule`, `lesson`, `help` or `reply`, the command prints a draft and saves nothing. Codehere saves it if your next message is a plain yes. Typed in your own terminal, they save at once.
 
