@@ -4,6 +4,7 @@
 //   node scripts/conformance.mjs --agent claude --model haiku
 //   node scripts/conformance.mjs --agent codex --model qwen3.5:9b-q4_K_M --oss
 //   node scripts/conformance.mjs --agent copilot --model qwen3.5:9b-q4_K_M --oss [--bin <path to copilot>]
+//   add --package <dir> to run an installed codehere, such as node_modules/codehere from npm
 //
 // Everything happens in a scratch folder: the repo, the approvals (XDG_CONFIG_HOME) and, for
 // Codex and Copilot, their own CODEX_HOME or COPILOT_HOME, so the developer's real config is
@@ -33,7 +34,7 @@ const copilotBin = flag('bin') || 'copilot';
 // that never ran `init --agent copilot`; the default installs both, to check nothing runs twice.
 const claudeHooksOnly = agent === 'copilot' && flag('hooks') === 'claude';
 if (!['claude', 'codex', 'copilot'].includes(agent) || !model) {
-  console.error('Usage: node scripts/conformance.mjs --agent claude|codex|copilot --model <model> [--oss] [--bin <path>]');
+  console.error('Usage: node scripts/conformance.mjs --agent claude|codex|copilot --model <model> [--oss] [--bin <path>] [--package <dir>]');
   process.exit(1);
 }
 
@@ -65,7 +66,9 @@ fs.mkdirSync(path.join(tmp, 'bin'));
 const calls = path.join(tmp, 'calls.tsv');
 // For Copilot, every hook call is logged with the size of what it printed: Copilot also runs the
 // Claude Code hooks, and those must print nothing. Other commands keep their terminal.
-const bin = path.join(V2, 'bin', 'codehere.js');
+// --package <dir>: an installed codehere (such as from npm) instead of this checkout
+const pkg = flag('package') ? path.resolve(flag('package')) : V2;
+const bin = path.join(pkg, 'bin', 'codehere.js');
 fs.writeFileSync(
   path.join(tmp, 'bin', 'codehere'),
   agent === 'copilot'
@@ -284,9 +287,9 @@ if (agent === 'copilot' && !claudeHooksOnly) {
 // ---------- result file ----------
 
 const today = new Date().toISOString().slice(0, 10);
-// a --bin path can name the developer's home folder: keep only the file name
-const shownArgs = args.map((a, i) => (args[i - 1] === '--bin' ? `<path>/${path.basename(a)}` : a)).join(' ');
-const build = `${JSON.parse(fs.readFileSync(path.join(V2, 'package.json'), 'utf8')).version} at ${execSync('git rev-parse --short HEAD', { cwd: V2 }).toString().trim()}${execSync('git status --porcelain -- src bin', { cwd: V2 }).toString().trim() ? ' plus uncommitted changes' : ''}`;
+// a --bin or --package path can name the developer's home folder: keep only the file name
+const shownArgs = args.map((a, i) => (args[i - 1] === '--bin' || args[i - 1] === '--package' ? `<path>/${path.basename(a)}` : a)).join(' ');
+const build = pkg !== V2 ? `${JSON.parse(fs.readFileSync(path.join(pkg, 'package.json'), 'utf8')).version}, installed from npm` : `${JSON.parse(fs.readFileSync(path.join(V2, 'package.json'), 'utf8')).version} at ${execSync('git rev-parse --short HEAD', { cwd: V2 }).toString().trim()}${execSync('git status --porcelain -- src bin', { cwd: V2 }).toString().trim() ? ' plus uncommitted changes' : ''}`;
 const name = { claude: 'Claude Code', codex: 'Codex CLI', copilot: 'Copilot CLI' }[agent];
 const lines = (t) => (t.lines ? t.lines.map((l) => `\`${l}\``).join('<br>') || 'none' : `not recorded by ${name}`);
 const md = [
