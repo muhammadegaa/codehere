@@ -60,6 +60,22 @@ Mapped so far: the claims tonight's changes touched. The rest of the README is n
 | Gemma optional, local only | the `--gemma` checks (8), e.g. "--gemma: an OLLAMA_HOST off this machine is refused before any request, with a reason" |
 | Only human-confirmed context at session start | the draft-and-yes checks (61), e.g. "E2: agent path, rule: no team file changes; one draft of that kind, printed, its id on the last line" |
 
+### "Install", "The team loop", "Commands" and "What lives where" (mapped 14 Nov against e2e at 0b95143 plus one new check)
+
+| Claim | Checks (examples) |
+|---|---|
+| `init` finds the test command, adds the hooks, asks you to approve; safe to run again | "init is idempotent"; "init --agent codex twice adds nothing"; "init --agent copilot twice adds nothing"; the approve-at-a-terminal checks |
+| With no `--agent`, `init` sets up Claude Code | "init succeeds" then "installs 5 hook events" in `.claude/settings.json`, after `init` with no `--agent` |
+| Until a teammate approves, their agent tells them at session start that the test check is off | "session start: the agent is asked to tell the developer the finish check is off until approved" |
+| `uninstall` removes the hooks, and `.codehere/` when it holds no rules, lessons, help cards or briefs | the 23 `uninstall` checks, e.g. "uninstall keeps the .gitignore line when it keeps .codehere/" |
+| Codehere runs only the approved command; a changed command is skipped and you are told | "not approved here: the command does not run, the agent is not blocked, the developer sees ⊘"; "a teammate's changed command does not run after git pull"; "agent changed the command: blocked once, config.json named" |
+| A plain yes from a fixed list saves, alone or with "please" or "thanks"; "no", "change the wording first" and "yes, save it" discard | "a plain yes saves, alone or with please or thanks; …" (added 14 Nov); the E5 discard checks |
+| A run whose summary counts a failure is a failure even at exit 0 | the 2.0.3 counts checks, e.g. "counts: the unittest FAILED line is still read" |
+| A tick in a rule or lesson reaches the agent as `[tick]` | "a team rule with a tick reaches the agent as [tick], look-alikes too"; "a lesson whose fix fakes Codehere's tick reaches the agent without it" |
+| The agent is told whether the files a fix changed have changed since | "after the fixed file changes, the agent is told" |
+| `stats` reports turns to green, loops stopped, context size | "stats: turns to green, loops stopped, size, turns to fix" |
+| `.codehere/local/` is git-ignored | "local state is git-ignored" |
+
 Not mapped to a check: the "Which agents" table's live rows rest on the linked conformance results from 27 Oct to 3 Nov (2.0.x and 2.1.0-rc.0); no live run on the 2.1.0 branch yet (launch bar L8). The "Known limits" are statements of what is not done; the two tonight's work changed are updated above.
 
 ## codehere.uk (codehere-landing, branch `main` at dad0caf, live)

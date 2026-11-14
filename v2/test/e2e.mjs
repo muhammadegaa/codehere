@@ -8,7 +8,7 @@ import { spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readOnly, runResult } from '../src/hooks.js';
 import { pickModel, summarize } from '../src/gemma.js';
-import { lowInfoPrompt, vagueFeature, testCounts, signature, failingTest, tamperFindings, tamperEvents } from '../src/signals.js';
+import { lowInfoPrompt, vagueFeature, testCounts, signature, failingTest, tamperFindings, tamperEvents, plainYes } from '../src/signals.js';
 import { printable, today, slug, saveRecord } from '../src/brain.js';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'codehere.js');
@@ -386,6 +386,10 @@ check('no Gemma installed: none', pickModel(['qwen3:8b', 'embeddinggemma:300m'],
 console.log('\n17. prompt words, English and Indonesian');
 check('short repair prompts count (en + id)', ['still broken', 'fix it', 'still error', "doesn't work", 'masih error, benerin dong', 'kenapa masih error?', 'gak jalan', 'tolong perbaiki'].every(lowInfoPrompt));
 check('thanks, confirmations, questions and pasted errors do not', !['thanks!', 'yes', 'ya', 'ok', 'ok continue', 'it works now, thanks', 'nice work', 'mantap, sudah bisa', 'why?', 'no, use postgres instead', 'great, now print the receipt', 'TypeError: x is not a function', 'expected 20 but got 10', 'fix src/cart.js'].some(lowInfoPrompt));
+// The README's examples of a reply that saves a draft, and of replies that discard it
+const savesDraft = ['yes', 'ok', 'sure', 'save it', 'go ahead', 'do it', 'Yes!', 'yes please', 'ok, thanks', 'save it thank you'];
+const discardsDraft = ['no', 'change the wording first', 'yes, save it', 'yes and also fix the bug'];
+check('a plain yes saves, alone or with please or thanks; "no", "change the wording first" and "yes, save it" do not', savesDraft.every(plainYes) && !discardsDraft.some(plainYes), [...savesDraft.filter((x) => !plainYes(x)), ...discardsDraft.filter(plainYes)].join(' | '));
 check('questions and small edits are not vague features', !['how do I add auth to this app?', 'why did you create a new api route here?', 'make sure the dashboard still loads after the change', 'make the login button blue instead of grey'].some(vagueFeature));
 check('vague feature (en + id)', vagueFeature('Buatkan aplikasi kasir untuk warung dengan laporan bulanan') && vagueFeature('Add a discount code feature to the checkout page'));
 check('vague feature, colloquial Indonesian (-in forms)', ['tambahin fitur dashboard untuk pesanan dengan grafik', 'buatin aplikasi kasir untuk warung dengan laporan bulanan', 'tolong bikinin website toko online buat jualan kue'].every((p) => vagueFeature(p)));
