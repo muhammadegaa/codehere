@@ -16,3 +16,15 @@ What each row checks: L1 the team rule is in the model's context before its firs
 Known fault in these six reports: the session table's "Tests after" for the second session was read after the third session, so it shows pass. Fixed in the harness; the ✕ lines in that row show the tests failed.
 
 Not run: Codex CLI and Copilot CLI on this branch; any agent on an npm build of 2.1.0-rc.3.
+
+## From npm: codehere 2.1.0-rc.3 (launch bar L8, Claude Code)
+
+The same harness with `--package` pointing at `codehere@2.1.0-rc.3` installed from npm into a throwaway folder (registry shasum eb391c16, `src/` byte-identical to the clone tested before publishing). Claude Code 2.1.323, model haiku, Ega's subscription login. Three runs, 11:55 to 11:58 UTC. Reports: `docs/conformance/2026-11-14-claude-2.1.323-haiku-npm-2.1.0-rc.3-run{1,2,3}.md`.
+
+| Run | L1 | L2 | L3 | L6 | L5 | Sessions (all three of each run) |
+|---|---|---|---|---|---|---|
+| 1 | PASS | PASS | PASS (3 send-backs) | PASS (✓ line 1) | PASS (✕ line 1) | d95630aa-3733-4f98-a566-a5b4ffbce310 2c0abbb7-0350-4bba-b173-28c06c142722 dedf407e-e0cf-4ec5-a86b-4314a2c98065 |
+| 2 | PASS | PASS | PASS (3 send-backs) | PASS (✓ line 1) | PASS (✕ line 1) | 5144f565-f0ed-49f7-a599-2f4fb82a5676 124a1ea6-9d51-405c-8c61-d2d4595713e2 67d1365c-4c07-42ff-88e3-fd61c24d4444 |
+| 3 | PASS | PASS | PASS (3 send-backs) | PASS (✓ line 1) | PASS (✕ line 1) | cdaf1e35-50f2-4bb8-8046-4226db79a3c1 ee40254c-2927-4ef0-9451-dd8b6422e2d8 561f258a-0ce3-4a95-bdfb-dc1af397c436 |
+
+In each run the second session's tests still failed when it ended (read as it ended, after the harness fix), and the third session's skipped test was sent back with the person's ✕ line.
