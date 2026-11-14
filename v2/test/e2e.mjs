@@ -761,20 +761,31 @@ sh('git checkout -q -- . && git clean -fdq', sam);
 // signals.js only reads ✓ in test output, so it is not searched
 check('✓ is written in exactly one place in the code: the finish line for a run made here', ['brain.js', 'hooks.js', 'commands.js', 'gemma.js'].flatMap((x) => fs.readFileSync(path.join(path.dirname(BIN), '..', 'src', x), 'utf8').split('\n').filter((l) => l.includes('✓') && !l.trim().startsWith('//') && !l.includes('.replace(/[✓')).map((l) => `${x}: ${l.trim()}`)).length === 1);
 
-// time per post-tool hook with a lesson delivered (node start included)
-const times = [];
+// Time the post-tool hook adds over a bare node start, with a lesson delivered. Each run times a bare
+// `node -e 0` and the hook back to back, in CPU time, and the check limits the difference: on a busy
+// machine both slow down together (even CPU time grows when work moves to slower cores), and the
+// clock alone failed for that (owner's choice, 14 Nov 2026). 60 ms is the old 100 ms limit less
+// about 40 ms of node start on an idle machine.
+const cpuFile = path.join(tmp, 'cpu-times');
+const cpuPreload = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'cpu-time.mjs');
+const added = [];
+const clock = [];
 for (let i = 0; i < 20; i++) {
   H('session-start', sam, { session_id: `p${i}`, hook_event_name: 'SessionStart', source: 'startup' });
+  fs.rmSync(cpuFile, { force: true });
+  spawnSync('node', ['--import', cpuPreload, '-e', '0'], { env: { ...process.env, CPU_TIME_FILE: cpuFile } });
   const t0 = process.hrtime.bigint();
-  H('post-tool', sam, { session_id: `p${i}`, hook_event_name: 'PostToolUse', ...priceError });
-  times.push(Number(process.hrtime.bigint() - t0) / 1e6);
+  spawnSync('node', ['--import', cpuPreload, BIN, 'hook', 'post-tool'], { cwd: sam, input: JSON.stringify({ cwd: sam, session_id: `p${i}`, hook_event_name: 'PostToolUse', ...priceError }), encoding: 'utf8', env: { ...process.env, CPU_TIME_FILE: cpuFile } });
+  clock.push(Number(process.hrtime.bigint() - t0) / 1e6);
+  const [bare, hook] = fs.readFileSync(cpuFile, 'utf8').trim().split('\n').map(Number);
+  if (Number.isFinite(bare) && Number.isFinite(hook)) added.push(hook - bare);
 }
-times.sort((a, b) => a - b);
-const p95 = times[Math.ceil(times.length * 0.95) - 1];
-console.log(`  post-tool with a lesson: p50 ${times[9].toFixed(0)} ms, p95 ${p95.toFixed(0)} ms`);
-// shared CI runners are slower and noisier; there the limit only catches a large slowdown
-const limit = process.env.CI ? 250 : 100;
-check(`post-tool with a lesson: p95 at most ${limit} ms`, p95 <= limit, `p95=${p95}`);
+const pct = (xs, q) => xs.slice().sort((a, b) => a - b)[Math.ceil(xs.length * q) - 1];
+const p95 = pct(added, 0.95);
+console.log(`  post-tool with a lesson: adds ${pct(added, 0.5).toFixed(0)} ms CPU at p50, ${p95.toFixed(0)} ms at p95, over a bare node start; clock p50 ${pct(clock, 0.5).toFixed(0)} ms`);
+// shared CI runners are slower; there the limit only catches a large slowdown
+const limit = process.env.CI ? 210 : 60;
+check(`post-tool with a lesson: adds at most ${limit} ms CPU at p95 over a bare node start, 20 runs`, added.length === 20 && p95 <= limit, `p95=${p95} (${added.length} runs measured)`);
 
 console.log('\n22. build 1 review: glyphs from the repo, file names, subfolders, the cap, counts');
 // a teammate's lesson file cannot put a ✓ on the developer's line
