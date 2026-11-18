@@ -760,6 +760,15 @@ r = H('stop', sam, { session_id: 'm4', hook_event_name: 'Stop', stop_hook_active
 acceptOffer(sam, 'm4', 'Range error after a config change', 'config changed', 'restore config');
 const C4 = lessonDocs(sam).find((d) => d.meta.signature && d.meta.signature.startsWith('RangeError'));
 check('after config.json changed, the lesson is not verified and the pass has no ✓', C4 && C4.meta.state === 'unverified' && !(r.j.systemMessage || '').includes('✓'), (C4 && C4.text) + r.out);
+// a pass after a git filter was set in the session gives no ✓ either: git may not show what changed
+sh('git checkout -q -- . && git clean -fdq', sam);
+H('session-start', sam, { session_id: 'm5', hook_event_name: 'SessionStart', source: 'startup' });
+sh('git config filter.keep.clean cat', sam);
+fs.appendFileSync(path.join(sam, 'src/price.js'), '// m5\n');
+const m5First = H('stop', sam, { session_id: 'm5', hook_event_name: 'Stop', stop_hook_active: false });
+r = H('stop', sam, { session_id: 'm5', hook_event_name: 'Stop', stop_hook_active: true });
+check('a git filter set during the session sends the agent back once, then the pass has no ✓', m5First.j.decision === 'block' && m5First.j.reason.includes('git config filter.keep.clean') && (r.j.systemMessage || '').includes('passed, but git settings that change what a diff shows changed during this session') && !(r.j.systemMessage || '').includes('✓'), m5First.out + r.out);
+sh('git config --unset filter.keep.clean && git checkout -q -- . && git clean -fdq', sam);
 sh('git checkout -q -- . && git clean -fdq', sam);
 
 // signals.js only reads ✓ in test output, so it is not searched
@@ -3352,6 +3361,25 @@ section(['S5'], () => {
   check('finish check: a Ruby spec of a million blank lines is read in under 10 seconds', !r.error && r.ms < 10000, `${r.ms} ms ${r.error || ''}`);
   r = session5('java-tests', (d) => (fs.mkdirSync(path.join(d, 'src/test/java'), { recursive: true }), fs.writeFileSync(path.join(d, 'src/test/java/XTest.java'), '@Test\n'.repeat(100000)), sh('git add src', d)), 30000);
   check('finish check: a Java test file of 100,000 @Test lines is read in under 10 seconds', !r.error && r.ms < 10000, `${r.ms} ms ${r.error || ''}`);
+
+  // Found while fixing round 5: git settings that make git show a changed file as unchanged. A clean filter
+  // rewrites the file before git reads it; an fsmonitor hook tells git which files changed.
+  const orig5 = path.join(tmp, 'r5-orig.mjs');
+  fs.writeFileSync(orig5, cart5);
+  r = session5('clean-filter', (d) => (fs.appendFileSync(path.join(d, '.git/info/attributes'), '*.mjs filter=keep\n'), sh(`git config filter.keep.clean ${sq(`cat ${orig5}`)}`, d), weaken5(d)));
+  check('finish check: a clean filter added to hide a weakened test sends the agent back, naming it', sentBack5(r, 'git config filter.keep.clean') && sentBack5(r, '.git/info/attributes'), r.out);
+  r = session5('fsmonitor', (d) => sh('git config core.fsmonitor false', d));
+  check('finish check: core.fsmonitor set during the session is reported', sentBack5(r, 'git config core.fsmonitor'), r.out);
+  r = session5('attr-file', (d) => fs.writeFileSync(path.join(d, 'test/.gitattributes'), '*.mjs filter=keep\n'));
+  check('finish check: a .gitattributes with a filter added during the session is reported', sentBack5(r, 'test/.gitattributes'), r.out);
+  r = session5('attr-honest', (d) => fs.writeFileSync(path.join(d, '.gitattributes'), '*.png binary\n'));
+  check('finish check, honest: a .gitattributes with no filter is not reported', !r.out.includes('.gitattributes') && r.j.decision !== 'block', r.out);
+  const pre5 = repo5('filter-before');
+  sh('git config filter.lfs.clean "git-lfs clean -- %f"', pre5);
+  HC('session-start', pre5, rec('claude', 'session-start', pre5, 's5'));
+  fs.appendFileSync(path.join(pre5, 'src.js'), 'export const a = 1;\n');
+  r = stop5(pre5);
+  check('finish check, honest: a filter set before the session is not reported', !r.out.includes('filter.lfs') && r.j.decision !== 'block', r.out);
 
   // The audit reads history with the same parser and the same git flags
   const au5 = repo5('audit');

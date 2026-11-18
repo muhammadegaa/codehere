@@ -2,6 +2,7 @@
 // Every handler fails open: if anything goes wrong, it exits 0 and the agent carries on as if
 // Codehere were not installed.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -119,11 +120,13 @@ function sessionStart(root, input, agent) {
     s.startHead = git(root, 'rev-parse HEAD') || null;
     s.baseline = dirtySnapshot(root);
     s.settings = settingsSnapshot(root);
+    s.gitSettings = gitSettingsSnapshot(root);
     s.team = teamSnapshot(root);
     s.teamHead = s.startHead;
   } else if (input.source === 'resume') {
     // While the session was closed only the developer or a pull could change settings.
     s.settings = settingsSnapshot(root);
+    s.gitSettings = gitSettingsSnapshot(root);
     s.team = teamSnapshot(root);
     s.teamHead = git(root, 'rev-parse HEAD') || null;
   }
@@ -300,6 +303,48 @@ function teamChanged(root, s) {
     return byCommit.has(nfc(f));
   };
   return diff.filter((f) => dirty.has(nfc(f)) || !committed(f)).sort();
+}
+
+// Git settings that make git show a changed file as unchanged: a clean filter rewrites a file before git
+// reads it, an fsmonitor hook tells git which files changed. Every other diff setting is overridden by
+// PLAIN_DIFF. Kept at session start, from every config scope and the attributes files outside the work tree;
+// in an attributes file only the lines that name a filter or define a macro, which can carry one.
+const FILTER_ATTR = /\bfilter\b|^\s*\[attr\]/;
+const filterLines = (text) => text.split('\n').filter((l) => FILTER_ATTR.test(l)).join('\n');
+function gitSettingsSnapshot(root) {
+  const snap = {};
+  for (const l of git(root, ['config', '--get-regexp', '^(filter\\.|core\\.fsmonitor)'], true).split('\n')) {
+    if (l) snap[`git config ${l.split(' ')[0]}`] = crypto.createHash('sha256').update(l).digest('hex');
+  }
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  const files = [git(root, ['rev-parse', '--git-path', 'info/attributes']), git(root, ['config', '--path', 'core.attributesFile']) || path.join(xdg, 'git', 'attributes')];
+  for (const f of files.filter(Boolean)) {
+    let text = null;
+    try {
+      text = readPlain(path.resolve(root, f), 'utf8', 1024 * 1024);
+    } catch {}
+    if (text != null && filterLines(text)) snap[f.startsWith('.git/') ? f : path.resolve(root, f)] = crypto.createHash('sha256').update(filterLines(text)).digest('hex');
+  }
+  return snap;
+}
+
+// The git settings above that changed since session start, and .gitattributes files changed this session
+// that name a filter.
+function gitSettingsChanged(root, s, changed) {
+  const out = [];
+  if (s.gitSettings) {
+    const now = gitSettingsSnapshot(root);
+    for (const k of new Set([...Object.keys(now), ...Object.keys(s.gitSettings)])) if (now[k] !== s.gitSettings[k]) out.push(noTick(k));
+  }
+  for (const f of changed) {
+    if (path.basename(f) !== '.gitattributes') continue;
+    let text = '';
+    try {
+      text = readPlain(path.join(root, f), 'utf8', 1024 * 1024);
+    } catch {}
+    if (filterLines(text)) out.push(noTick(f));
+  }
+  return out.sort();
 }
 
 function settingsChanged(root, s) {
@@ -931,7 +976,8 @@ function stop(root, input) {
   const listed = changedThisSession(root, s);
   const blind = listed == null; // git could not list the changes: never read that as "nothing changed"
   const changed = listed || [];
-  const settings = settingsChanged(root, s);
+  const gitSettings = gitSettingsChanged(root, s, changed);
+  const settings = [...settingsChanged(root, s), ...gitSettings];
   const removed = removedAt(root);
   const team = teamChanged(root, s);
   if (!blind && !changed.length && !settings.length && !removed && !team.length) quiet(); // the agent changed nothing this session: stay silent
@@ -1017,7 +1063,7 @@ function stop(root, input) {
     writeState(root, state);
     sendAgentBack(
       [
-        'Codehere settings or hook settings changed during this session:',
+        'Codehere, hook or git settings changed during this session:',
         ...settings.map((f) => `- ${f}`),
         'If you changed them and the user did not ask for it, undo your change.',
         'Then tell the user in one line what changed and why, and finish.',
@@ -1068,10 +1114,11 @@ function stop(root, input) {
     }
     // ✓ only for intact evidence (DESIGN.md §1): not after a weakened test, nor after the
     // config that names the test command changed.
-    proven = !findings.length && !configChanged && !unread;
+    proven = !findings.length && !configChanged && !unread && !gitSettings.length;
     if (findings.length) passLine = `codehere ✕ ${cmd} passed, but a check was weakened · ${noTick(findings.join(' · '))}`;
     else if (configChanged) passLine = `codehere ✕ ${cmd} passed, but .codehere/config.json changed during this session`;
     else if (unread) passLine = `codehere ✕ ${cmd} passed, but this session's diff could not be read · weakened tests not checked`;
+    else if (gitSettings.length) passLine = `codehere ✕ ${cmd} passed, but git settings that change what a diff shows changed during this session`;
     else passLine = `codehere ✓ ${cmd} · ${runResult(t)} · re-run here · ${t.seconds.toFixed(1)} s`;
     if (proven) {
       state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };
