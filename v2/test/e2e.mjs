@@ -1300,6 +1300,27 @@ r = HC('stop', kai, cop('stop', kai, 'p10'), 'copilot');
 check('Copilot session: a new hook file next to Codehere\'s is reported (Copilot runs them all)', r.j.decision === 'block' && r.j.reason.includes('- .github/hooks/'), r.out);
 fs.rmSync(path.join(kai, '.github/hooks/zz.json'));
 sh('git checkout -q -- src/price.js', kai);
+// A linked .github/hooks/ folder is followed on purpose: Copilot loads hooks through the link, so an
+// edit through it must still be caught. The reads stay bounded, so a FIFO or /dev/zero there cannot hang.
+const kaiHooks = path.join(kai, '.github/hooks');
+const linkedHooks = path.join(tmp, 'kai-linked-hooks');
+fs.renameSync(kaiHooks, linkedHooks);
+fs.symlinkSync(linkedHooks, kaiHooks);
+HC('session-start', kai, cop('session-start', kai, 'p12'), 'copilot');
+fs.writeFileSync(path.join(linkedHooks, 'codehere.json'), JSON.stringify({ version: 1, hooks: {} }));
+fs.appendFileSync(path.join(kai, 'src/price.js'), '// kai\n');
+r = HC('stop', kai, cop('stop', kai, 'p12'), 'copilot');
+check('Copilot session: an edit through a linked .github/hooks/ folder is still caught', r.j.decision === 'block' && r.j.reason.includes('- .github/hooks/'), r.out);
+fs.writeFileSync(path.join(linkedHooks, 'codehere.json'), kaiCopilotText);
+sh('git checkout -q -- src/price.js', kai);
+fs.symlinkSync('/dev/zero', path.join(linkedHooks, 'zero.json'));
+execSync(`mkfifo '${path.join(linkedHooks, 'pipe.json')}'`);
+const linkedRun = (event, id) => !spawnSync('node', [BIN, 'hook', event, '--agent', 'copilot'], { cwd: kai, input: JSON.stringify(cop(event, kai, id)), encoding: 'utf8', timeout: 10000, env: { ...process.env, COPILOT_CLI: '' } }).error;
+check('no hook hangs on /dev/zero or a FIFO inside a linked .github/hooks/ folder', linkedRun('session-start', 'p13') && linkedRun('stop', 'p13'));
+fs.unlinkSync(kaiHooks);
+fs.rmSync(path.join(linkedHooks, 'zero.json'));
+fs.rmSync(path.join(linkedHooks, 'pipe.json'));
+fs.renameSync(linkedHooks, kaiHooks);
 HC('session-start', kai, cop('session-start', kai, 'p11'), 'copilot');
 fs.mkdirSync(path.join(kai, '.github/copilot'), { recursive: true });
 fs.writeFileSync(path.join(kai, '.github/copilot/settings.local.json'), JSON.stringify({ model: 'some-model' }));
