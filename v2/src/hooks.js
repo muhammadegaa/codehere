@@ -428,7 +428,7 @@ function bindDraft(root, input, command, text) {
   const exact = !!file && fs.existsSync(path.dirname(file)) && fs.readdirSync(path.dirname(file)).includes(`${m[1]}.json`);
   const rel = path.relative(root, file || '').toLowerCase();
   const tracked = git(root, ['ls-files', '-z']).split('\0').some((x) => x.toLowerCase() === rel); // .CODEHERE/... too
-  if (!callOk || !exact || tracked) return 'refused';
+  if (!callOk || !exact || tracked || !ownPath(root, file)) return 'refused';
   const content = readPlain(file, null);
   let rec = null;
   try {
@@ -685,6 +685,7 @@ function decideDrafts(root, state, s, prompt) {
   let proofBack = null;
   for (const d of bound) {
     const file = draftFile(root, d.id);
+    if (!ownPath(root, file)) continue;
     // Taken by a rename, which only one of two hooks running at the same moment can win (two unlinks
     // of one file both succeeded in a test on macOS); the other finds it gone and saves nothing.
     let content = null;

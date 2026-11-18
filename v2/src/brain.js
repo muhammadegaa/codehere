@@ -57,6 +57,13 @@ const DEFAULT_CONFIG = {
 // final link and without blocking, checked on the open file, and read up to max bytes: a linked
 // folder can still reach a file such as /proc/self/pagemap, which says it is plain and never ends.
 // encoding null gives a Buffer.
+// A teammate can commit .codehere/ or a folder in it as a link to a folder outside the repo (git keeps
+// links), so a brain file is read only when no part of its path below root is a link.
+export function readOwn(root, file, encoding, max) {
+  if (!ownPath(root, file)) throw Object.assign(new Error(`linked path: ${file}`), { code: 'ENOTPLAIN' });
+  return readPlain(file, encoding, max);
+}
+
 export function readPlain(file, encoding = 'utf8', max = 8 * 1024 * 1024) {
   const notPlain = () => Object.assign(new Error(`not a plain file: ${file}`), { code: 'ENOTPLAIN' });
   let fd;
@@ -82,7 +89,7 @@ export function readPlain(file, encoding = 'utf8', max = 8 * 1024 * 1024) {
 export function readConfig(root) {
   const p = paths(root);
   try {
-    return { ...DEFAULT_CONFIG, ...JSON.parse(readPlain(p.config)) };
+    return { ...DEFAULT_CONFIG, ...JSON.parse(readOwn(root, p.config)) };
   } catch {
     return { ...DEFAULT_CONFIG };
   }
@@ -96,7 +103,7 @@ export function writeConfig(root, cfg) {
 
 export function readState(root) {
   try {
-    const state = JSON.parse(readPlain(paths(root).state));
+    const state = JSON.parse(readOwn(root, paths(root).state));
     // state.json can arrive through git: a file of the wrong shape counts as empty
     if (state && state.sessions && typeof state.sessions === 'object') return state;
   } catch {}
@@ -174,7 +181,7 @@ export function renderDoc(meta, body) {
 }
 
 export function listDocs(dir) {
-  if (!fs.existsSync(dir)) return [];
+  if (!fs.existsSync(dir) || !ownPath(path.dirname(path.dirname(dir)), dir)) return []; // dir is <root>/.codehere/<folder>
   return fs
     .readdirSync(dir)
     .filter((f) => f.endsWith('.md'))
@@ -216,7 +223,7 @@ export function readRules(root) {
   const file = paths(root).rules;
   let text = '';
   try {
-    text = readPlain(file);
+    text = readOwn(root, file);
   } catch {
     return [];
   }

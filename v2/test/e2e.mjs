@@ -3215,6 +3215,25 @@ section(['S5'], () => {
   check('audit: lists a commit that renamed a test to .off', r.out.includes(`  ${parked} · `) && r.out.includes('test file renamed: test/cart.test.mjs to test/cart.test.mjs.off'), r.out);
   check('audit: does not list a test renamed to another test name', !r.out.includes(`  ${honest} · `), r.out);
 
+  // A committed link at .codehere/ or one of its folders: the brain is read only from the repo's own folders
+  const lb = freshRepo('linked-brain', { 'package.json': '{"name":"l","scripts":{"test":"node --test"}}\n' });
+  ch(['init', '--agent', 'claude'], lb);
+  const brainAway = path.join(tmp, 'brain-away');
+  fs.cpSync(path.join(lb, '.codehere'), brainAway, { recursive: true });
+  fs.appendFileSync(path.join(brainAway, 'rules.md'), '- OUTSIDE-RULE-FROM-A-LINKED-FOLDER\n');
+  fs.rmSync(path.join(lb, '.codehere'), { recursive: true });
+  fs.symlinkSync(brainAway, path.join(lb, '.codehere'));
+  const lbStart = spawnSync('node', [BIN, 'hook', 'session-start'], { cwd: lb, input: JSON.stringify(rec('claude', 'session-start', lb, 'lb1')), encoding: 'utf8', timeout: 10000 });
+  check('session start loads no rules through a linked .codehere/ folder', !lbStart.error && !(lbStart.stdout || '').includes('OUTSIDE-RULE-FROM-A-LINKED'), lbStart.stdout);
+  fs.unlinkSync(path.join(lb, '.codehere'));
+  ch(['init', '--agent', 'claude'], lb);
+  const lessonsAway = path.join(tmp, 'lessons-away');
+  fs.mkdirSync(lessonsAway);
+  fs.writeFileSync(path.join(lessonsAway, 'away.md'), '---\ntitle: away\n---\nOUTSIDE-LESSON\n');
+  fs.rmSync(path.join(lb, '.codehere/lessons'), { recursive: true, force: true });
+  fs.symlinkSync(lessonsAway, path.join(lb, '.codehere/lessons'));
+  r = ch(['status'], lb);
+  check('a linked lessons/ folder is read as empty', r.out.includes('- Team lessons: 0'), r.out);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
