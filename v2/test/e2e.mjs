@@ -3380,6 +3380,15 @@ section(['S5'], () => {
   fs.appendFileSync(path.join(pre5, 'src.js'), 'export const a = 1;\n');
   r = stop5(pre5);
   check('finish check, honest: a filter set before the session is not reported', !r.out.includes('filter.lfs') && r.j.decision !== 'block', r.out);
+  // the attributes file swapped for a link, routing tests through a filter that was already there
+  const link5 = repo5('attr-link');
+  sh(`git config filter.keep.clean ${sq(`cat ${orig5}`)}`, link5);
+  HC('session-start', link5, rec('claude', 'session-start', link5, 's5'));
+  fs.writeFileSync(path.join(tmp, 'r5-attrs'), '*.mjs filter=keep\n');
+  fs.symlinkSync(path.join(tmp, 'r5-attrs'), path.join(link5, '.git/info/attributes'));
+  weaken5(link5);
+  r = stop5(link5);
+  check('finish check: .git/info/attributes replaced by a link during the session is reported', sentBack5(r, '.git/info/attributes'), r.out);
 
   // The audit reads history with the same parser and the same git flags
   const au5 = repo5('audit');

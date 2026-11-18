@@ -319,11 +319,14 @@ function gitSettingsSnapshot(root) {
   const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   const files = [git(root, ['rev-parse', '--git-path', 'info/attributes']), git(root, ['config', '--path', 'core.attributesFile']) || path.join(xdg, 'git', 'attributes')];
   for (const f of files.filter(Boolean)) {
+    // git follows a link here, which readPlain does not: a link counts by its target, so swapping one in is seen
     let text = null;
     try {
-      text = readPlain(path.resolve(root, f), 'utf8', 1024 * 1024);
-    } catch {}
-    if (text != null && filterLines(text)) snap[f.startsWith('.git/') ? f : path.resolve(root, f)] = crypto.createHash('sha256').update(filterLines(text)).digest('hex');
+      text = filterLines(readPlain(path.resolve(root, f), 'utf8', 1024 * 1024));
+    } catch (e) {
+      if (e.code === 'ENOTPLAIN') text = `not a plain file: ${fs.lstatSync(path.resolve(root, f)).isSymbolicLink() ? fs.readlinkSync(path.resolve(root, f)) : ''}`;
+    }
+    if (text) snap[f.startsWith('.git/') ? f : path.resolve(root, f)] = crypto.createHash('sha256').update(text).digest('hex');
   }
   return snap;
 }
