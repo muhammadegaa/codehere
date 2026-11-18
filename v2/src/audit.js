@@ -5,6 +5,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import readline from 'node:readline';
 import { printable, hasGit } from './brain.js';
 import { tamperEvents, isTestFile, isTestConfig } from './signals.js';
+import { unquotePath } from './gitpath.js';
 
 const DAYS = 90;
 const KINDS = new Set(['test-deleted', 'test-skipped', 'assertion-weakened']);
@@ -55,7 +56,13 @@ function commitsSince(root, since) {
 }
 
 // The path in `diff --git a/P b/P` when both sides name the same file, as they do for a deletion.
+// Git quotes both sides of a path it escapes: diff --git "a/caf\303\251.js" "b/caf\303\251.js".
 function samePath(line) {
+  const q = /^diff --git ("(?:[^"\\]|\\.)*") ("(?:[^"\\]|\\.)*")$/.exec(line);
+  if (q) {
+    const [a, b] = [unquotePath(q[1]), unquotePath(q[2])];
+    return a.startsWith('a/') && b === `b/${a.slice(2)}` ? a.slice(2) : '';
+  }
   const rest = line.slice('diff --git a/'.length);
   const half = (rest.length - ' b/'.length) / 2;
   return Number.isInteger(half) && rest.slice(half, half + 3) === ' b/' ? rest.slice(0, half) : '';
@@ -96,11 +103,11 @@ function scanChanges(root, since, bySha) {
         return;
       }
       if (line.startsWith('rename from ')) {
-        renamedFrom = line.slice('rename from '.length);
+        renamedFrom = unquotePath(line.slice('rename from '.length));
         return;
       }
       if (line.startsWith('rename to ')) {
-        if (isTestFile(renamedFrom)) nameStatus.push(`R\t${renamedFrom}\t${line.slice('rename to '.length)}`);
+        if (isTestFile(renamedFrom)) nameStatus.push(`R\t${renamedFrom}\t${unquotePath(line.slice('rename to '.length))}`);
         renamedFrom = '';
         return;
       }
@@ -111,7 +118,7 @@ function scanChanges(root, since, bySha) {
         return;
       }
       if (line.startsWith('+++ ')) {
-        const file = line.replace(/^\+\+\+ (b\/)?/, '');
+        const file = unquotePath(line.slice(4)).replace(/^b\//, '');
         keep = file !== '/dev/null' && (isTestFile(file) || isTestConfig(file));
         if (keep) kept.push(`+++ ${file}`);
         return;

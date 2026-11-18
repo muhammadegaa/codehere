@@ -25,6 +25,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+import { unquotePath } from './gitpath.js';
+
 // ---------- helpers (noskip src/util.js) ----------
 
 const normalizeLine = (text) => text.trim().replace(/\s+/g, ' ');
@@ -427,11 +429,11 @@ function parseDiff(diff) {
       continue;
     }
     if (line.startsWith('--- ') && !h) {
-      from = line.slice(4).replace(/^a\//, '');
+      from = unquotePath(line.slice(4)).replace(/^a\//, '');
       continue;
     }
     if (line.startsWith('+++ ') && !h) {
-      const to = line.slice(4).replace(/^b\//, '');
+      const to = unquotePath(line.slice(4)).replace(/^b\//, '');
       f = { path: to === '/dev/null' ? from : to, status: from === '/dev/null' ? 'A' : to === '/dev/null' ? 'D' : 'M', hunks: [], removed: [], added: [] };
       files.push(f);
       continue;

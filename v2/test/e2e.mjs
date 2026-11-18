@@ -3215,6 +3215,19 @@ section(['S5'], () => {
   check('audit: lists a commit that renamed a test to .off', r.out.includes(`  ${parked} · `) && r.out.includes('test file renamed: test/cart.test.mjs to test/cart.test.mjs.off'), r.out);
   check('audit: does not list a test renamed to another test name', !r.out.includes(`  ${honest} · `), r.out);
 
+  // Git writes a non-ASCII path quoted and escaped ("test/caf\303\251.test.mjs"); it is still the same test (Codex L13 round 3)
+  const qt = freshRepo('quoted-test', { 'package.json': '{"name":"q","scripts":{"test":"node --test test/"}}\n', 'test/café.test.mjs': cartTest, 'test/other.test.mjs': "import test from 'node:test';\ntest('ok', () => {});\n" });
+  ch(['init', '--agent', 'claude'], qt);
+  sh('git add -A && git commit -qm init', qt);
+  HC('session-start', qt, rec('claude', 'session-start', qt, 'qt1'));
+  sh('git rm -q test/café.test.mjs', qt);
+  r = HC('stop', qt, rec('claude', 'stop', qt, 'qt1', { stop_hook_active: false }));
+  check('finish check: deleting a test with a non-ASCII name sends the agent back', r.j.decision === 'block' && r.j.reason.includes('test file deleted: test/café.test.mjs'), r.out);
+  sh('git commit -qm "drop the café test"', qt);
+  const dropped = sh('git rev-parse --short=8 HEAD', qt).trim();
+  r = ch(['audit'], qt);
+  check('audit: lists a deleted test with a non-ASCII name, by its real name', r.out.includes(`  ${dropped} · `) && r.out.includes('test file deleted: test/café.test.mjs') && !r.out.includes('\\303'), r.out);
+
   // A committed link at .codehere/ or one of its folders: the brain is read only from the repo's own folders
   const lb = freshRepo('linked-brain', { 'package.json': '{"name":"l","scripts":{"test":"node --test"}}\n' });
   ch(['init', '--agent', 'claude'], lb);

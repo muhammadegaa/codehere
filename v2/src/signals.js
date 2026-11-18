@@ -1,5 +1,6 @@
 // Deterministic signals. No AI in the decision path.
 import { testChanges } from './noskip.js';
+import { unquotePath } from './gitpath.js';
 
 const ERROR_LINE =
   /(error|exception|traceback|failed|failure|fatal|cannot|can't|not found|undefined is not|is not defined|is not a function|segmentation fault|ERR!|panic:|denied|refused|unexpected token|syntaxerror|typeerror|referenceerror|modulenotfound|no such file)/i;
@@ -429,7 +430,7 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
   };
   const ext = (f) => (f.match(/\.[^./]+$/) || [''])[0];
   for (const line of nameStatus.split('\n')) {
-    const [status, file, to] = line.split('\t');
+    const [status, file, to] = line.split('\t').map(unquotePath);
     if (status === 'D' && file && isTestFile(file)) add(DELETED, file, `test file deleted: ${file}`);
     // a rename to a name that is not a test file, or to another extension (.off, .bak), hides the test
     if (/^R\d*$/.test(status) && to && isTestFile(file) && (!isTestFile(to) || ext(to) !== ext(file))) add(DELETED, file, `test file renamed: ${file} to ${to}`);
@@ -454,7 +455,7 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
   let hadFilters = new Set(); // options that left tests out before this session
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ ')) {
-      current = line.replace(/^\+\+\+ (b\/)?/, '');
+      current = unquotePath(line.slice(4)).replace(/^b\//, '');
       removed = new Set();
       removedShapes = new Map();
       removedValueChecks = new Map();
