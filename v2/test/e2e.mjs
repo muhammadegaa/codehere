@@ -3183,6 +3183,40 @@ section(['S6'], () => {
   resetRepo(zed);
 });
 
+section(['S5'], () => {
+  // A test renamed so the runner no longer picks it up hides it as well as deleting it (Codex L13 round 2).
+  const cartTest = "import test from 'node:test'; import assert from 'node:assert';\ntest('qty', () => assert.equal(2 * 3, 6));\n";
+  const rn = freshRepo('rename-test', { 'package.json': '{"name":"r","scripts":{"test":"node --test test/"}}\n', 'test/cart.test.mjs': cartTest, 'test/other.test.mjs': "import test from 'node:test';\ntest('ok', () => {});\n", 'src/cart.js': 'export const total = 1;\n' });
+  ch(['init', '--agent', 'claude'], rn);
+  sh('git add -A && git commit -qm init', rn);
+  const renamed = (sid, move, commit = false) => {
+    sh('git reset -q --hard HEAD', rn);
+    HC('session-start', rn, rec('claude', 'session-start', rn, sid));
+    fs.appendFileSync(path.join(rn, 'src/cart.js'), '// edit\n');
+    sh(`${move}${commit ? ' && git commit -qam moved' : ''}`, rn);
+    const x = HC('stop', rn, rec('claude', 'stop', rn, sid, { stop_hook_active: false }));
+    if (commit) sh('git reset -q --hard HEAD~1', rn);
+    return x;
+  };
+  r = renamed('rn1', 'git mv test/cart.test.mjs test/cart.test.mjs.off');
+  check('finish check: a test renamed to .off sends the agent back', r.j.decision === 'block' && r.j.reason.includes('test file renamed: test/cart.test.mjs to test/cart.test.mjs.off'), r.out);
+  r = renamed('rn2', 'git mv test/cart.test.mjs src/cart-check.mjs');
+  check('finish check: a test moved out of the test files sends the agent back', r.j.decision === 'block' && r.j.reason.includes('test file renamed: test/cart.test.mjs to src/cart-check.mjs'), r.out);
+  r = renamed('rn3', 'git mv test/cart.test.mjs test/cart.test.mjs.off', true);
+  check('finish check: a test renamed to .off in a commit this session sends the agent back', r.j.decision === 'block' && r.j.reason.includes('test file renamed: test/cart.test.mjs to test/cart.test.mjs.off'), r.out);
+  r = renamed('rn4', 'git mv test/cart.test.mjs test/cart.spec.mjs');
+  check('finish check: a test renamed to another test name is not reported', !(r.out || '').includes('test file renamed'), r.out);
+  sh('git reset -q --hard HEAD', rn);
+  sh('git mv test/cart.test.mjs test/cart.test.mjs.off && git commit -qm "park cart test"', rn);
+  const parked = sh('git rev-parse --short=8 HEAD', rn).trim();
+  sh('git mv test/other.test.mjs test/other.spec.mjs && git commit -qm "rename other"', rn);
+  const honest = sh('git rev-parse --short=8 HEAD', rn).trim();
+  r = ch(['audit'], rn);
+  check('audit: lists a commit that renamed a test to .off', r.out.includes(`  ${parked} · `) && r.out.includes('test file renamed: test/cart.test.mjs to test/cart.test.mjs.off'), r.out);
+  check('audit: does not list a test renamed to another test name', !r.out.includes(`  ${honest} · `), r.out);
+
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

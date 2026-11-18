@@ -364,7 +364,10 @@ export function statusFiles(root) {
     const e = entries[i];
     if (e.length < 4) continue;
     if (e.slice(3).startsWith(prefix)) files.push(e.slice(3 + prefix.length));
-    if (e[0] === 'R' || e[0] === 'C') i++; // the old name of a rename or copy
+    if (e[0] === 'R' || e[0] === 'C') {
+      const old = entries[++i] || ''; // the old name of a rename or copy
+      if (e[0] === 'R' && old.startsWith(prefix)) files.push(old.slice(prefix.length)); // a rename changed the old path too
+    }
   }
   return files;
 }

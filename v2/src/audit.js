@@ -76,6 +76,7 @@ function scanChanges(root, since, bySha) {
     let kept = [];
     let keep = false;
     let deleted = '';
+    let renamedFrom = '';
     const finish = () => {
       if (commit) commit.events = tamperEvents(nameStatus.join('\n'), kept.join('\n')).filter((e) => KINDS.has(e.kind));
     };
@@ -92,6 +93,15 @@ function scanChanges(root, since, bySha) {
       if (line.startsWith('diff --git ')) {
         keep = false;
         deleted = samePath(line);
+        return;
+      }
+      if (line.startsWith('rename from ')) {
+        renamedFrom = line.slice('rename from '.length);
+        return;
+      }
+      if (line.startsWith('rename to ')) {
+        if (isTestFile(renamedFrom)) nameStatus.push(`R\t${renamedFrom}\t${line.slice('rename to '.length)}`);
+        renamedFrom = '';
         return;
       }
       if (line.startsWith('deleted file mode')) {

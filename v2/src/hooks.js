@@ -214,7 +214,7 @@ function changedThisSession(root, s) {
     }
   }
   if (commitId(s.startHead)) {
-    git(root, ['diff', s.startHead, 'HEAD', '--name-only', '--relative', '-z'], true)
+    git(root, ['diff', s.startHead, 'HEAD', '--name-only', '--no-renames', '--relative', '-z'], true)
       .split('\0')
       .filter((f) => f && !IGNORE(f))
       .forEach((f) => changed.add(f));

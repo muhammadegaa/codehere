@@ -427,9 +427,12 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
     seen.add(why);
     events.push({ kind, file, why });
   };
+  const ext = (f) => (f.match(/\.[^./]+$/) || [''])[0];
   for (const line of nameStatus.split('\n')) {
-    const [status, file] = line.split(/\s+/);
+    const [status, file, to] = line.split('\t');
     if (status === 'D' && file && isTestFile(file)) add(DELETED, file, `test file deleted: ${file}`);
+    // a rename to a name that is not a test file, or to another extension (.off, .bak), hides the test
+    if (/^R\d*$/.test(status) && to && isTestFile(file) && (!isTestFile(to) || ext(to) !== ext(file))) add(DELETED, file, `test file renamed: ${file} to ${to}`);
   }
   let current = '';
   let removedAsserts = 0;
