@@ -339,33 +339,58 @@ export function printable(text) {
 
 // ---------- git helpers (all fail-safe) ----------
 
-// Pass an array whenever an argument comes from the repo or the state file: it never
-// goes through a shell, so a file name such as a$(cmd).js stays a file name.
+const BIG = 512 * 1024 * 1024;
+
+// diff and log output as plain text whatever the repo's config or attributes ask for: no color, no external
+// diff program, no textconv, no "Binary files differ", and a/ b/ prefixes. The agent can change all of these
+// in .git/config or .git/info/attributes (cold review, L13 round 5).
+export const PLAIN_DIFF = ['--no-color', '--no-ext-diff', '--no-textconv', '--text', '--src-prefix=a/', '--dst-prefix=b/'];
+
+// Every git call with arguments from the repo or the state file: an array never goes through a shell, so a
+// file name such as a$(cmd).js stays a file name. The output is read whole, and null when git fails, so an
+// unread answer never looks like an empty one.
+export function gitRead(root, args, input) {
+  const [cmd, ...rest] = args;
+  try {
+    const all = ['--literal-pathspecs', cmd, ...(cmd === 'diff' || cmd === 'log' ? PLAIN_DIFF : []), ...rest];
+    return execFileSync('git', all, { cwd: root, input, stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'ignore'], maxBuffer: BIG }).toString();
+  } catch {
+    return null;
+  }
+}
+
+// gitRead with paths after "--", in batches: one argument list holds about 1 MiB on macOS, and a session can
+// change tens of thousands of files (an npm install into a node_modules that is not ignored). Null when a batch fails.
+export function gitPaths(root, args, paths) {
+  let out = '';
+  for (let i = 0; i < paths.length; ) {
+    let j = i;
+    for (let bytes = 0; j < paths.length && (j === i || bytes < 256 * 1024); j++) bytes += Buffer.byteLength(paths[j]) + 1;
+    const part = gitRead(root, [...args, '--', ...paths.slice(i, j)]);
+    if (part == null) return null;
+    out += part;
+    i = j;
+  }
+  return out;
+}
+
 // raw keeps the output as git wrote it: -z lists, and porcelain lines whose first character is a space.
+// '' when git fails; a string is for fixed commands only.
 export function git(root, args, raw = false) {
   try {
-    const opts = { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] };
-    const out = (Array.isArray(args) ? execFileSync('git', ['--literal-pathspecs', ...args], opts) : execSync(`git ${args}`, opts)).toString();
+    const out = Array.isArray(args) ? (gitRead(root, args) ?? '') : execSync(`git ${args}`, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
     return raw ? out : out.trim();
   } catch {
     return '';
   }
 }
 
-// A diff can be far larger than execFileSync's 1 MiB default, and an unread diff must never look
-// like an empty one: this reads it whole and returns null when git fails.
-export function gitDiff(root, args) {
-  try {
-    return execFileSync('git', ['--literal-pathspecs', ...args], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 512 * 1024 * 1024 }).toString();
-  } catch {
-    return null;
-  }
-}
-
-// Files with uncommitted changes, relative to root, which may be a subfolder of the repo.
+// Files with uncommitted changes, relative to root, which may be a subfolder of the repo. Null when git fails.
 export function statusFiles(root) {
   const prefix = git(root, ['rev-parse', '--show-prefix']);
-  const entries = git(root, ['status', '--porcelain', '-z', '--untracked-files=all', '--', '.'], true).split('\0');
+  const out = gitRead(root, ['status', '--porcelain', '-z', '--untracked-files=all', '--', '.']);
+  if (out == null) return null;
+  const entries = out.split('\0');
   const files = [];
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
@@ -384,17 +409,10 @@ export function statusFiles(root) {
 // --stdin-paths ignores the subfolder git was started in.
 export function gitHashes(root, files) {
   const present = files.filter((f) => !f.includes('\n') && fs.existsSync(path.join(root, f)));
-  let out = [];
-  try {
-    if (present.length) {
-      out = execFileSync('git', ['hash-object', '--stdin-paths'], { cwd: root, input: present.map((f) => path.resolve(root, f)).join('\n') + '\n', stdio: ['pipe', 'pipe', 'ignore'] })
-        .toString()
-        .trim()
-        .split('\n');
-    }
-  } catch {}
+  const out = present.length ? (gitRead(root, ['hash-object', '--stdin-paths'], present.map((f) => path.resolve(root, f)).join('\n') + '\n') ?? '').trim().split('\n') : [];
+  const at = new Map(present.map((f, i) => [f, i]));
   return files.map((f) => {
-    const i = present.indexOf(f);
+    const i = at.get(f) ?? -1;
     if (i >= 0) return out[i] || null;
     return f.includes('\n') ? null : 'deleted';
   });
@@ -541,7 +559,7 @@ export function teamSnapshot(root) {
 
 // Before a save: the team files' hashes, and which files git sees as changed.
 export function teamMark(root) {
-  return { hashes: teamSnapshot(root), dirty: new Set(statusFiles(root).map((f) => f.normalize('NFC'))) };
+  return { hashes: teamSnapshot(root), dirty: new Set((statusFiles(root) || []).map((f) => f.normalize('NFC'))) };
 }
 
 // A save Codehere made is not the agent's change: what it changed moves into the session's

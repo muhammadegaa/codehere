@@ -3249,6 +3249,130 @@ section(['S5'], () => {
   check('a linked lessons/ folder is read as empty', r.out.includes('- Team lessons: 0'), r.out);
 });
 
+section(['S5'], () => {
+  // The cold review's round 5 (docs/reviews/2026-11-18-cold-review-round-5.md): each case is a probe from
+  // 2026-11-18-round-5-probe.sh, run through the finish check as an agent would meet it.
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart5 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const edit5 = (dir, f, fn) => fs.writeFileSync(path.join(dir, f), fn(fs.readFileSync(path.join(dir, f), 'utf8')));
+  const weaken5 = (dir) => edit5(dir, 'test/cart.test.mjs', (t) => t.replace(THREE, ''));
+  const repo5 = (name) => {
+    const dir = freshRepo(`r5-${name}`, { 'package.json': '{"name":"p","scripts":{"test":"node --test test/"}}\n', 'test/cart.test.mjs': cart5 });
+    ch(['init', '--agent', 'claude'], dir);
+    sh('git add -A && git commit -qm init', dir);
+    return dir;
+  };
+  const stop5 = (dir, timeout = 60000) => {
+    const t0 = Date.now();
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, 's5', { stop_hook_active: false })), encoding: 'utf8', timeout, maxBuffer: 64 * 1024 * 1024 });
+    let j = {};
+    try {
+      j = x.stdout ? JSON.parse(x.stdout) : {};
+    } catch {}
+    return { out: x.stdout || '', j, error: x.error, ms: Date.now() - t0 };
+  };
+  const session5 = (name, change, timeout) => {
+    const dir = repo5(name);
+    HC('session-start', dir, rec('claude', 'session-start', dir, 's5'));
+    change(dir);
+    return stop5(dir, timeout);
+  };
+  const sentBack5 = (x, why) => x.j.decision === 'block' && x.j.reason.includes(why);
+  r = session5('control', weaken5);
+  check('round 5 control: deleting three assertions sends the agent back', sentBack5(r, '3 assertions removed'), r.out);
+
+  // F2: the repo's git config or attributes changed how the diff reads
+  r = session5('no-diff', (d) => (fs.appendFileSync(path.join(d, '.git/info/attributes'), '*.mjs -diff\n'), weaken5(d)));
+  check('finish check: assertions deleted after marking .mjs files -diff still send the agent back', sentBack5(r, '3 assertions removed'), r.out);
+  r = session5('color', (d) => (sh('git config color.diff always', d), weaken5(d)));
+  check('finish check: assertions deleted with color.diff always still send the agent back', sentBack5(r, '3 assertions removed'), r.out);
+  const ran5 = path.join(tmp, 'r5-ext-diff-ran');
+  const extDiff = path.join(tmp, 'r5-ext-diff.sh');
+  fs.writeFileSync(extDiff, `#!/bin/sh\ntouch ${sq(ran5)}\n`, { mode: 0o755 });
+  r = session5('ext-diff', (d) => (sh(`git config diff.external ${sq(extDiff)}`, d), weaken5(d)));
+  check('finish check: an external diff program set in the repo is not run, and the deleted assertions are seen', sentBack5(r, '3 assertions removed') && !fs.existsSync(ran5), `${r.out} ran: ${fs.existsSync(ran5)}`);
+  const blank5 = path.join(tmp, 'r5-textconv.sh');
+  fs.writeFileSync(blank5, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  r = session5('textconv', (d) => (fs.appendFileSync(path.join(d, '.git/info/attributes'), '*.mjs diff=blank\n'), sh(`git config diff.blank.textconv ${sq(blank5)}`, d), weaken5(d)));
+  check('finish check: a textconv that blanks test files does not hide deleted assertions', sentBack5(r, '3 assertions removed'), r.out);
+
+  // F3: an added line "++ n;" is "+++ n;" in the diff, which is not a file header inside a hunk
+  r = session5('plusplus', (d) => edit5(d, 'test/cart.test.mjs', (t) => t.replace("describe('cart', () => {\n", "let n = 0;\n++ n;\n\n\n\ndescribe('cart', () => {\n").replace(THREE, '')));
+  check('finish check: an added "++ n;" line does not hide assertions deleted below it', sentBack5(r, '3 assertions removed'), r.out);
+  const mm5 = repo5('minusminus');
+  edit5(mm5, 'test/cart.test.mjs', (t) => `const seed = \`\n-- seed\nSELECT 1;\n\`;\n${t}`);
+  sh('git commit -qam seed', mm5);
+  HC('session-start', mm5, rec('claude', 'session-start', mm5, 's5'));
+  edit5(mm5, 'test/cart.test.mjs', (t) => t.replace('-- seed\n', '').replace("describe('cart', () => {\n", "++ n;\ndescribe('cart', () => {\n").replace(THREE, ''));
+  r = stop5(mm5);
+  check('finish check: a removed "-- seed" line ("--- seed" in the diff) is read as a line, not a file header', sentBack5(r, '3 assertions removed'), r.out);
+
+  // F7: tests moved to another code extension together are a migration. A lone test moved to an extension no
+  // other test uses may stop running (Node 22's runner skips .ts, Node 24's runs it), so it is still reported.
+  const ts5 = repo5('to-ts');
+  fs.writeFileSync(path.join(ts5, 'test/tax.test.mjs'), cart5);
+  sh('git add -A && git commit -qm tax', ts5);
+  HC('session-start', ts5, rec('claude', 'session-start', ts5, 's5'));
+  sh('git mv test/cart.test.mjs test/cart.test.ts && git mv test/tax.test.mjs test/tax.test.ts', ts5);
+  r = stop5(ts5);
+  check('finish check, honest: two tests moved from .mjs to .ts together are not reported', r.out !== '' && !r.out.includes('test file renamed'), r.out);
+  r = session5('lone-ts', (d) => sh('git mv test/cart.test.mjs test/cart.test.ts', d));
+  check('finish check: the only test moved from .mjs to .ts is reported, as no other test runs as .ts', sentBack5(r, 'test file renamed: test/cart.test.mjs to test/cart.test.ts'), r.out);
+  r = session5('to-txt', (d) => sh('git mv test/cart.test.mjs test/cart.test.txt', d));
+  check('finish check: a test renamed to .test.txt is still reported', sentBack5(r, 'test file renamed: test/cart.test.mjs to test/cart.test.txt'), r.out);
+
+  // F1: a quote in a block comment or a regex literal does not open a string that hides a skip
+  r = session5('comment-quote', (d) => edit5(d, 'test/cart.test.mjs', (t) => t.replace("  it('adds'", "  /* don't run yet */ it.skip('adds'")));
+  check("finish check: a skip after a block comment holding a quote (don't) sends the agent back", sentBack5(r, 'a test was skipped (.skip)'), r.out);
+  r = session5('regex-quote', (d) => edit5(d, 'test/cart.test.mjs', (t) => t.replace("  it('adds'", "  /'/.test(''); it.skip('adds'")));
+  check('finish check: a skip after a regex literal holding a quote sends the agent back', sentBack5(r, 'a test was skipped (.skip)'), r.out);
+  const inText5 = one(['  const fixture = "it.skip(\'adds\', () => {});";', "  const re = /[/]/; const half = total / 2; const s = 'it.skip(1)';"]);
+  check('scan, honest: a skip inside a string is still not a skip, after a regex literal or a division too', inText5 === '', inText5);
+
+  // F5: a condition that uses the input in arithmetic does not return a hardcoded answer
+  const fbTests = ["test/fb.test.mjs\0test('15', () => assert.strictEqual(fizzbuzz(15), 'FizzBuzz'));\n"];
+  const fb = (lines) => tamperFindings('M\tsrc/fb.mjs', [`--- a/src/fb.mjs`, `+++ b/src/fb.mjs`, `@@ -1,0 +1,${lines.length} @@`, ...lines.map((l) => `+${l}`)].join('\n'), { tests: fbTests }).join(' · ');
+  const fizz = fb(["  if (n % 15 === 0) return 'FizzBuzz';", "  if (n % 3 === 0) return 'Fizz';", "  if (n % 5 === 0) return 'Buzz';"]);
+  check('scan, honest: FizzBuzz written with n % 15 === 0 is not a hardcoded answer', fizz === '', fizz);
+  const fizzHard = fb(["  if (n === 15) return 'FizzBuzz';"]);
+  check('scan: n === 15 returning the expected FizzBuzz is still a hardcoded answer', fizzHard.includes("returns 'FizzBuzz' when given 15, the exact value a test expects"), fizzHard);
+
+  // F4: more git output than the old 1 MiB buffer, and more paths than one argument list holds
+  r = session5('many-files', (d) => {
+    fs.mkdirSync(path.join(d, 'junk'));
+    for (let i = 0; i < 7000; i++) fs.writeFileSync(path.join(d, 'junk', `${'n'.repeat(230)}-${i}.txt`), '');
+    sh('git rm -q test/cart.test.mjs', d);
+  });
+  check('finish check: 7,000 new files with long names do not hide a deleted test', sentBack5(r, 'test file deleted: test/cart.test.mjs'), `${r.out.slice(0, 300)} ${r.error || ''}`);
+  r = session5('bad-index', (d) => (weaken5(d), fs.writeFileSync(path.join(d, '.git/index'), 'not an index')));
+  check('finish check: when git cannot list the changes, it says so instead of staying silent', r.out.includes('could not be read'), r.out);
+
+  // F6: test files built to make the test-name patterns take quadratic time
+  r = session5('ruby-blank', (d) => (fs.mkdirSync(path.join(d, 'spec')), fs.writeFileSync(path.join(d, 'spec/x_spec.rb'), '\n'.repeat(1000000)), sh('git add spec', d)), 30000);
+  check('finish check: a Ruby spec of a million blank lines is read in under 10 seconds', !r.error && r.ms < 10000, `${r.ms} ms ${r.error || ''}`);
+  r = session5('java-tests', (d) => (fs.mkdirSync(path.join(d, 'src/test/java'), { recursive: true }), fs.writeFileSync(path.join(d, 'src/test/java/XTest.java'), '@Test\n'.repeat(100000)), sh('git add src', d)), 30000);
+  check('finish check: a Java test file of 100,000 @Test lines is read in under 10 seconds', !r.error && r.ms < 10000, `${r.ms} ms ${r.error || ''}`);
+
+  // The audit reads history with the same parser and the same git flags
+  const au5 = repo5('audit');
+  const commit5 = (msg) => (sh(`git add -A && git commit -qm ${sq(msg)}`, au5), sh('git rev-parse --short=8 HEAD', au5).trim());
+  edit5(au5, 'test/cart.test.mjs', (t) => t.replace("describe('cart', () => {\n", "let n = 0;\n++ n;\n\n\n\ndescribe('cart', () => {\n").replace(THREE, ''));
+  const plusplus5 = commit5('tidy cart test');
+  sh('git checkout -q HEAD~1 -- test/cart.test.mjs && git commit -qam restore', au5);
+  fs.appendFileSync(path.join(au5, '.git/info/attributes'), '*.mjs -diff\n');
+  weaken5(au5);
+  const binary5 = commit5('shorter cart test');
+  sh('git checkout -q HEAD~1 -- test/cart.test.mjs && git commit -qam restore', au5);
+  fs.writeFileSync(path.join(au5, 'test/tax.test.mjs'), cart5);
+  commit5('tax test');
+  sh('git mv test/cart.test.mjs test/cart.test.ts && git mv test/tax.test.mjs test/tax.test.ts', au5);
+  const toTs5 = commit5('tests in TypeScript');
+  r = ch(['audit'], au5);
+  check('audit: lists assertions deleted below an added "++ n;" line', r.out.includes(`  ${plusplus5} · `), r.out);
+  check('audit: lists assertions deleted from a file marked -diff', r.out.includes(`  ${binary5} · `), r.out);
+  check('audit, honest: two tests moved from .mjs to .ts in one commit are not listed', !r.out.includes(`  ${toTs5} · `), r.out);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

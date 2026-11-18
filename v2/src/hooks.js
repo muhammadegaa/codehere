@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
-  listDocs, git, gitDiff, isGitRepo, hasGit, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
+  listDocs, git, gitRead, gitPaths, isGitRepo, hasGit, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
   removedAt, expireDrafts, draftFile, saveRecord, readPlain, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
@@ -196,14 +196,19 @@ function briefFile(root, file) {
 
 const IGNORE = (f) => ['.codehere/', '.claude/', '.codex/', '.github/copilot/', '.github/hooks/'].some((d) => f.startsWith(d));
 
+// Null when git cannot list the changes.
 export function dirtySnapshot(root) {
-  const files = statusFiles(root).filter((f) => !IGNORE(f));
+  const listed = statusFiles(root);
+  if (listed == null) return null;
+  const files = listed.filter((f) => !IGNORE(f));
   const hashes = gitHashes(root, files);
   return Object.fromEntries(files.map((f, i) => [f, hashes[i] || 'x']));
 }
 
+// Null when git cannot list them: the finish check then says so instead of staying silent.
 function changedThisSession(root, s) {
   const now = dirtySnapshot(root);
+  if (now == null) return null;
   const before = s.baseline || null;
   const changed = new Set();
   if (!before) {
@@ -214,7 +219,9 @@ function changedThisSession(root, s) {
     }
   }
   if (commitId(s.startHead)) {
-    git(root, ['diff', s.startHead, 'HEAD', '--name-only', '--no-renames', '--relative', '-z'], true)
+    const committed = gitRead(root, ['diff', s.startHead, 'HEAD', '--name-only', '--no-renames', '--relative', '-z']);
+    if (committed == null) return null;
+    committed
       .split('\0')
       .filter((f) => f && !IGNORE(f))
       .forEach((f) => changed.add(f));
@@ -277,7 +284,7 @@ function teamChanged(root, s) {
   const diff = [...new Set([...Object.keys(now), ...Object.keys(s.team)])].filter((f) => now[f] !== s.team[f]);
   if (!diff.length) return [];
   const nfc = (f) => f.normalize('NFC');
-  const dirty = new Set(statusFiles(root).map(nfc));
+  const dirty = new Set((statusFiles(root) || []).map(nfc));
   let byCommit = null;
   const committed = (f) => {
     if (!byCommit) {
@@ -553,7 +560,7 @@ function lessonProofFor(root, sig, proofCommand, changed, test) {
       proof_command: proofCommand,
       proof_exit: 0,
       proof_commit: git(root, ['rev-parse', '--short', 'HEAD']),
-      proof_dirty: statusFiles(root).some((f) => !IGNORE(f)),
+      proof_dirty: (statusFiles(root) ?? ['?']).some((f) => !IGNORE(f)), // unknown counts as dirty
     });
   }
   proof.files = JSON.stringify(changed);
@@ -921,11 +928,13 @@ function stop(root, input) {
   if (!hasGit()) emitJson({ systemMessage: 'codehere ⊘ git not found · the finish check did not run' });
   if (!isGitRepo(root)) quiet();
   const base = commitId(s.startHead) || 'HEAD';
-  const changed = changedThisSession(root, s);
+  const listed = changedThisSession(root, s);
+  const blind = listed == null; // git could not list the changes: never read that as "nothing changed"
+  const changed = listed || [];
   const settings = settingsChanged(root, s);
   const removed = removedAt(root);
   const team = teamChanged(root, s);
-  if (!changed.length && !settings.length && !removed && !team.length) quiet(); // the agent changed nothing this session: stay silent
+  if (!blind && !changed.length && !settings.length && !removed && !team.length) quiet(); // the agent changed nothing this session: stay silent
 
   // Lines for the developer. Each is escaped as a whole, so text from the repo cannot fake a
   // line, and text from the repo never carries a tick (noTick).
@@ -946,15 +955,15 @@ function stop(root, input) {
     quiet();
   }
   // only lessons or help cards changed: the person gets the line, and the tests are not run
-  if (!changed.length && !settings.length && !removed) report();
+  if (!blind && !changed.length && !settings.length && !removed) report();
 
   // 1. tampering with tests or checks (only in files changed this session)
   let findings = [];
-  let unread = false; // the session's diff could not be read, so weakened tests were not checked: never proven
+  let unread = blind; // the session's diff could not be read, so weakened tests were not checked: never proven
   if (changed.length) {
-    const nameStatus = git(root, ['diff', base, '--relative', '--name-status', '--', ...changed]);
-    const diff = gitDiff(root, ['diff', base, '--relative', '-U0', '--', ...changed]);
-    unread = diff === null;
+    const nameStatus = gitPaths(root, ['diff', base, '--relative', '--name-status'], changed);
+    const diff = gitPaths(root, ['diff', base, '--relative', '-U0'], changed);
+    unread = diff === null || nameStatus === null;
     // a test file as it is now, to see what a swallowing catch holds: plain files only, up to 1 MiB
     const read = (f, max = 1024 * 1024) => {
       try {
@@ -965,10 +974,12 @@ function stop(root, input) {
     };
     // the repo's test files, read only when the diff returns a literal under a condition: up to 400
     // files, 256 KiB each and 4 MiB in all
+    let testList = null;
+    const testFiles = () => (testList ||= git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], true).split('\0').filter(isTestFile));
     const tests = () => {
       const out = [];
       let total = 0;
-      for (const f of git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], true).split('\0').filter(isTestFile).slice(0, 400)) {
+      for (const f of testFiles().slice(0, 400)) {
         const text = read(f, 256 * 1024);
         if (text == null) continue;
         if ((total += text.length) > 4 * 1024 * 1024) break;
@@ -976,7 +987,7 @@ function stop(root, input) {
       }
       return out;
     };
-    findings = tamperFindings(nameStatus, diff || '', { read, tests });
+    findings = tamperFindings(nameStatus || '', diff || '', { read, tests, testFiles });
   }
   const key = findings.join('|');
   if (findings.length && s.tamperReported !== key && mayBlock) {

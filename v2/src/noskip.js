@@ -83,30 +83,30 @@ const EXT_LANG = {
   py: 'py', pyi: 'py', go: 'go', rs: 'rs', java: 'java', kt: 'java', kts: 'java', groovy: 'java', scala: 'java', cs: 'cs',
   rb: 'rb', php: 'php', swift: 'swift', dart: 'dart', c: 'c', cc: 'c', cpp: 'c', cxx: 'c', h: 'c', hh: 'c', hpp: 'c', hxx: 'c', ex: 'ex', exs: 'ex',
 };
-const languageOf = (p) => EXT_LANG[(/\.([^./]+)$/.exec(p) || [])[1]?.toLowerCase()] ?? null;
+export const languageOf = (p) => EXT_LANG[(/\.([^./]+)$/.exec(p) || [])[1]?.toLowerCase()] ?? null;
 
 const STR = String.raw`(['"\x60])((?:\\.|(?!\1)[^\\])*)\1`;
 const NAME_PATTERNS = {
   js: [
     {
       re: new RegExp(
-        String.raw`\b(?:it|test|specify)(?:\s*\.\s*(?:only|skip|concurrent|sequential|failing|fails|todo|fixme|skipIf\([^)]*\)|runIf\([^)]*\)|each\s*(?:\([^)]*\)|\x60[^\x60]*\x60)))*\s*\(\s*` + STR,
+        String.raw`\b(?:it|test|specify)(?:\s*\.\s*(?:only|skip|concurrent|sequential|failing|fails|todo|fixme|skipIf\([^)]{0,1000}\)|runIf\([^)]{0,1000}\)|each\s*(?:\([^)]{0,1000}\)|\x60[^\x60]*\x60)))*\s*\(\s*` + STR,
         'g',
       ),
       pick: (m) => m[2],
     },
   ],
   py: [{ re: /^[ \t]*(?:async[ \t]+)?def[ \t]+(test\w*)[ \t]*\(/gm }],
-  go: [{ re: /^func\s+(?:\([^)]*\)\s*)?((?:Test|Benchmark|Fuzz|Example)\w*)\s*\(/gm }, { re: /\bt\.Run\(\s*"((?:\\.|[^"\\])*)"/g }, { re: /\bname:\s*"((?:\\.|[^"\\])*)"/g }],
-  rs: [{ re: /#\[(?:[\w:]+::)?test\b[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)/g }],
+  go: [{ re: /^func\s+(?:\([^)]{0,1000}\)\s*)?((?:Test|Benchmark|Fuzz|Example)\w*)\s*\(/gm }, { re: /\bt\.Run\(\s*"((?:\\.|[^"\\])*)"/g }, { re: /\bname:\s*"((?:\\.|[^"\\])*)"/g }],
+  rs: [{ re: /#\[(?:[\w:]+::)?test\b[^\]]{0,1000}\]\s*(?:#\[[^\]]{0,1000}\]\s*){0,20}(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)/g }],
   java: [
-    { re: /@(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b[^\n]*\n(?:\s*@[^\n]*\n)*\s*(?:(?:public|private|protected|internal|open|override|suspend|static|final)\s+)*(?:void\s+|fun\s+)?`?([^`(\n]+?)`?\s*\(/g },
+    { re: /@(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b[^\n]{0,1000}\n(?:[ \t]*(?:@[^\n]{0,1000})?\n){0,20}[ \t]*(?:(?:public|private|protected|internal|open|override|suspend|static|final)\s+)*(?:void\s+|fun\s+)?`?([^`(\n]+?)`?\s*\(/g },
     { re: /\bvoid\s+(test\w+)\s*\(/g },
   ],
-  cs: [{ re: /\[\s*(?:Fact|Theory|Test|TestMethod|TestCase|TestCaseSource|SkippableFact)\b[^\]]*\]\s*(?:\[[^\]]*\]\s*)*(?:(?:public|private|protected|internal|async|static|virtual|override)\s+)*[\w<>[\],.?]+\s+(\w+)\s*\(/g }],
-  rb: [{ re: new RegExp(String.raw`^\s*(?:it|specify|scenario|example|test)\s*\(?\s*` + STR, 'gm'), pick: (m) => m[2] }, { re: /^\s*def\s+(test_\w+)/gm }],
+  cs: [{ re: /\[\s*(?:Fact|Theory|Test|TestMethod|TestCase|TestCaseSource|SkippableFact)\b[^\]]{0,1000}\]\s*(?:\[[^\]]{0,1000}\]\s*){0,20}(?:(?:public|private|protected|internal|async|static|virtual|override)\s+)*[\w<>[\],.?]+\s+(\w+)\s*\(/g }],
+  rb: [{ re: new RegExp(String.raw`^[ \t]*(?:it|specify|scenario|example|test)[ \t]*(?:\(\s*)?` + STR, 'gm'), pick: (m) => m[2] }, { re: /^[ \t]*def\s+(test_\w+)/gm }],
   php: [{ re: /function\s+(test\w+)\s*\(/g }, { re: /(?:#\[Test\]|@test\b)[^]{0,200}?function\s+(\w+)\s*\(/g }, { re: new RegExp(String.raw`\b(?:it|test)\s*\(\s*` + STR, 'g'), pick: (m) => m[2] }],
-  swift: [{ re: /func\s+(test\w+)\s*\(/g }, { re: /@Test\b(?:\([^)]*\))?\s*(?:@\w+(?:\([^)]*\))?\s*)*func\s+(\w+)\s*\(/g }],
+  swift: [{ re: /func\s+(test\w+)\s*\(/g }, { re: /@Test\b(?:\([^)]{0,1000}\))?\s*(?:@\w+(?:\([^)]{0,1000}\))?\s*){0,20}func\s+(\w+)\s*\(/g }],
   dart: [{ re: new RegExp(String.raw`\b(?:test|testWidgets)\s*\(\s*` + STR, 'g'), pick: (m) => m[2] }],
   c: [{ re: /\b(?:TEST|TEST_F|TEST_P|TYPED_TEST)\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)/g, pick: (m) => `${m[1]}.${m[2]}` }, { re: /\bTEST_CASE\s*\(\s*"((?:\\.|[^"\\])*)"/g }],
   ex: [{ re: /\btest\s+"((?:\\.|[^"\\])*)"/g }],

@@ -1,6 +1,6 @@
 // Deterministic signals. No AI in the decision path.
-import { testChanges } from './noskip.js';
-import { unquotePath } from './gitpath.js';
+import { testChanges, languageOf } from './noskip.js';
+import { unquotePath, hunkReader } from './gitpath.js';
 
 const ERROR_LINE =
   /(error|exception|traceback|failed|failure|fatal|cannot|can't|not found|undefined is not|is not defined|is not a function|segmentation fault|ERR!|panic:|denied|refused|unexpected token|syntaxerror|typeerror|referenceerror|modulenotfound|no such file)/i;
@@ -206,18 +206,39 @@ function filtersOn(file, line) {
 
 // Which characters of a line are inside a string literal: test code often writes another test as
 // text, and a skip in that text is not a skip. One line at a time, so a string that spans lines (a
-// template literal, a docstring) is not seen; after // or a # comment, no quote opens a string.
+// template literal, a docstring) is not seen; after // or a # comment, no quote opens a string. A quote in a
+// /* comment */ or a regex literal opens none either, so "/* don't */ it.skip(" is a skip (cold review, L13
+// round 5). A / starts a regex where an expression can start: after an operator, a bracket or nothing.
 function stringMask(line) {
   const mask = new Uint8Array(line.length);
   let quote = '';
+  let last = ''; // the last character outside strings and comments that is not a space
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
     if (quote) {
       mask[i] = 1;
       if (c === '\\') mask[++i] = 1;
-      else if (c === quote) quote = '';
-    } else if (c === '"' || c === "'" || c === '`') (quote = c), (mask[i] = 1);
-    else if ((c === '/' && line[i + 1] === '/') || (c === '#' && (i <= 1 || /\s/.test(line[i - 1])))) break;
+      else if (c === quote) (quote = ''), (last = c);
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') (quote = c), (mask[i] = 1);
+    else if (c === '/' && line[i + 1] === '*') {
+      const end = line.indexOf('*/', i + 2);
+      if (end < 0) break;
+      i = end + 1;
+      continue;
+    } else if ((c === '/' && line[i + 1] === '/') || (c === '#' && (i <= 1 || /\s/.test(line[i - 1])))) break;
+    else if (c === '/' && (!last || '(,=:[!&|?{};+-*%<>~^'.includes(last))) {
+      let j = i + 1;
+      for (let inClass = false; j < line.length; j++) {
+        if (line[j] === '\\') j++;
+        else if (line[j] === '[') inClass = true;
+        else if (line[j] === ']') inClass = false;
+        else if (line[j] === '/' && !inClass) break;
+      }
+      if (j < line.length) i = j;
+    }
+    if (!/\s/.test(c)) last = line[i];
   }
   return mask;
 }
@@ -353,6 +374,13 @@ const LITERAL_RE = /(?<![\w.$])-?\d[\d_]*(?:\.\d+)?(?![\w$])|'((?:[^'\\]|\\.)*)'
 function literals(text) {
   return [...String(text).matchAll(LITERAL_RE)].map((m) => (m[1] !== undefined || m[2] !== undefined ? `s:${m[1] ?? m[2]}` : `n:${Number(m[0].replace(/_/g, ''))}`));
 }
+// The literals a condition compares with == or ===: price === 250, 250 == price. A literal inside arithmetic
+// (n % 15 === 0) is not an input the code singles out (cold review, L13 round 5).
+const LIT = String.raw`-?\d[\d_]*(?:\.\d+)?(?![\w$])|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"`;
+const COMPARED = new RegExp(String.raw`(?<![=!<>])===?\s*(${LIT})(?!\s*[-+*/%])|(?<![-+*/%]\s*|[\w$.])(${LIT})\s*===?(?!=)`, 'g');
+function comparedLiterals(cond) {
+  return [...String(cond).matchAll(COMPARED)].flatMap((m) => literals(m[1] ?? m[2]));
+}
 // Values too common to say anything when code returns them
 const DULL = new Set(['n:0', 'n:1', 'n:-1', 'n:2', 's:']);
 
@@ -419,8 +447,9 @@ export function tamperFindings(nameStatus, diff, opts) {
 // read(file), when given, returns the file as it is now (or null): the finish check passes one, the audit
 // does not and relies on the diff's context lines. tests, when given, is the repo's test files as
 // "path\0content" (or a function returning them, called only when it is needed), for the expected values a
-// hardcoded answer would copy.
-export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
+// hardcoded answer would copy. testFiles, when given, is a function returning the paths of the repo's test
+// files (now, or at the commit), called only for a test renamed to another code extension.
+export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) {
   const events = [];
   const seen = new Set();
   const add = (kind, file, why) => {
@@ -429,11 +458,16 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
     events.push({ kind, file, why });
   };
   const ext = (f) => (f.match(/\.[^./]+$/) || [''])[0];
+  // A rename to another code extension (.mjs to .ts) is a migration when other tests in the repo already use
+  // that extension. A lone test moved to one may stop running: Node 22's test runner skips .ts files, Node 24's
+  // runs them (cold review, L13 round 5).
+  let others = null;
+  const migrated = (to) => languageOf(to) != null && typeof testFiles === 'function' && (others ||= testFiles()).some((f) => f !== to && ext(f) === ext(to));
   for (const line of nameStatus.split('\n')) {
     const [status, file, to] = line.split('\t').map(unquotePath);
     if (status === 'D' && file && isTestFile(file)) add(DELETED, file, `test file deleted: ${file}`);
     // a rename to a name that is not a test file, or to another extension (.off, .bak), hides the test
-    if (/^R\d*$/.test(status) && to && isTestFile(file) && (!isTestFile(to) || ext(to) !== ext(file))) add(DELETED, file, `test file renamed: ${file} to ${to}`);
+    if (/^R\d*$/.test(status) && to && isTestFile(file) && (!isTestFile(to) || (ext(to) !== ext(file) && !migrated(to)))) add(DELETED, file, `test file renamed: ${file} to ${to}`);
   }
   let current = '';
   let removedAsserts = 0;
@@ -453,8 +487,10 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
   const weakenedIn = new Set(); // one weakened-matcher finding per file
   let hadFallback = false; // the test script already ended in `|| true` before this session
   let hadFilters = new Set(); // options that left tests out before this session
+  const inHunk = hunkReader();
   for (const line of diff.split('\n')) {
-    if (line.startsWith('+++ ')) {
+    const body = inHunk(line);
+    if (!body && line.startsWith('+++ ')) {
       current = unquotePath(line.slice(4)).replace(/^b\//, '');
       removed = new Set();
       removedShapes = new Map();
@@ -466,7 +502,7 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
       hadFilters = new Set();
       continue;
     }
-    if (line.startsWith('--- ')) continue;
+    if (!body && line.startsWith('--- ')) continue;
     if (line.startsWith('@@')) {
       newLine = Number((/\+(\d+)/.exec(line) || [])[1] || 0);
       continue;
@@ -497,7 +533,7 @@ export function tamperEvents(nameStatus, diff, { read, tests } = {}) {
       if (r) {
         const same = SAME_LINE_IF.exec(line.slice(1, 10001));
         const cond = same ? same[1] : /^\s*if\b/.test(before) ? before : null;
-        if (cond != null) returns.push({ file: current, text: r[1], value: literals(r[1])[0], given: literals(cond) });
+        if (cond != null) returns.push({ file: current, text: r[1], value: literals(r[1])[0], given: comparedLiterals(cond) });
       }
     }
     const probe = line.slice(0, 10000); // the patterns can take quadratic time on a long line

@@ -3,9 +3,9 @@
 // check's own detector. A count found by pattern is a list of candidates, never proof (DESIGN.md §1).
 import { spawn, execFileSync } from 'node:child_process';
 import readline from 'node:readline';
-import { printable, hasGit } from './brain.js';
+import { printable, hasGit, gitRead, PLAIN_DIFF } from './brain.js';
 import { tamperEvents, isTestFile, isTestConfig } from './signals.js';
-import { unquotePath } from './gitpath.js';
+import { unquotePath, hunkReader } from './gitpath.js';
 
 const DAYS = 90;
 const KINDS = new Set(['test-deleted', 'test-skipped', 'assertion-weakened']);
@@ -73,30 +73,38 @@ function samePath(line) {
 // memory stays small however large a commit is. Each commit's kinds go on its entry in bySha.
 function scanChanges(root, since, bySha) {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', ['log', '--no-merges', `--since=${since}`, '-p', '--no-color', '--format=%x00%H'], {
+    const child = spawn('git', ['log', ...PLAIN_DIFF, '--no-merges', `--since=${since}`, '-p', '--format=%x00%H'], {
       cwd: root,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
     let commit = null;
+    let sha = '';
+    let inHunk = hunkReader();
     let nameStatus = [];
     let kept = [];
     let keep = false;
     let deleted = '';
     let renamedFrom = '';
     const finish = () => {
-      if (commit) commit.events = tamperEvents(nameStatus.join('\n'), kept.join('\n')).filter((e) => KINDS.has(e.kind));
+      // the repo's test files at that commit, for a test renamed to another code extension
+      const at = sha;
+      const testFiles = () => (gitRead(root, ['ls-tree', '-r', '-z', '--name-only', at]) ?? '').split('\0').filter(isTestFile);
+      if (commit) commit.events = tamperEvents(nameStatus.join('\n'), kept.join('\n'), { testFiles }).filter((e) => KINDS.has(e.kind));
     };
     lines.on('line', (line) => {
       if (line.startsWith('\0')) {
         finish();
-        commit = bySha.get(line.slice(1)) || null;
+        sha = line.slice(1);
+        commit = bySha.get(sha) || null;
+        inHunk = hunkReader();
         nameStatus = [];
         kept = [];
         keep = false;
         return;
       }
       if (!commit) return;
+      const body = inHunk(line); // in a hunk, "+++ n;" is an added "++ n;", not a file header
       if (line.startsWith('diff --git ')) {
         keep = false;
         deleted = samePath(line);
@@ -117,13 +125,13 @@ function scanChanges(root, since, bySha) {
         keep = false;
         return;
       }
-      if (line.startsWith('+++ ')) {
+      if (!body && line.startsWith('+++ ')) {
         const file = unquotePath(line.slice(4)).replace(/^b\//, '');
         keep = file !== '/dev/null' && (isTestFile(file) || isTestConfig(file));
         if (keep) kept.push(`+++ ${file}`);
         return;
       }
-      if (keep && !line.startsWith('--- ')) kept.push(line);
+      if (keep && (body || !line.startsWith('--- '))) kept.push(line);
     });
     let failed = null;
     child.on('error', (e) => (failed = e));
