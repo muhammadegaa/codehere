@@ -288,6 +288,7 @@ check('lesson is shown only once per session', !r.out, r.out);
 console.log('\n10. fail-safe');
 r = spawnSync('node', [BIN, 'hook', 'stop'], { cwd: tmp, input: 'not json', encoding: 'utf8' });
 check('garbage input outside a project: exit 0', r.status === 0);
+ch(['hook', 'session-start'], ana, { session_id: 's8', cwd: ana, hook_event_name: 'SessionStart', source: 'startup' });
 r = ch(['hook', 'stop'], ana, { session_id: 's8', cwd: ana, hook_event_name: 'Stop' });
 check('no changes this session: silent', r.code === 0 && !r.out, r.out);
 // codehere 1.x installed user-level hooks such as `codehere scan-tool --log-only`
@@ -3885,6 +3886,127 @@ section(['R9'], () => {
     return stop9(d);
   })();
   check('finish check, honest: a test config moved with plain mv is not a new filter', r.j.decision !== 'block' && ticked9(r), r.out);
+});
+
+section(['R10'], () => {
+  // The cold review's round 10 (docs/reviews/2026-11-19-cold-review-round-10.md), against the bounded promise.
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart10 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const gut10 = (dir, f = 'test/cart.test.mjs') => fs.writeFileSync(path.join(dir, f), fs.readFileSync(path.join(dir, f), 'utf8').replace(THREE, ''));
+  const repo10 = (name, files = { 'test/cart.test.mjs': cart10 }, scripts = { test: 'node --test' }) => {
+    const dir = freshRepo(`r10-${name}`, { 'package.json': `${JSON.stringify({ name: 'p', type: 'module', scripts }, null, 2)}\n`, ...files });
+    ch(['init', '--agent', 'claude'], dir);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', dir, 'y');
+    return dir;
+  };
+  const start10 = (dir, sid = 's10', source = 'startup') => HC('session-start', dir, rec('claude', 'session-start', dir, sid, { source }));
+  const stop10 = (dir, sid = 's10') => {
+    const t0 = Date.now();
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, sid, { stop_hook_active: false })), encoding: 'utf8', timeout: 120000 });
+    let j = {};
+    try {
+      j = x.stdout ? JSON.parse(x.stdout) : {};
+    } catch {}
+    return { out: x.stdout || '', j, ms: Date.now() - t0 };
+  };
+  const sentBack10 = (x, why) => x.j.decision === 'block' && x.j.reason.includes(why);
+  const ticked10 = (x) => x.out.includes('✓');
+  const src10 = (d) => fs.writeFileSync(path.join(d, 'src.js'), `export const x = ${Date.now()};\n`);
+  const state10 = (d) => JSON.parse(readText(path.join(d, '.codehere/local/state.json')) || '{}');
+
+  // 1: a session whose entry state.json lost, gutting a test and committing, is not checked in silence
+  const lost10 = repo10('lost-commit');
+  start10(lost10);
+  const st10 = state10(lost10);
+  delete st10.sessions.s10;
+  fs.writeFileSync(path.join(lost10, '.codehere/local/state.json'), JSON.stringify(st10));
+  gut10(lost10);
+  sh('git commit -qam "tidy cart test"', lost10);
+  r = stop10(lost10);
+  check('finish check: a session state.json lost, which gutted a test and committed, is sent back through its record', sentBack10(r, '3 assertions removed') && !ticked10(r), r.out);
+  const gone10 = repo10('lost-no-record');
+  start10(gone10);
+  const sg10 = state10(gone10);
+  delete sg10.sessions.s10;
+  fs.writeFileSync(path.join(gone10, '.codehere/local/state.json'), JSON.stringify(sg10));
+  fs.rmSync(path.join(gone10, '.codehere/local/records'), { recursive: true, force: true });
+  gut10(gone10);
+  sh('git commit -qam "tidy cart test"', gone10);
+  r = stop10(gone10);
+  check('finish check: a session with no known start and no record, after a commit, says so instead of staying silent', r.out.includes('no record') && !ticked10(r), r.out);
+  // six sessions starting at once all keep their entries and records
+  const many10 = repo10('parallel-starts');
+  sh(Array.from({ length: 6 }, (_, i) => `printf '%s' ${sq(JSON.stringify(rec('claude', 'session-start', many10, `p${i}`, { source: 'startup' })))} | node ${sq(BIN)} hook session-start --agent claude > /dev/null &`).join(' ') + ' wait', many10);
+  const kept10 = Array.from({ length: 6 }, (_, i) => state10(many10).sessions?.[`p${i}`]?.record).filter(Boolean);
+  check('six sessions starting at once each keep their entry and record', kept10.length === 6, JSON.stringify(Object.keys(state10(many10).sessions || {})));
+  // a finish check running the tests does not write another session back stale
+  const stale10 = repo10('stale', { 'test/cart.test.mjs': cart10 }, { test: 'node -e "setTimeout(() => {}, 1500)" && node --test' });
+  start10(stale10, 'b10');
+  gut10(stale10); // B's change; A starts after it, so A's check runs the (slow) tests
+  start10(stale10, 'a10');
+  src10(stale10);
+  sh(`(printf '%s' ${sq(JSON.stringify(rec('claude', 'stop', stale10, 'a10', { stop_hook_active: false })))} | node ${sq(BIN)} hook stop --agent claude > /dev/null &) ; sleep 0.4 ; printf '%s' ${sq(JSON.stringify(rec('claude', 'stop', stale10, 'b10', { stop_hook_active: false })))} | node ${sq(BIN)} hook stop --agent claude > /dev/null ; sleep 4`, stale10);
+  check("a session sent back while another session's finish check ran keeps its send-back count", state10(stale10).sessions?.b10?.stopBlocks === 1, JSON.stringify(state10(stale10).sessions?.b10 || {}).slice(0, 300));
+
+  // 2: a CI workflow that ran the tests, deleted or moved where CI does not read it
+  const ci10 = { 'test/cart.test.mjs': cart10, '.github/workflows/ci.yml': 'on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n' };
+  for (const [label, change] of [['git rm', (d) => sh('git rm -q .github/workflows/ci.yml', d)], ['moved to ci.yml.disabled', (d) => fs.renameSync(path.join(d, '.github/workflows/ci.yml'), path.join(d, '.github/workflows/ci.yml.disabled'))]]) {
+    const d = repo10(`ci-${label.replace(/\W+/g, '-')}`, ci10);
+    start10(d);
+    change(d);
+    r = stop10(d);
+    check(`finish check: a CI workflow that ran the tests, ${label}, sends the agent back`, r.j.decision === 'block' && /CI/.test(r.j.reason) && !ticked10(r), r.out);
+  }
+  r = (() => {
+    const d = repo10('gitlab-moved', { 'test/cart.test.mjs': cart10, '.gitlab-ci.yml': 'test:\n  script:\n    - npm test\n' });
+    start10(d);
+    fs.mkdirSync(path.join(d, 'ci'));
+    fs.renameSync(path.join(d, '.gitlab-ci.yml'), path.join(d, 'ci/.gitlab-ci.yml'));
+    return stop10(d);
+  })();
+  check('finish check: .gitlab-ci.yml moved into a folder, where GitLab does not read it, sends the agent back', r.j.decision === 'block' && /CI/.test(r.j.reason), r.out);
+
+  // 3, 4: a runner config rewritten as it moves, and a build that copies a config into an ignored folder
+  r = (() => {
+    const d = repo10('config-esm', { 'test/cart.test.mjs': cart10, 'jest.config.js': "module.exports = {\n  testPathIgnorePatterns: ['/node_modules/', '/e2e/'],\n};\n" });
+    start10(d);
+    fs.writeFileSync(path.join(d, 'jest.config.mjs'), "export default {\n  testPathIgnorePatterns: ['/node_modules/', '/e2e/'],\n};\n");
+    fs.rmSync(path.join(d, 'jest.config.js'));
+    return stop10(d);
+  })();
+  check('finish check, honest: jest.config.js rewritten as jest.config.mjs is not a new filter', r.j.decision !== 'block' && ticked10(r), r.out);
+  const copy10 = repo10('config-copy', { 'test/cart.test.mjs': cart10, '.gitignore': 'dist/\n', 'jest.config.cjs': "module.exports = { testPathIgnorePatterns: ['/e2e/'] };\n" }, { test: 'rm -rf dist && mkdir dist && cp jest.config.cjs dist/ && node --test' });
+  start10(copy10);
+  src10(copy10);
+  r = stop10(copy10);
+  src10(copy10);
+  const second10 = stop10(copy10);
+  check('finish check, honest: a config the test command copies into an ignored build folder is let off at every stop', ticked10(r) && second10.j.decision !== 'block' && ticked10(second10), r.out + second10.out);
+
+  // 5, 6: a side test script, and a mocha timeout beside jest-extended
+  const pkg10 = '{"scripts":{"test":"node --test","test:smoke":"jest -t smoke"}}';
+  const side10 = tamperFindings('M\tpackage.json', diff27('package.json', ['  "test": "node --test"'], ['  "test": "node --test",', '  "test:smoke": "jest -t smoke"']), { read: () => pkg10 }).join(' · ');
+  check('scan: a side test:smoke script with -t does not leave out what npm test runs', side10 === '', side10);
+  const mocha10 = pj(['  "test": "mocha"'], ['  "test": "mocha -r jest-extended/all -t 5000"']);
+  check("scan: mocha's -t timeout beside jest-extended is not jest's -t", mocha10 === '', mocha10);
+
+  // 8: an edit inside a submodule that was already dirty at session start
+  const lib10 = freshRepo('r10-lib', { 'add.mjs': 'export const add = (a, b) => a + b;\n' });
+  const sub10 = repo10('submodule', { 'test/cart.test.mjs': "import { it } from 'node:test'; import assert from 'node:assert'; import { add } from '../lib/add.mjs';\nit('adds', () => assert.equal(add(1, 1), 2));\n" });
+  sh(`git -c protocol.file.allow=always submodule add -q ${sq(lib10)} lib && git commit -qm lib`, sub10);
+  fs.appendFileSync(path.join(sub10, 'lib/add.mjs'), '// wip\n');
+  start10(sub10);
+  fs.writeFileSync(path.join(sub10, 'lib/add.mjs'), 'export const add = (a, b) => a - b;\n// wip\n');
+  r = stop10(sub10);
+  check('finish check: an edit inside a submodule already dirty at session start is seen; the failing tests send the agent back', r.j.decision === 'block' && r.j.reason.includes('failed'), r.out);
+
+  // 9: a thousand tests moved with plain mv are read in a few seconds
+  const move10 = repo10('move-1000', Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`test/t${i}.test.mjs`, `import { it } from 'node:test';\nit('t${i}', () => {});\n`])));
+  start10(move10);
+  fs.renameSync(path.join(move10, 'test'), path.join(move10, 'tests'));
+  r = stop10(move10);
+  check('finish check, honest: 1,000 tests moved with plain mv get their ✓ in under 8 seconds', ticked10(r) && r.ms < 8000, `${r.ms} ms ${r.out.slice(0, 200)}`);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');

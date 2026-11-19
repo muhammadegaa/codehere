@@ -191,7 +191,7 @@ const COMMENT = /^[+-]\s*(\/\/|#|\/\*|\*)\s*/;
 // Options that make the runner leave tests out (node --test, jest, vitest, mocha, playwright, pytest,
 // go, cargo), on a test script or a pytest addopts line. Reporter, coverage and other options are not.
 const FILTER = /(?:^|\s)(--test-skip-pattern|--test-name-pattern|--testPathIgnorePatterns|--testNamePattern|--testPathPatterns?|--grep-invert|--grep|--fgrep|--invert|--ignore(?:-glob)?|--deselect|--skip|-skip|-run|-k)(?=[\s=]|$)/g;
-const TEST_SCRIPT = /"test(?::[^"]*)?"\s*:\s*"((?:[^"\\]|\\.)*)"/;
+const TEST_SCRIPT = /"(test(?::[^"]*)?)"\s*:\s*"((?:[^"\\]|\\.)*)"/;
 const ADDOPTS = /^[+-]\s*"?addopts"?\s*=(.*)$/;
 const PYTEST_CONFIG = /(^|\/)(pytest\.ini|pyproject\.toml|setup\.cfg|tox\.ini)$/;
 // The same, as keys in a runner's own config file
@@ -203,17 +203,19 @@ export const isTestConfig = (file) => /(^|\/)package\.json$/.test(file) || PYTES
 function filtersOn(file, line) {
   let text = null;
   let where = '';
-  if (/(^|\/)package\.json$/.test(file)) (text = (TEST_SCRIPT.exec(line) || [])[1] ?? null), (where = 'by the test script');
+  let script = null;
+  if (/(^|\/)package\.json$/.test(file)) ([, script = null, text = null] = TEST_SCRIPT.exec(line) || []), (where = 'by the test script');
   else if (PYTEST_CONFIG.test(file)) (text = (ADDOPTS.exec(line) || [])[1] ?? null), (where = "by the test runner's options");
   else if (RUNNER_CONFIG.test(file)) (text = line.slice(1)), (where = "by the test runner's config");
   if (text == null) return [];
   const re = RUNNER_CONFIG.test(file) ? CONFIG_KEY : FILTER;
-  const found = [...text.matchAll(re)].map((m) => ({ option: m[1], where }));
-  // jest's and vitest's -t (--testNamePattern); mocha's -t is a timeout, so only after jest or vitest (round 9)
-  if (where === 'by the test script' && JEST_T.test(text)) found.push({ option: '-t', where });
+  const found = [...text.matchAll(re)].map((m) => ({ option: m[1], where, script }));
+  // jest's and vitest's -t (--testNamePattern); mocha's -t is a timeout, so only after jest or vitest as the command
+  // word, not inside jest-extended or vitest.config.ts (rounds 9 and 10)
+  if (where === 'by the test script' && JEST_T.test(text)) found.push({ option: '-t', where, script });
   return found;
 }
-const JEST_T = /\b(?:jest|vitest)\b[^&|;]*?\s-t(?=[\s=]|$)/;
+const JEST_T = /(?:^|[\s;&|(])(?:jest|vitest)\s(?:[^&|;]*?\s)?-t(?=[\s=]|$)/;
 
 // Which characters of a line are inside a string literal: test code often writes another test as
 // text, and a skip in that text is not a skip. One line at a time, so a string that spans lines (a
@@ -428,7 +430,8 @@ const RUNNER_MARKER = /\b(NODE_TEST_CONTEXT|JEST_WORKER_ID|VITEST_WORKER_ID|VITE
 const TEST_SETUP = /(^|\/)(conftest\.py|setupTests\.[cm]?[jt]sx?|(jest|vitest)\.setup\.[cm]?[jt]sx?)$/;
 
 // CI files, and the commands in them that run the tests
-const CI_FILE = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.gitlab-ci\.ya?ml$|(^|\/)\.circleci\/config\.ya?ml$|(^|\/)(azure|bitbucket)-pipelines\.ya?ml$/;
+// at the repo's top, where CI reads them: one moved elsewhere no longer runs (round 10)
+const CI_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$|^\.gitlab-ci\.ya?ml$|^\.circleci\/config\.ya?ml$|^(azure|bitbucket)-pipelines\.ya?ml$/;
 // Every file that says what the tests are or how they run: test code in a language the scan reads, test configs,
 // test setup and CI files. Codehere keeps its own record of these at session start, so a change to one is read
 // even when git does not show it (docs/finish-check-promise.md). Data in a test folder is not one.
@@ -513,7 +516,21 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
     // to test/cart.mjs), or to another extension (.off, .bak), hides the test
     const dropsName = TEST_NAME.test(file) && !TEST_NAME.test(to);
     if (/^R\d*$/.test(status) && to && isTestFile(file) && (!isTestFile(to) || dropsName || (ext(to) !== ext(file) && !migrated(file, to)))) add(DELETED, file, `test file renamed: ${file} to ${to}`);
+    // a CI file moved where CI does not read it (ci.yml to ci.yml.disabled, .gitlab-ci.yml into a folder) runs nothing
+    if (/^R\d*$/.test(status) && to && CI_FILE.test(file) && !CI_FILE.test(to)) add(CHECKS_OFF, file, `a CI file was moved where CI does not run it: ${file} to ${to}`);
   }
+  // A test:* script counts only when the test script calls it: a side script such as test:smoke with -t is not what
+  // npm test runs (round 10). Without the file as it is now (the audit), every test:* script counts.
+  const runsTests = (script) => {
+    if (!script || script === 'test' || !read) return true;
+    try {
+      const main = JSON.parse(read(current) || '{}').scripts?.test;
+      return typeof main !== 'string' || main.includes(script);
+    } catch {
+      return true;
+    }
+  };
+  let oldPath = ''; // the file a "--- a/" header names: a deleted CI file's lines are read under its own name (round 10)
   let current = '';
   let removedAsserts = 0;
   let addedAsserts = 0;
@@ -537,6 +554,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
     const body = inHunk(line);
     if (!body && line.startsWith('+++ ')) {
       current = unquotePath(line.slice(4)).replace(/^b\//, '');
+      if (current === '/dev/null' && CI_FILE.test(oldPath)) current = oldPath;
       removed = new Set();
       removedShapes = new Map();
       removedValueChecks = new Map();
@@ -547,7 +565,10 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
       hadFilters = new Set();
       continue;
     }
-    if (!body && line.startsWith('--- ')) continue;
+    if (!body && line.startsWith('--- ')) {
+      oldPath = unquotePath(line.slice(4)).replace(/^a\//, '');
+      continue;
+    }
     if (line.startsWith('@@')) {
       newLine = Number((/\+(\d+)/.exec(line) || [])[1] || 0);
       continue;
@@ -591,7 +612,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
     if (isTestConfig(current)) {
       for (const f of filtersOn(current, probe)) {
         if (line.startsWith('-')) hadFilters.add(f.option);
-        else if (line.startsWith('+') && !hadFilters.has(f.option)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+        else if (line.startsWith('+') && !hadFilters.has(f.option) && runsTests(f.script)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
       }
     }
     if (line.startsWith('+')) {
@@ -603,7 +624,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
         let pieceMask = null;
         const pmask = () => (pieceMask ||= stringMask(piece));
         for (const t of [...TAMPER_ADDED, ...(inTest ? TAMPER_ADDED_IN_TESTS : [])]) if (inCode(t.re, piece, pmask)) add(t.kind, current, `${t.why} in ${current}`);
-        if (isTestConfig(current)) for (const f of filtersOn(current, piece)) if (!hadFilters.has(f.option)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+        if (isTestConfig(current)) for (const f of filtersOn(current, piece)) if (!hadFilters.has(f.option) && runsTests(f.script)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
       }
       if (!inTest) continue;
       const text = probe.slice(1);

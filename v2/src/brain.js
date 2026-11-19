@@ -117,12 +117,24 @@ export function readState(root) {
 // made with exclusive create, so no planted link at that name is followed. Never throws: false when
 // nothing was saved, and a caller that needs the state kept (the finish check's send-back count)
 // then holds back, while what it reports still goes out.
-export function writeState(root, state) {
+// owned: the sessions this writer changed. Every other session is taken from the file as it is now, under a lock, so
+// hooks running at once (two session starts, a finish check running the tests while another session starts or stops)
+// neither drop each other's sessions nor write them back stale (cold review, L13 rounds 9 and 10). Without owned,
+// the state is written as given.
+export function writeState(root, state, owned) {
   const p = paths(root);
   if (!ownPath(root, p.local)) return false;
   const tmp = `${p.state}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  let lock = null;
   try {
     fs.mkdirSync(p.local, { recursive: true });
+    if (owned) {
+      lock = takeLock(`${p.state}.lock`);
+      const mine = new Set(owned);
+      const sessions = { ...readState(root).sessions };
+      for (const k of mine) if (state.sessions[k]) sessions[k] = state.sessions[k];
+      state.sessions = keepRecent(sessions, mine);
+    }
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2), { flag: 'wx' });
     fs.renameSync(tmp, p.state);
     return true;
@@ -131,7 +143,39 @@ export function writeState(root, state) {
       fs.rmSync(tmp, { force: true });
     } catch {} // local/ may be a file: there is no temporary file to remove
     return false;
+  } finally {
+    if (lock) fs.rmSync(lock, { force: true });
   }
+}
+
+// A lock taken with an exclusive create, waited for up to 3 s; one older than 10 s is left by a hook that died. null
+// when it cannot be taken: the write goes ahead without it, as a hook must not hang.
+function takeLock(file) {
+  const until = Date.now() + 3000;
+  for (;;) {
+    try {
+      fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
+      return file;
+    } catch (e) {
+      if (e.code !== 'EEXIST') return null;
+      try {
+        if (Date.now() - fs.lstatSync(file).mtimeMs > 10000) fs.rmSync(file, { force: true });
+      } catch {}
+      if (Date.now() > until) return null;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+}
+
+// keep the state file small: drop all but the 50 sessions active most recently (a long session still in use is kept,
+// though newer ones started after it: rounds 9 and 10), never one in keep
+function keepRecent(sessions, keep = new Set()) {
+  const keys = Object.keys(sessions);
+  if (keys.length <= 50) return sessions;
+  const seen = (k) => sessions[k].lastActive || sessions[k].startedAt || '';
+  const drop = keys.filter((k) => !keep.has(k)).sort((a, b) => seen(a).localeCompare(seen(b))).slice(0, keys.length - 50);
+  for (const k of drop) delete sessions[k];
+  return sessions;
 }
 
 export function session(state, id) {
@@ -149,16 +193,7 @@ export function session(state, id) {
   }
   state.lastSession = key;
   state.sessions[key].lastActive = new Date().toISOString();
-  // keep the state file small: drop all but the 20 sessions active most recently (a long session still in use is
-  // kept, though newer ones started after it: round 9)
-  const keys = Object.keys(state.sessions);
-  const seen = (k) => state.sessions[k].lastActive || state.sessions[k].startedAt || '';
-  if (keys.length > 20) {
-    keys
-      .sort((a, b) => seen(a).localeCompare(seen(b)))
-      .slice(0, keys.length - 20)
-      .forEach((k) => delete state.sessions[k]);
-  }
+  keepRecent(state.sessions, new Set([key]));
   return state.sessions[key];
 }
 
@@ -451,7 +486,16 @@ export function gitHashes(root, files, { filters = true } = {}) {
   if (read == null) return null;
   const out = read.trim().split('\n');
   const at = new Map(present.map((f, i) => [f, i]));
-  return files.map((f, i) => (kinds[i] === 'file' ? out[at.get(f)] || null : kinds[i]));
+  // a folder (a submodule, a worktree inside the repo) by its own commit and status, so an edit inside one is seen
+  // (round 10); 'folder' when git cannot read it
+  const folder = (f) => {
+    const dir = path.join(root, f);
+    const head = gitRead(dir, ['rev-parse', 'HEAD']);
+    const status = gitRead(dir, ['status', '--porcelain', '-z', '--untracked-files=all']);
+    const diff = gitRead(dir, ['diff', 'HEAD']); // a second edit to a file already changed keeps its status line
+    return head == null || status == null || diff == null ? 'folder' : `folder:${crypto.createHash('sha256').update(`${head}\0${status}\0${diff}`).digest('hex')}`;
+  };
+  return files.map((f, i) => (kinds[i] === 'file' ? out[at.get(f)] || null : kinds[i] === 'folder' ? folder(f) : kinds[i]));
 }
 
 // A tick is Codehere's mark for a run it made on this machine (DESIGN.md §1). Text from the
