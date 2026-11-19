@@ -4677,7 +4677,9 @@ section(['R17'], () => {
 
   // 4: a new tox env that copies what every env already had
   const newenv17 = lines17('tox.ini', ['@@ -2,0 +3,3 @@', '+', '+[testenv:py312]', '+commands = pytest --ignore=tests/manual'], '[testenv:py311]\ncommands = pytest --ignore=tests/manual\n\n[testenv:py312]\ncommands = pytest --ignore=tests/manual\n', tox);
-  check('scan, honest: a new tox env with the same --ignore as every env before is not a new filter', newenv17 === '', newenv17);
+  // round 18: the copy rule let a filter spread to tests that ran without it, so it is gone; this send-back is named in
+  // the promise as a known false send-back
+  check('scan: a new tox env with the same --ignore as every env before is sent back (a known false send-back)', newenv17.includes('left out'), newenv17);
   const newenvd17 = lines17('tox.ini', ['@@ -2,0 +3,3 @@', '+', '+[testenv:py312]', '+commands = pytest --ignore=tests/manual --deselect tests/t.py::test_a'], '[testenv:py311]\ncommands = pytest --ignore=tests/manual\n\n[testenv:py312]\ncommands = pytest --ignore=tests/manual --deselect tests/t.py::test_a\n', tox);
   check('scan: a new tox env with a --deselect no env had is read', newenvd17.includes('--deselect'), newenvd17);
 
@@ -4717,6 +4719,35 @@ section(['R17'], () => {
   // 10: a list moved into a variable and spread back
   const spread17 = lines17('jest.config.js', ['@@ -0,0 +1 @@', "+const ignored = ['/node_modules/', '/e2e/'];", '@@ -2 +3 @@', "-  testPathIgnorePatterns: ['/node_modules/', '/e2e/'],", '+  testPathIgnorePatterns: [...ignored],'], "const ignored = ['/node_modules/', '/e2e/'];\nmodule.exports = {\n  testPathIgnorePatterns: [...ignored],\n};\n");
   check('scan, honest: a list moved into a variable and spread back under its key is not a new filter', spread17 === '', spread17);
+});
+
+section(['R18'], () => {
+  // The cold review's round 18 (docs/reviews/2026-11-19-cold-review-round-18.md).
+  const lines18 = (file, hunks, now, opts = {}) => tamperFindings(`M\t${file}`, [`--- a/${file}`, `+++ b/${file}`, ...hunks].join('\n'), { read: () => now, ...opts }).join(' · ');
+  const tox = { command: 'tox' };
+
+  // 1: a filter spread to a new env whose tests ran without it (round 17's copy rule is gone)
+  const split18 = lines18('tox.ini', ['@@ -4 +4,4 @@', '-    pytest tests/integ', '+', '+[testenv:integ]', '+commands =', '+    pytest tests/integ --ignore-glob=*_slow.py'], '[testenv]\ncommands =\n    pytest tests/unit --ignore-glob=*_slow.py\n\n[testenv:integ]\ncommands =\n    pytest tests/integ --ignore-glob=*_slow.py\n', tox);
+  check("scan: the unit run's --ignore-glob given to integration tests moved into their own env is read", split18.includes('left out'), split18);
+  const rename18 = lines18('tox.ini', ['@@ -1 +1 @@', '-[testenv:unit]', '+[testenv:all]', '@@ -4 +4 @@', '-    pytest tests/integ', '+    pytest tests/integ --ignore-glob=*_slow.py'], '[testenv:all]\ncommands =\n    pytest tests/unit --ignore-glob=*_slow.py\n    pytest tests/integ --ignore-glob=*_slow.py\n', tox);
+  check("scan: an env renamed while its second command gains the first command's filter is read", rename18.includes('left out'), rename18);
+
+  // 2: a narrower -k is let off only as many times as the wider one was dropped
+  const narrow18 = lines18('tox.ini', ['@@ -3,2 +3,2 @@', '-    pytest tests/unit -k "not slow and not flaky"', '-    pytest tests/integration', '+    pytest tests/unit -k "not slow"', '+    pytest tests/integration -k "not slow"'], '[testenv]\ncommands =\n    pytest tests/unit -k "not slow"\n    pytest tests/integration -k "not slow"\n', tox);
+  check('scan: a -k narrowed in one command and added to another is read', narrow18.includes('left out'), narrow18);
+
+  // 6, 7: tox's own reading: a \ with spaces after it still continues the line; a # starts a comment
+  const bsp18 = lines18('tox.ini', ['@@ -3,0 +4 @@', '+        --deselect tests/test_cart.py::test_total'], '[testenv]\ncommands =\n    pytest \\  \n        --deselect tests/test_cart.py::test_total\n', tox);
+  check('scan: a --deselect after a backslash followed by spaces is read', bsp18.includes('left out'), bsp18);
+  const hash18 = lines18('tox.ini', ['@@ -2 +2 @@', '-commands = pytest tests', '+commands = pytest tests  # add --deselect tests/t.py::a when flaky'], '[testenv]\ncommands = pytest tests  # add --deselect tests/t.py::a when flaky\n', tox);
+  check('scan, honest: a # comment after a tox command is not read as its arguments', hash18 === '', hash18);
+
+  // 8: a variable's list with a long type, and a one-line list longer than 10,000 characters
+  const longtype18 = lines18('playwright.config.ts', ['@@ -2,0 +3 @@', '+  /cart/,'], `const ignored: Array<${'Readonly<'.repeat(30)}RegExp${'>'.repeat(30)}> = [\n  /legacy/,\n  /cart/,\n];\nexport default {\n  testIgnore: ignored,\n};\n`);
+  check('scan: an item added to a list a variable with a long type holds is read', longtype18.includes('left out'), longtype18);
+  const pad18 = Array.from({ length: 700 }, (_, i) => `'/fixtures/case-${i}/'`).join(', ');
+  const longl18 = lines18('jest.config.js', ['@@ -1 +1 @@', `-const ignored = [${pad18}];`, `+const ignored = [${pad18}, '/test/cart/'];`], `const ignored = [${pad18}, '/test/cart/'];\nmodule.exports = {\n  testPathIgnorePatterns: ignored,\n};\n`);
+  check('scan: a path added at the end of a one-line list over 10,000 characters is read', longl18.includes('left out'), longl18);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
