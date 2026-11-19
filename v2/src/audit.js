@@ -2,8 +2,7 @@
 // Read-only: it runs git on this machine and sends nothing anywhere. The kinds come from the finish
 // check's own detector. A count found by pattern is a list of candidates, never proof (DESIGN.md §1).
 import { spawn, execFileSync } from 'node:child_process';
-import readline from 'node:readline';
-import { printable, hasGit, gitRead, PLAIN_DIFF } from './brain.js';
+import { printable, hasGit, gitRead, PLAIN_DIFF, GIT_ENV, GIT_TIMEOUT } from './brain.js';
 import { tamperEvents, isTestFile, isTestConfig } from './signals.js';
 import { unquotePath, hunkReader } from './gitpath.js';
 
@@ -32,7 +31,7 @@ export function markersOf(author, body) {
 
 function gitLine(root, args) {
   try {
-    return execFileSync('git', args, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    return execFileSync('git', args, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], env: GIT_ENV, timeout: GIT_TIMEOUT }).toString().trim();
   } catch {
     return null;
   }
@@ -44,6 +43,7 @@ function commitsSince(root, since) {
     cwd: root,
     stdio: ['ignore', 'pipe', 'ignore'],
     maxBuffer: BIG,
+    env: GIT_ENV,
   }).toString();
   return out
     .split('\x1e')
@@ -76,8 +76,8 @@ function scanChanges(root, since, bySha) {
     const child = spawn('git', ['log', ...PLAIN_DIFF, '--no-merges', `--since=${since}`, '-p', '--format=%x00%H'], {
       cwd: root,
       stdio: ['ignore', 'pipe', 'ignore'],
+      env: GIT_ENV,
     });
-    const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
     let commit = null;
     let sha = '';
     let inHunk = hunkReader();
@@ -87,12 +87,12 @@ function scanChanges(root, since, bySha) {
     let deleted = '';
     let renamedFrom = '';
     const finish = () => {
-      // the repo's test files at that commit, for a test renamed to another code extension
+      // the repo's test files before that commit, for a test renamed to another code extension
       const at = sha;
-      const testFiles = () => (gitRead(root, ['ls-tree', '-r', '-z', '--name-only', at]) ?? '').split('\0').filter(isTestFile);
+      const testFiles = () => (gitRead(root, ['ls-tree', '-r', '-z', '--name-only', `${at}^`]) ?? '').split('\0').filter(isTestFile);
       if (commit) commit.events = tamperEvents(nameStatus.join('\n'), kept.join('\n'), { testFiles }).filter((e) => KINDS.has(e.kind));
     };
-    lines.on('line', (line) => {
+    const onLine = (line) => {
       if (line.startsWith('\0')) {
         finish();
         sha = line.slice(1);
@@ -132,12 +132,20 @@ function scanChanges(root, since, bySha) {
         return;
       }
       if (keep && (body || !line.startsWith('--- '))) kept.push(line);
+    };
+    // Lines end at \n only, as git writes them: readline also ends one at a lone \r inside a line, which puts
+    // the hunk reader out of step (cold review, L13 round 6).
+    let rest = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      const parts = (rest + chunk).split('\n');
+      rest = parts.pop();
+      parts.forEach(onLine);
     });
     let failed = null;
     child.on('error', (e) => (failed = e));
-    const ended = new Promise((r) => lines.on('close', r));
-    child.on('close', async (code) => {
-      await ended;
+    child.on('close', (code) => {
+      if (rest) onLine(rest);
       finish();
       if (failed || code !== 0) reject(failed || new Error(`git log exited ${code}`));
       else resolve();

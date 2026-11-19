@@ -12,8 +12,10 @@ import {
   removedAt, expireDrafts, draftFile, saveRecord, readPlain, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
-  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile,
+  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile, isCheckFile,
 } from './signals.js';
+import { languageOf } from './noskip.js';
+import { unquotePath, quotePath } from './gitpath.js';
 
 function readStdin() {
   try {
@@ -123,12 +125,15 @@ function sessionStart(root, input, agent) {
     s.gitSettings = gitSettingsSnapshot(root);
     s.team = teamSnapshot(root);
     s.teamHead = s.startHead;
+    keepRecord(root, s);
   } else if (input.source === 'resume') {
-    // While the session was closed only the developer or a pull could change settings.
+    // While the session was closed only the developer or a pull could change settings. The record of the
+    // test files is kept from the start: a change git hides must not become the new normal (round 6, M4).
     s.settings = settingsSnapshot(root);
     s.gitSettings = gitSettingsSnapshot(root);
     s.team = teamSnapshot(root);
     s.teamHead = git(root, 'rev-parse HEAD') || null;
+    if (s.raw === undefined && isGitRepo(root)) keepRecord(root, s);
   }
 
   const out = [];
@@ -313,9 +318,12 @@ const FILTER_ATTR = /\bfilter\b|^\s*\[attr\]/;
 const filterLines = (text) => text.split('\n').filter((l) => FILTER_ATTR.test(l)).join('\n');
 function gitSettingsSnapshot(root) {
   const snap = {};
+  // every value of a name, from every scope: Codehere's own core.fsmonitor=false comes last, after the repo's
+  const values = {};
   for (const l of git(root, ['config', '--get-regexp', '^(filter\\.|core\\.fsmonitor)'], true).split('\n')) {
-    if (l) snap[`git config ${l.split(' ')[0]}`] = crypto.createHash('sha256').update(l).digest('hex');
+    if (l) (values[`git config ${l.split(' ')[0]}`] ||= []).push(l);
   }
+  for (const [k, ls] of Object.entries(values)) snap[k] = crypto.createHash('sha256').update(ls.join('\n')).digest('hex');
   const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   const files = [git(root, ['rev-parse', '--git-path', 'info/attributes']), git(root, ['config', '--path', 'core.attributesFile']) || path.join(xdg, 'git', 'attributes')];
   for (const f of files.filter(Boolean)) {
@@ -345,9 +353,98 @@ function gitSettingsChanged(root, s, changed) {
     try {
       text = readPlain(path.join(root, f), 'utf8', 1024 * 1024);
     } catch {}
-    if (filterLines(text)) out.push(noTick(f));
+    // only a filter line the session added or changed: a repo that already uses LFS is edited honestly (round 6, m2)
+    const before = commitId(s.startHead) ? (gitRead(root, ['show', `${s.startHead}:./${f}`]) ?? '') : '';
+    if (filterLines(text) !== filterLines(before)) out.push(noTick(f));
   }
   return out.sort();
+}
+
+// ---------- Codehere's own record of the test files ----------
+// Each test file, test config, test setup and CI file by its bytes, kept at session start without asking git
+// and compared at the stop (docs/finish-check-promise.md). Git can be told to show a changed file as unchanged
+// (index flags, replace objects, filters, core.bare: cold review, L13 round 6); this record cannot. Ids are git
+// blob ids worked out here, so git can diff two versions by id. Folders that hold no tests of this repo are
+// skipped. A repo with more entries than RAW_LIMIT gets no record (null), and so no ✓.
+const SKIP_DIRS = new Set(['.git', '.codehere', 'node_modules', 'vendor', '.venv', 'venv', '__pycache__', '.tox', '.nox', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'target', '.gradle', '.next', '.nuxt', '.turbo', '.cache', 'coverage', 'dist', 'build']);
+const RAW_LIMIT = 200000;
+const blobId = (algo, bytes) => crypto.createHash(algo).update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+const isBlobId = (x) => typeof x === 'string' && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(x);
+function fileId(file, algo) {
+  try {
+    const st = fs.lstatSync(file);
+    if (st.isSymbolicLink()) return `link:${fs.readlinkSync(file)}`;
+    if (!st.isFile()) return 'not a file';
+    if (st.size > 64 * 1024 * 1024) return `size:${st.size}:${st.mtimeMs}`;
+    return blobId(algo, fs.readFileSync(file));
+  } catch {
+    return 'unreadable';
+  }
+}
+export function rawSnapshot(root, algo) {
+  const files = {};
+  let seen = 0;
+  const walk = (dir, rel) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {}
+    for (const e of entries) {
+      if (++seen > RAW_LIMIT) return false;
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name) && !walk(path.join(dir, e.name), r)) return false;
+      } else if (isCheckFile(r)) files[r] = fileId(path.join(dir, e.name), algo);
+    }
+    return true;
+  };
+  return walk(root, '') ? files : null;
+}
+
+// The record, and the start version of each file written into git's object store when it is not there yet (a
+// file changed or untracked at session start), so a diff from it can be built at the stop.
+function keepRecord(root, s) {
+  s.rawAlgo = git(root, ['rev-parse', '--show-object-format']) === 'sha256' ? 'sha256' : 'sha1';
+  s.raw = rawSnapshot(root, s.rawAlgo);
+  const ids = Object.entries(s.raw || {}).filter(([f, id]) => isBlobId(id) && !f.includes('\n'));
+  if (!ids.length) return;
+  const out = gitRead(root, ['cat-file', '--batch-check'], ids.map(([, id]) => id).join('\n') + '\n');
+  const missing = new Set((out || '').split('\n').filter((l) => l.endsWith(' missing')).map((l) => l.split(' ')[0]));
+  const files = ids.filter(([, id]) => missing.has(id)).map(([f]) => path.resolve(root, f));
+  if (files.length) gitRead(root, ['hash-object', '-w', '--no-filters', '--stdin-paths'], files.join('\n') + '\n');
+}
+
+// The diff of one file from its version at session start (a blob id, or null for a file that did not exist then)
+// to the file as it is now, built by git from the two blobs: no index flag, filter or replace object is asked.
+// Null when it cannot be built.
+function builtDiff(root, file, from, algo) {
+  const abs = path.join(root, file);
+  let st = null;
+  try {
+    st = fs.lstatSync(abs);
+  } catch {}
+  if ((st && !st.isFile()) || (!st && !from) || (from != null && !isBlobId(from)) || file.includes('\n')) return null;
+  const q = quotePath(file);
+  const head = `diff --git a/${q} b/${q}\n--- ${from ? `a/${q}` : '/dev/null'}\n+++ ${st ? `b/${q}` : '/dev/null'}\n`;
+  if (!from) {
+    // a new file: every line is added, no git needed
+    let text;
+    try {
+      text = readPlain(abs, 'utf8', 1024 * 1024);
+    } catch {
+      return null;
+    }
+    const lines = text.split('\n');
+    if (lines.at(-1) === '') lines.pop();
+    return { status: `A\t${q}`, diff: head + (lines.length ? `@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => `+${l}`).join('\n')}` : '') };
+  }
+  const now = st ? (gitRead(root, ['hash-object', '-w', '--no-filters', '--stdin-paths'], abs + '\n') ?? '').trim() : blobId(algo, Buffer.alloc(0));
+  if (!isBlobId(now)) return null;
+  const out = gitRead(root, ['diff', '-U0', from, now]);
+  if (out == null) return null;
+  // git names the two blobs: the file's own path goes in their place
+  const at = out.startsWith('@@') ? 0 : out.indexOf('\n@@') + 1;
+  return { status: `${st ? 'M' : 'D'}\t${q}`, diff: head + (at > 0 || out.startsWith('@@') ? out.slice(at) : '') };
 }
 
 function settingsChanged(root, s) {
@@ -974,16 +1071,23 @@ function stop(root, input) {
   };
 
   if (!hasGit()) emitJson({ systemMessage: 'codehere ⊘ git not found · the finish check did not run' });
-  if (!isGitRepo(root)) quiet();
+  // A session that started in a repo goes on when git stops reading the folder as one (core.bare): its record
+  // of the test files still says what changed (round 6, B2).
+  if (!isGitRepo(root) && !isMap(s.raw)) quiet();
   const base = commitId(s.startHead) || 'HEAD';
   const listed = changedThisSession(root, s);
   const blind = listed == null; // git could not list the changes: never read that as "nothing changed"
   const changed = listed || [];
+  const nfc = (f) => f.normalize('NFC');
+  // the test files whose bytes changed since session start, by Codehere's own record; none to compare means no ✓
+  const rawNow = isMap(s.raw) ? rawSnapshot(root, s.rawAlgo || 'sha1') : null;
+  const noRecord = !rawNow;
+  const rawChanged = rawNow ? [...new Set([...Object.keys(rawNow), ...Object.keys(s.raw)])].filter((f) => rawNow[f] !== s.raw[f]) : [];
   const gitSettings = gitSettingsChanged(root, s, changed);
   const settings = [...settingsChanged(root, s), ...gitSettings];
   const removed = removedAt(root);
   const team = teamChanged(root, s);
-  if (!blind && !changed.length && !settings.length && !removed && !team.length) quiet(); // the agent changed nothing this session: stay silent
+  if (!blind && !changed.length && !rawChanged.length && !settings.length && !removed && !team.length) quiet(); // the agent changed nothing this session: stay silent
 
   // Lines for the developer. Each is escaped as a whole, so text from the repo cannot fake a
   // line, and text from the repo never carries a tick (noTick).
@@ -1004,15 +1108,40 @@ function stop(root, input) {
     quiet();
   }
   // only lessons or help cards changed: the person gets the line, and the tests are not run
-  if (!blind && !changed.length && !settings.length && !removed) report();
+  if (!blind && !changed.length && !rawChanged.length && !settings.length && !removed) report();
 
   // 1. tampering with tests or checks (only in files changed this session)
   let findings = [];
   let unread = blind; // the session's diff could not be read, so weakened tests were not checked: never proven
-  if (changed.length) {
-    const nameStatus = gitPaths(root, ['diff', base, '--relative', '--name-status'], changed);
-    const diff = gitPaths(root, ['diff', base, '--relative', '-U0'], changed);
-    unread = diff === null || nameStatus === null;
+  if (changed.length || rawChanged.length) {
+    let nameStatus = changed.length ? gitPaths(root, ['diff', base, '--relative', '--name-status'], changed) : '';
+    let diff = changed.length ? gitPaths(root, ['diff', base, '--relative', '-U0'], changed) : '';
+    unread = blind || diff === null || nameStatus === null;
+    // Files that diff leaves out, read through a diff Codehere builds: new files the agent left untracked (git diff
+    // never shows them), and test files whose bytes changed while git shows no change (round 6, B1 to B4).
+    const inDiff = new Set(String(nameStatus || '').split('\n').flatMap((l) => l.split('\t').slice(1)).map((f) => nfc(unquotePath(f))));
+    const build = new Map(); // file -> its version at session start: a blob id, or null when it is new
+    if (changed.length && !blind) {
+      const untracked = (gitPaths(root, ['ls-files', '-z', '--others', '--exclude-standard'], changed) ?? '').split('\0').filter(Boolean);
+      // new code and new test files; a file already untracked at session start is built from its start version
+      // when Codehere kept one (test files), and otherwise left as before
+      let n = 0;
+      for (const f of untracked) {
+        if (inDiff.has(nfc(f)) || !(isCheckFile(f) || languageOf(f) != null)) continue;
+        if (++n > 2000) break;
+        if (s.baseline && f in s.baseline) {
+          if (isCheckFile(f) && isMap(s.raw) && f in s.raw) build.set(f, s.raw[f]);
+        } else build.set(f, null);
+      }
+    }
+    for (const f of rawChanged) if (!inDiff.has(nfc(f)) && !build.has(f)) build.set(f, f in s.raw ? s.raw[f] : null);
+    for (const [f, from] of build) {
+      const built = builtDiff(root, f, from, s.rawAlgo || 'sha1');
+      if (built) {
+        nameStatus = `${nameStatus || ''}\n${built.status}`;
+        diff = `${diff || ''}\n${built.diff}`;
+      } else if (isCheckFile(f)) unread = true; // a test file changed and its change could not be read: never proven
+    }
     // a test file as it is now, to see what a swallowing catch holds: plain files only, up to 1 MiB
     const read = (f, max = 1024 * 1024) => {
       try {
@@ -1036,7 +1165,10 @@ function stop(root, input) {
       }
       return out;
     };
-    findings = tamperFindings(nameStatus || '', diff || '', { read, tests, testFiles });
+    // a lone test moved to another extension is a migration only if tests the repo had at session start use it
+    let baseList = null;
+    const baseTests = () => (baseList ||= (commitId(s.startHead) ? git(root, ['ls-tree', '-r', '-z', '--name-only', s.startHead], true) : '').split('\0').filter(isTestFile));
+    findings = tamperFindings(nameStatus || '', diff || '', { read, tests, testFiles: baseTests });
   }
   const key = findings.join('|');
   if (findings.length && s.tamperReported !== key && mayBlock) {
@@ -1117,11 +1249,12 @@ function stop(root, input) {
     }
     // ✓ only for intact evidence (DESIGN.md §1): not after a weakened test, nor after the
     // config that names the test command changed.
-    proven = !findings.length && !configChanged && !unread && !gitSettings.length;
+    proven = !findings.length && !configChanged && !unread && !gitSettings.length && !noRecord;
     if (findings.length) passLine = `codehere ✕ ${cmd} passed, but a check was weakened · ${noTick(findings.join(' · '))}`;
     else if (configChanged) passLine = `codehere ✕ ${cmd} passed, but .codehere/config.json changed during this session`;
     else if (unread) passLine = `codehere ✕ ${cmd} passed, but this session's diff could not be read · weakened tests not checked`;
     else if (gitSettings.length) passLine = `codehere ✕ ${cmd} passed, but git settings that change what a diff shows changed during this session`;
+    else if (noRecord) passLine = `codehere ✕ ${cmd} passed, but Codehere has no record of the test files from session start · weakened tests may be missed`;
     else passLine = `codehere ✓ ${cmd} · ${runResult(t)} · re-run here · ${t.seconds.toFixed(1)} s`;
     if (proven) {
       state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };

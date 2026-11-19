@@ -98,9 +98,9 @@ const NAME_PATTERNS = {
   ],
   py: [{ re: /^[ \t]*(?:async[ \t]+)?def[ \t]+(test\w*)[ \t]*\(/gm }],
   go: [{ re: /^func\s+(?:\([^)]{0,1000}\)\s*)?((?:Test|Benchmark|Fuzz|Example)\w*)\s*\(/gm }, { re: /\bt\.Run\(\s*"((?:\\.|[^"\\])*)"/g }, { re: /\bname:\s*"((?:\\.|[^"\\])*)"/g }],
-  rs: [{ re: /#\[(?:[\w:]+::)?test\b[^\]]{0,1000}\]\s*(?:#\[[^\]]{0,1000}\]\s*){0,20}(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)/g }],
+  rs: [{ re: /#\[(?:[\w:]+::)?test\b[^\]]{0,1000}\]\s*(?:#\[[^\]]{0,1000}\]\s*){0,20}(?:pub(?:\([^)\n]{0,200}\))?\s+)?(?:async\s+)?fn\s+(\w+)/g }],
   java: [
-    { re: /@(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b[^\n]{0,1000}\n(?:[ \t]*(?:@[^\n]{0,1000})?\n){0,20}[ \t]*(?:(?:public|private|protected|internal|open|override|suspend|static|final)\s+)*(?:void\s+|fun\s+)?`?([^`(\n]+?)`?\s*\(/g },
+    { re: /@(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b[^\n]{0,1000}\n(?:[ \t]*(?:@[^\n]{0,1000})?\n){0,20}[ \t]*(?:(?:public|private|protected|internal|open|override|suspend|static|final)\s+)*(?:void\s+|fun\s+)?`?([^`(\s][^`(\n]{0,199}?)`?[ \t]{0,40}\(/g },
     { re: /\bvoid\s+(test\w+)\s*\(/g },
   ],
   cs: [{ re: /\[\s*(?:Fact|Theory|Test|TestMethod|TestCase|TestCaseSource|SkippableFact)\b[^\]]{0,1000}\]\s*(?:\[[^\]]{0,1000}\]\s*){0,20}(?:(?:public|private|protected|internal|async|static|virtual|override)\s+)*[\w<>[\],.?]+\s+(\w+)\s*\(/g }],

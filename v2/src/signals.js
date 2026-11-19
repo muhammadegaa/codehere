@@ -134,6 +134,8 @@ export function similarity(a, b) {
 // ---------- test tampering ----------
 
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[a-z]+$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
+// The name a runner collects a test file by, wherever it is: pytest, jest and vitest do not collect test/cart.js.
+const TEST_NAME = /\.(test|spec)\.[a-z]+$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
 // Data the tests read, not tests: deleting or editing it is not counted as weakening a test.
 const FIXTURE = /(^|\/)(__fixtures__|fixtures?|__snapshots__|__mocks__|testdata)\//i;
 export const isTestFile = (file) => TEST_FILE.test(file) && !FIXTURE.test(file);
@@ -228,7 +230,7 @@ function stringMask(line) {
       i = end + 1;
       continue;
     } else if ((c === '/' && line[i + 1] === '/') || (c === '#' && (i <= 1 || /\s/.test(line[i - 1])))) break;
-    else if (c === '/' && (!last || '(,=:[!&|?{};+-*%<>~^'.includes(last))) {
+    else if (c === '/' && (!last || '(,=:[!&|?{};+-*%<>~^'.includes(last) || REGEX_AFTER.test(line.slice(Math.max(0, i - 12), i)))) {
       let j = i + 1;
       for (let inClass = false; j < line.length; j++) {
         if (line[j] === '\\') j++;
@@ -240,8 +242,10 @@ function stringMask(line) {
     }
     if (!/\s/.test(c)) last = line[i];
   }
+  mask.open = quote;
   return mask;
 }
+const REGEX_AFTER = /(?:^|[^\w$.])(?:return|typeof|void|delete|in|of|instanceof|new|throw|case|do|else|yield|await)\s*$/;
 
 // An assertion line with its values taken out. A removed and an added line with the same shape and other
 // values are one assertion whose expected value changed; assertTrue and assertFalse share a shape.
@@ -374,12 +378,23 @@ const LITERAL_RE = /(?<![\w.$])-?\d[\d_]*(?:\.\d+)?(?![\w$])|'((?:[^'\\]|\\.)*)'
 function literals(text) {
   return [...String(text).matchAll(LITERAL_RE)].map((m) => (m[1] !== undefined || m[2] !== undefined ? `s:${m[1] ?? m[2]}` : `n:${Number(m[0].replace(/_/g, ''))}`));
 }
-// The literals a condition compares with == or ===: price === 250, 250 == price. A literal inside arithmetic
-// (n % 15 === 0) is not an input the code singles out (cold review, L13 round 5).
+// The literals a condition singles an input out by: price === 250, 250 == price, [250].includes(price),
+// price in (250,), Object.is(price, 250). A literal inside arithmetic (n % 15 === 0) is not one (cold review,
+// L13 round 5); a comment after it does not make it arithmetic (round 6).
 const LIT = String.raw`-?\d[\d_]*(?:\.\d+)?(?![\w$])|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"`;
-const COMPARED = new RegExp(String.raw`(?<![=!<>])===?\s*(${LIT})(?!\s*[-+*/%])|(?<![-+*/%]\s*|[\w$.])(${LIT})\s*===?(?!=)`, 'g');
+const LITS = String.raw`(?:${LIT})(?:\s*,\s*(?:${LIT}))*\s*,?`;
+const COMPARED = new RegExp(
+  [
+    String.raw`(?<![=!<>])===?\s*(${LIT})(?!\s*(?:[-+*%]|\/(?![/*])))`,
+    String.raw`(?<![-+*/%]\s*|[\w$.])(${LIT})\s*===?(?!=)`,
+    String.raw`\[\s*(${LITS})\s*\]\s*\.includes\s*\(`,
+    String.raw`\bin\s*[[({]\s*(${LITS})\s*[\])}]`,
+    String.raw`\bObject\.is\s*\(([^()]*)\)`,
+  ].join('|'),
+  'g'
+);
 function comparedLiterals(cond) {
-  return [...String(cond).matchAll(COMPARED)].flatMap((m) => literals(m[1] ?? m[2]));
+  return [...String(cond).matchAll(COMPARED)].flatMap((m) => literals(m.slice(1).find((x) => x !== undefined)));
 }
 // Values too common to say anything when code returns them
 const DULL = new Set(['n:0', 'n:1', 'n:-1', 'n:2', 's:']);
@@ -405,6 +420,10 @@ const TEST_SETUP = /(^|\/)(conftest\.py|setupTests\.[cm]?[jt]sx?|(jest|vitest)\.
 
 // CI files, and the commands in them that run the tests
 const CI_FILE = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.gitlab-ci\.ya?ml$|(^|\/)\.circleci\/config\.ya?ml$|(^|\/)(azure|bitbucket)-pipelines\.ya?ml$/;
+// Every file that says what the tests are or how they run: test code in a language the scan reads, test configs,
+// test setup and CI files. Codehere keeps its own record of these at session start, so a change to one is read
+// even when git does not show it (docs/finish-check-promise.md). Data in a test folder is not one.
+export const isCheckFile = (f) => (isTestFile(f) && languageOf(f) != null) || isTestConfig(f) || CI_FILE.test(f) || TEST_SETUP.test(f);
 const TEST_CMD = /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|node\s+--test\b|(?:npx\s+)?(?:jest|vitest|mocha)\b|(?:python3?\s+-m\s+)?pytest\b|python3?\s+-m\s+unittest\b|go\s+test\b|cargo\s+test\b|make\s+test\b)/;
 const CI_ALWAYS_PASSES = new RegExp(TEST_CMD.source + String.raw`[^\n]*?(\|\|\s*(true|:|exit\s+0|echo\b)|;\s*(true|exit\s+0)\s*$)`);
 const CI_IGNORE = /^\s*(continue-on-error|allow_failure)\s*:\s*true\b/;
@@ -430,10 +449,16 @@ function blockRunsTests(lines, at, text) {
   return false;
 }
 
-// re found in the code of the line, not only inside its strings
+// re found in the code of the line, not only inside its strings. A ' or " string still open where the line ends
+// means the mask lost its place, as at a regex literal it read as a division: the whole line is then read as
+// code, so a stray quote cannot hide a skip (cold review, L13 round 6). Python's triple quotes and a line
+// continued with \ do open strings that end on a later line.
+const OPEN_ON_PURPOSE = /'''|"""|\\\s*$/;
 function inCode(re, line, mask) {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
-  for (const m of line.matchAll(g)) if (!mask()[m.index + (m[0].length - m[0].trimStart().length)]) return true;
+  let m = mask();
+  if ((m.open === "'" || m.open === '"') && !OPEN_ON_PURPOSE.test(line)) m = [];
+  for (const x of line.matchAll(g)) if (!m[x.index + (x[0].length - x[0].trimStart().length)]) return true;
   return false;
 }
 
@@ -448,7 +473,8 @@ export function tamperFindings(nameStatus, diff, opts) {
 // does not and relies on the diff's context lines. tests, when given, is the repo's test files as
 // "path\0content" (or a function returning them, called only when it is needed), for the expected values a
 // hardcoded answer would copy. testFiles, when given, is a function returning the paths of the repo's test
-// files (now, or at the commit), called only for a test renamed to another code extension.
+// files before the change (at session start, or at the commit's parent), called only for a test renamed to
+// another code extension.
 export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) {
   const events = [];
   const seen = new Set();
@@ -458,16 +484,23 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
     events.push({ kind, file, why });
   };
   const ext = (f) => (f.match(/\.[^./]+$/) || [''])[0];
-  // A rename to another code extension (.mjs to .ts) is a migration when other tests in the repo already use
-  // that extension. A lone test moved to one may stop running: Node 22's test runner skips .ts files, Node 24's
-  // runs them (cold review, L13 round 5).
+  // A rename to another code extension (.mjs to .ts) is a migration when tests the repo already had use that
+  // extension, or other tests made the same move in this change. A lone test moved to one may stop running:
+  // Node 22's test runner skips .ts files, Node 24's runs them (cold review, L13 round 5). A new file does not
+  // count, so an empty zz.test.ts added beside the move does not make it one (round 6, m6).
+  const entries = nameStatus.split('\n').map((line) => line.split('\t').map(unquotePath));
+  const renames = entries.filter(([status, file, to]) => /^R\d*$/.test(status) && file && to && isTestFile(file));
   let others = null;
-  const migrated = (to) => languageOf(to) != null && typeof testFiles === 'function' && (others ||= testFiles()).some((f) => f !== to && ext(f) === ext(to));
-  for (const line of nameStatus.split('\n')) {
-    const [status, file, to] = line.split('\t').map(unquotePath);
+  const migrated = (file, to) =>
+    languageOf(to) != null &&
+    (renames.some(([, a, b]) => b !== to && ext(a) === ext(file) && ext(b) === ext(to)) ||
+      (typeof testFiles === 'function' && (others ||= testFiles()).some((f) => f !== to && f !== file && ext(f) === ext(to))));
+  for (const [status, file, to] of entries) {
     if (status === 'D' && file && isTestFile(file)) add(DELETED, file, `test file deleted: ${file}`);
-    // a rename to a name that is not a test file, or to another extension (.off, .bak), hides the test
-    if (/^R\d*$/.test(status) && to && isTestFile(file) && (!isTestFile(to) || (ext(to) !== ext(file) && !migrated(to)))) add(DELETED, file, `test file renamed: ${file} to ${to}`);
+    // a rename to a name that is not a test file, that drops the test name inside a test folder (test/cart.test.mjs
+    // to test/cart.mjs), or to another extension (.off, .bak), hides the test
+    const dropsName = TEST_NAME.test(file) && !TEST_NAME.test(to);
+    if (/^R\d*$/.test(status) && to && isTestFile(file) && (!isTestFile(to) || dropsName || (ext(to) !== ext(file) && !migrated(file, to)))) add(DELETED, file, `test file renamed: ${file} to ${to}`);
   }
   let current = '';
   let removedAsserts = 0;

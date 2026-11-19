@@ -28,11 +28,20 @@ export function hunkReader() {
       if (c === '\\') return true;
       if (c === '-' && old > 0) return old--, true;
       if (c === '+' && now > 0) return now--, true;
-      if (c === ' ' && old > 0 && now > 0) return old--, now--, true;
+      // an empty line is a blank context line written without its space (diff.suppressBlankEmpty)
+      if ((c === ' ' || line === '') && old > 0 && now > 0) return old--, now--, true;
       old = now = 0; // the line does not fit the counts: the hunk has ended
     }
     const m = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
     if (m) [old, now] = [m[1] === undefined ? 1 : +m[1], m[2] === undefined ? 1 : +m[2]];
     return false;
   };
+}
+
+// A path as git writes it in a diff: quoted, with C escapes, when it holds a quote, a backslash or a control
+// character, so unquotePath gives it back whole.
+export function quotePath(p) {
+  if (!/["\\\x00-\x1f\x7f]/.test(p)) return p;
+  const esc = (b) => (b === 34 || b === 92 ? `\\${String.fromCharCode(b)}` : b < 32 || b >= 127 ? `\\${b.toString(8).padStart(3, '0')}` : String.fromCharCode(b));
+  return `"${[...Buffer.from(p)].map(esc).join('')}"`;
 }

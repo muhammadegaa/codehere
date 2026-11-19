@@ -346,6 +346,22 @@ const BIG = 512 * 1024 * 1024;
 // in .git/config or .git/info/attributes (cold review, L13 round 5).
 export const PLAIN_DIFF = ['--no-color', '--no-ext-diff', '--no-textconv', '--text', '--src-prefix=a/', '--dst-prefix=b/'];
 
+// Every git call runs with these over anything the repo or the user set (cold review, L13 round 6): no
+// fsmonitor program, which git would run inside the hook; no replace objects, which can swap the session's
+// start commit for one holding a gutted test; and blank context lines that keep their leading space. A call
+// that takes longer than GIT_TIMEOUT counts as failed, so the finish check says it could not read the diff.
+const extra = Number(process.env.GIT_CONFIG_COUNT) || 0;
+export const GIT_ENV = {
+  ...process.env,
+  GIT_NO_REPLACE_OBJECTS: '1',
+  GIT_CONFIG_COUNT: String(extra + 2),
+  [`GIT_CONFIG_KEY_${extra}`]: 'core.fsmonitor',
+  [`GIT_CONFIG_VALUE_${extra}`]: 'false',
+  [`GIT_CONFIG_KEY_${extra + 1}`]: 'diff.suppressBlankEmpty',
+  [`GIT_CONFIG_VALUE_${extra + 1}`]: 'false',
+};
+export const GIT_TIMEOUT = 30000;
+
 // Every git call with arguments from the repo or the state file: an array never goes through a shell, so a
 // file name such as a$(cmd).js stays a file name. The output is read whole, and null when git fails, so an
 // unread answer never looks like an empty one.
@@ -353,7 +369,7 @@ export function gitRead(root, args, input) {
   const [cmd, ...rest] = args;
   try {
     const all = ['--literal-pathspecs', cmd, ...(cmd === 'diff' || cmd === 'log' ? PLAIN_DIFF : []), ...rest];
-    return execFileSync('git', all, { cwd: root, input, stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'ignore'], maxBuffer: BIG }).toString();
+    return execFileSync('git', all, { cwd: root, input, stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'ignore'], maxBuffer: BIG, env: GIT_ENV, timeout: GIT_TIMEOUT }).toString();
   } catch {
     return null;
   }
@@ -378,7 +394,7 @@ export function gitPaths(root, args, paths) {
 // '' when git fails; a string is for fixed commands only.
 export function git(root, args, raw = false) {
   try {
-    const out = Array.isArray(args) ? (gitRead(root, args) ?? '') : execSync(`git ${args}`, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+    const out = Array.isArray(args) ? (gitRead(root, args) ?? '') : execSync(`git ${args}`, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], env: GIT_ENV, timeout: GIT_TIMEOUT }).toString();
     return raw ? out : out.trim();
   } catch {
     return '';
