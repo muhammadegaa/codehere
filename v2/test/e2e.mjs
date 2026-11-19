@@ -4647,6 +4647,78 @@ section(['R16'], () => {
   check("scan: a second path added to mocha's comma list is read", comma16.includes('left out'), comma16);
 });
 
+section(['R17'], () => {
+  // The cold review's round 17 (docs/reviews/2026-11-19-cold-review-round-17.md).
+  const cart17 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n    assert.equal(1 + 1, 2);\n  });\n});\n`;
+  const lines17 = (file, hunks, now, opts = {}) => tamperFindings(`M\t${file}`, [`--- a/${file}`, `+++ b/${file}`, ...hunks].join('\n'), { read: () => now, ...opts }).join(' · ');
+  const tox = { command: 'tox' };
+
+  // 1: a tox command continued with a backslash
+  const bs17 = lines17('tox.ini', ['@@ -3,0 +4 @@', '+        --deselect tests/test_cart.py::test_total \\'], '[testenv]\ncommands =\n    pytest --cov=cart \\\n        --deselect tests/test_cart.py::test_total \\\n        tests\n', tox);
+  check('scan: a --deselect on a backslash-continued line of a tox pytest command is read', bs17.includes('left out'), bs17);
+  const bsk17 = lines17('tox.ini', ['@@ -3,0 +4 @@', '+        -k "not total" \\'], '[testenv]\ncommands =\n    python -m pytest \\\n        -k "not total" \\\n        tests\n', tox);
+  check('scan: a -k on a backslash-continued line after python -m pytest is read', bsk17.includes('left out'), bsk17);
+
+  // 2: a -k counts by its places too; narrowed back only where it replaced the wider value
+  const integ17 = lines17('tox.ini', ['@@ -5 +5 @@', '-commands = pytest', '+commands = pytest -k "not network"'], '[testenv]\ncommands = pytest -k "not slow and not network"\n\n[testenv:integ]\ncommands = pytest -k "not network"\n', tox);
+  check('scan: a -k added to a second tox env, narrower than the first env\'s, is read', integ17.includes('left out'), integ17);
+  const swap17 = lines17('tox.ini', ['@@ -5 +5 @@', '-commands = pytest -k "not slow"', '+commands = pytest -k "not cart"'], '[testenv:a]\ncommands = pytest -k "not slow and not cart"\n\n[testenv:b]\ncommands = pytest -k "not cart"\n', tox);
+  check('scan: a -k changed to another term that a different env holds is read', swap17.includes('left out'), swap17);
+  const copy17 = lines17('tox.ini', ['@@ -5 +5 @@', '-commands = pytest', '+commands = pytest -k "not slow and not network"'], '[testenv]\ncommands = pytest -k "not slow and not network"\n\n[testenv:integ]\ncommands = pytest -k "not slow and not network"\n', tox);
+  check('scan: the same -k copied to a second existing tox env is read', copy17.includes('left out'), copy17);
+
+  // 3: tox by its path or in a subshell
+  for (const command of ['.venv/bin/tox', '/usr/local/bin/tox -e py312', '(cd . && tox)']) {
+    const got = lines17('tox.ini', ['@@ -2 +2 @@', '-commands = pytest', '+commands = pytest --deselect tests/t.py::test_a'], '[testenv]\ncommands = pytest --deselect tests/t.py::test_a\n', { command });
+    check(`scan: with ${command} approved, a --deselect added to tox commands is read`, got.includes('left out'), got);
+  }
+  const cfg17 = lines17('tox.ini', ['@@ -2 +2 @@', '-commands = pytest', '+commands = pytest --deselect tests/t.py::test_a'], '[testenv]\ncommands = pytest --deselect tests/t.py::test_a\n', { command: 'pytest -c ./tox.ini' });
+  check('scan, honest: pytest -c ./tox.ini approved does not make tox commands count', cfg17 === '', cfg17);
+
+  // 4: a new tox env that copies what every env already had
+  const newenv17 = lines17('tox.ini', ['@@ -2,0 +3,3 @@', '+', '+[testenv:py312]', '+commands = pytest --ignore=tests/manual'], '[testenv:py311]\ncommands = pytest --ignore=tests/manual\n\n[testenv:py312]\ncommands = pytest --ignore=tests/manual\n', tox);
+  check('scan, honest: a new tox env with the same --ignore as every env before is not a new filter', newenv17 === '', newenv17);
+  const newenvd17 = lines17('tox.ini', ['@@ -2,0 +3,3 @@', '+', '+[testenv:py312]', '+commands = pytest --ignore=tests/manual --deselect tests/t.py::test_a'], '[testenv:py311]\ncommands = pytest --ignore=tests/manual\n\n[testenv:py312]\ncommands = pytest --ignore=tests/manual --deselect tests/t.py::test_a\n', tox);
+  check('scan: a new tox env with a --deselect no env had is read', newenvd17.includes('--deselect'), newenvd17);
+
+  // 5: pytest's other config file names
+  r = (() => {
+    const dir = freshRepo('r17-dotini', { 'package.json': '{"name":"p","type":"module","scripts":{"test":"node --test"}}\n', 'test/cart.test.mjs': cart17, '.pytest.ini': '[pytest]\naddopts = -q\n' });
+    ch(['init', '--agent', 'claude'], dir);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', dir, 'y');
+    HC('session-start', dir, rec('claude', 'session-start', dir, 's17', { source: 'startup' }));
+    fs.writeFileSync(path.join(dir, '.pytest.ini'), '[pytest]\naddopts = -q --deselect test/cart.test.mjs::adds\n');
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, 's17', { stop_hook_active: false })), encoding: 'utf8', timeout: 60000 });
+    let j = {};
+    try {
+      j = JSON.parse(x.stdout || '{}');
+    } catch {}
+    return { out: x.stdout || '', j };
+  })();
+  check('finish check: a --deselect added to .pytest.ini sends the agent back', r.j.decision === 'block' && /left out/.test(r.j.reason) && !r.out.includes('✓'), r.out);
+  for (const file of ['pytest.toml', '.pytest.toml']) {
+    const got = lines17(file, ['@@ -2 +2 @@', '-addopts = ["-q"]', '+addopts = ["-q", "--deselect=tests/t.py::a"]'], '[pytest]\naddopts = ["-q", "--deselect=tests/t.py::a"]\n');
+    check(`scan: a --deselect added to ${file} is read`, got.includes('left out'), got);
+  }
+
+  // 6, 7: no throw on a line holding a line separator; a long line of type annotations read in linear time
+  let threw17 = '';
+  try {
+    lines17('pyproject.toml', ['@@ -2 +2 @@', '-addopts = "-q"', '+addopts = """-q --deselect t.py::a""" # note x'], '[tool.pytest.ini_options]\naddopts = """-q --deselect t.py::a""" # note x\n');
+  } catch (e) {
+    threw17 = e.message;
+  }
+  check('scan: an addopts """ line holding a line separator does not throw', threw17 === '', threw17);
+  const t17 = Date.now();
+  lines17('jest.config.js', ['@@ -1 +1 @@', '-// x', `+${'let a: '.repeat(20000)}`], `${'let a: '.repeat(20000)}\nmodule.exports = {};\n`);
+  check('scan: a 140 KB line of type annotations in a jest config is read in under 2 seconds', Date.now() - t17 < 2000, `${Date.now() - t17} ms`);
+
+  // 10: a list moved into a variable and spread back
+  const spread17 = lines17('jest.config.js', ['@@ -0,0 +1 @@', "+const ignored = ['/node_modules/', '/e2e/'];", '@@ -2 +3 @@', "-  testPathIgnorePatterns: ['/node_modules/', '/e2e/'],", '+  testPathIgnorePatterns: [...ignored],'], "const ignored = ['/node_modules/', '/e2e/'];\nmodule.exports = {\n  testPathIgnorePatterns: [...ignored],\n};\n");
+  check('scan, honest: a list moved into a variable and spread back under its key is not a new filter', spread17 === '', spread17);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

@@ -196,7 +196,8 @@ const FILTER_NAMES = String.raw`--test-skip-pattern|--test-name-pattern|--testPa
 const FILTER = new RegExp(String.raw`(?:^|\s)(${FILTER_NAMES})(?=[\s=]|$)`, 'g');
 const TEST_SCRIPT = /"(test(?::[^"]*)?)"\s*:\s*"((?:[^"\\]|\\.)*)"/;
 const ADDOPTS = /^[+-]\s*"?addopts"?\s*[=:](.*?)\r?$/; // pytest reads addopts: in an ini file too; a CRLF line (round 15)
-const PYTEST_CONFIG = /(^|\/)(pytest\.ini|pyproject\.toml|setup\.cfg|tox\.ini)$/;
+// pytest's config files, pytest 9's pytest.toml and the hidden names too (round 17)
+const PYTEST_CONFIG = /(^|\/)(\.?pytest\.ini|\.?pytest\.toml|pyproject\.toml|setup\.cfg|tox\.ini)$/;
 // The same, as keys in a runner's own config file
 const RUNNER_CONFIG = /(^|\/)(jest|vitest|playwright)\.config\.[\w.]+$|(^|\/)\.mocharc(\.[\w]+)?$/;
 const CONFIG_KEY = /(?:^|[\s{,'"])(testPathIgnorePatterns|testNamePattern|testIgnore|grepInvert|grep|invert|ignore)['"]?\s*:/g;
@@ -240,7 +241,7 @@ const narrows = (now, start) => {
   return !!a && !!b && [...a].every((t) => b.has(t));
 };
 function pytestArgs(file, text, inList = false) {
-  if (!/(^|\/)pyproject\.toml$/.test(file)) return shellWords(text);
+  if (!/\.toml$/.test(file)) return shellWords(text);
   const v = text.split('\n').map(dropComment).join('\n').trim(); // quotes inside a # comment are not items (round 15)
   return inList || v.startsWith('[') ? tomlItems(v) : shellWords(tomlItems(v)[0] ?? v);
 }
@@ -805,7 +806,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       }
       out[k] = stack.length ? stack[stack.length - 1] : null;
       // a list a variable holds (const ignored = [ ... ]) is placed under its name, for a key that names it (round 15)
-      const name = m ? null : /(?:const|let|var)\s+([\w$]+)\s*(?::[^=]*)?=\s*\[/.exec(line); // a type before the = (round 16)
+      const name = m ? null : /(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]{0,200})?=\s*\[/.exec(line); // a type before the = (round 16)
       for (const c of line.match(/[[\]]/g) || []) {
         if (c === '[') stack.push(m ? { kind: 'items', option: m[1], where: "by the test runner's config" } : name && !stack.length ? { kind: 'items', name: name[1] } : stack[stack.length - 1] || null);
         else stack.pop();
@@ -851,11 +852,13 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
     const out = new Map();
     // each value is counted by the places that set it, so a value one place sets, added in a second place (another
     // jest project, another tox env), is new there (round 16)
-    const put = (option, where, script, values) => {
+    const put = (option, where, script, values, place) => {
       const key = `${script || ''}\0${option}`;
-      const e = out.get(key) || out.set(key, { option, where, script, values: new Map() }).get(key);
+      const e = out.get(key) || out.set(key, { option, where, script, values: new Map(), places: new Map() }).get(key);
       for (const v of new Set(values)) e.values.set(v, (e.values.get(v) || 0) + 1);
+      if (place != null) for (const v of values) (e.places.get(place) || e.places.set(place, new Set()).get(place)).add(v);
     };
+    out.envs = new Set(); // tox envs whose commands run pytest, by section name
     if (/(^|\/)package\.json$/.test(file)) {
       let pkg = null;
       try {
@@ -882,9 +885,11 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       return out;
     }
     if (PYTEST_CONFIG.test(file)) {
-      const toml = /(^|\/)pyproject\.toml$/.test(file);
+      const toml = /\.toml$/.test(file);
       // tox's commands count when the approved command runs tox, as a command word (round 16: not tox.ini)
-      const tox = /(^|\/)tox\.ini$/.test(file) && /(^|[\s;&|(])tox(?=\s|$)/.test(String(command || ''));
+      // by its path or in a subshell too (.venv/bin/tox, (cd x && tox): round 17)
+      const tox = /(^|\/)tox\.ini$/.test(file) && /(^|[\s;&|(/])tox(?=[\s;&|)]|$)/.test(String(command || ''));
+      let section = '';
       const blocks = [];
       let block = null;
       for (const line of lines) {
@@ -899,28 +904,32 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
           if (!m) continue;
           // a list, or a multi-line string between """ or ''' (round 16)
           const triple = /^\s*("""|''')/.exec(m[1]);
-          const value = triple ? /^\s*"?addopts"?\s*=(.*)$/.exec(line)[1] : m[1];
+          const value = triple ? line.slice(line.indexOf('=') + 1) : m[1];
           const open = triple ? value.indexOf(triple[1], value.indexOf(triple[1]) + 3) < 0 : /^\s*\[/.test(value) && !closesList(value);
           blocks.push((block = { kind: 'addopts', text: [value], open, close: triple?.[1] }));
           continue;
         }
         if (/^\s*[#;]/.test(line)) continue; // an ini comment line
+        const header = /^\s*\[([^\]]+)\]/.exec(line);
+        if (header) section = header[1];
         if (block && /^\s+\S/.test(line)) {
           block.text.push(line);
           continue;
         }
         if (line.trim()) block = null;
         const m = /^\s*(addopts|commands)\s*[=:](.*)$/.exec(line);
-        if (m && (m[1] === 'addopts' || tox)) blocks.push((block = { kind: m[1], text: [m[2]] }));
+        if (m && (m[1] === 'addopts' || tox)) blocks.push((block = { kind: m[1], text: [m[2]], env: section }));
       }
       for (const b of blocks) {
         if (b.kind === 'commands') {
-          // each line is a command: only a pytest command's arguments are pytest's, not a linter's --ignore (round 16)
-          for (const cmd of b.text) {
+          // each line is a command, a line ending in \ joined with the next (round 17): only a pytest command's
+          // arguments are pytest's, not a linter's --ignore (round 16); each env is a place
+          for (const cmd of b.text.join('\n').split(/(?<!\\)\n/).map((c) => c.replace(/\\\n/g, ' '))) {
             const words = shellWords(cmd);
             const at = words.findIndex((w, i) => /(^|\/)py\.?test$/.test(w) || (w === '-m' && /^py\.?test$/.test(words[i + 1] || '')));
             if (at < 0) continue;
-            for (const f of argFilters(words.slice(at + (words[at] === '-m' ? 2 : 1)))) put(f.option, "by tox's commands", 'tox', [f.value]);
+            out.envs.add(b.env);
+            for (const f of argFilters(words.slice(at + (words[at] === '-m' ? 2 : 1)))) put(f.option, "by tox's commands", 'tox', [f.value], b.env);
           }
           continue;
         }
@@ -960,7 +969,8 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
           } else if (yaml) vals = quoted(v).length ? quoted(v) : v.replace(/^[\s[]+|[\s\]]+$/g, '').split(/\s*,\s*/).filter(Boolean);
           else {
             if (!v.trim()) v = nextValue(k);
-            vals = configValues(v);
+            // a ...spread names a variable's list; its own text is not a value (round 17)
+            vals = configValues(v.replace(/\.\.\.[\w$]+\s*,?/g, ''));
             for (const s of v.matchAll(/\.\.\.([\w$]+)/g)) refs.push([m[1], s[1]]);
           }
           if (!yaml && vals.length === 1 && !quoted(v).length && /^[A-Za-z_$][\w$]*$/.test(vals[0])) refs.push([m[1], vals[0]]);
@@ -968,7 +978,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
         }
         if (keys.length) return;
         // a list a variable holds: the values on its own line too, and a type before the = (round 16)
-        const decl = yaml ? null : /(?:const|let|var)\s+([\w$]+)\s*(?::[^=]*)?=\s*(\[.*)$/.exec(line);
+        const decl = yaml ? null : /(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]{0,200})?=\s*(\[.*)$/.exec(line.slice(0, 10000)); // bounded (round 17)
         if (decl) lists.set(decl[1], [...(lists.get(decl[1]) || []), ...itemValues(ownValue(`x:${decl[2]}`, 'x', 0), false)]);
         const p = places[k];
         if (p?.kind !== 'items') return;
@@ -1009,10 +1019,17 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       if (!start) continue;
       wholeFile.add(file);
       const before = configFilters(file, start.lines);
-      for (const [key, f] of configFilters(file, now.split('\n'))) {
+      const after = configFilters(file, now.split('\n'));
+      const newEnvs = [...after.envs].filter((e) => !before.envs.has(e));
+      for (const [key, f] of after) {
         const had = before.get(key)?.values || new Map();
-        // set in more places than at the start; a -k narrowed back to fewer not-terms runs more tests, not fewer (round 16)
-        const added = [...f.values].some(([v, n]) => n > (had.get(v) || 0) && !(f.option === '-k' && [...had.keys()].some((s) => narrows(v, s))));
+        const hadPlaces = before.get(key)?.places || new Map();
+        // a new tox env that sets what every env set at the start is a copy of them, not a filter (round 17)
+        const copies = (v) => (before.envs.size && [...before.envs].every((e) => hadPlaces.get(e)?.has(v)) ? newEnvs.filter((e) => f.places.get(e)?.has(v)).length : 0);
+        // set in more places than at the start (round 16); a -k narrowed back runs more tests, but only where it
+        // replaced the wider value it narrows (round 17)
+        const narrowed = (v) => f.option === '-k' && [...had].some(([s, m]) => narrows(v, s) && (f.values.get(s) || 0) < m);
+        const added = [...f.values].some(([v, n]) => n - copies(v) > (had.get(v) || 0) && !narrowed(v));
         if (added && (f.script == null || f.script === 'tox' || runsTests(f.script, file))) add(SKIPPED, file, `tests were left out ${f.where} (${f.option}) in ${file}`);
       }
     }
