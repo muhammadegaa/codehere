@@ -12,7 +12,7 @@ import {
   removedAt, expireDrafts, draftFile, saveRecord, readPlain, readOwn, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
-  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile, isCheckFile, isTestCode, isCiFile,
+  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile, isCheckFile, isTestCode, isCiFile, ciFileIn,
 } from './signals.js';
 import { languageOf } from './noskip.js';
 import { unquotePath, quotePath } from './gitpath.js';
@@ -386,9 +386,9 @@ const RAW_LIMIT = 200000;
 const blobId = (algo, bytes) => crypto.createHash(algo).update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 const isBlobId = (x) => typeof x === 'string' && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(x);
 const statKey = (st) => `${st.ino}:${st.ctimeMs}:${st.mtimeMs}:${st.size}`;
-function fileId(file, algo, stats, r) {
+function fileId(file, algo, stats, r, follow = false) {
   try {
-    const st = fs.lstatSync(file);
+    const st = (follow ? fs.statSync : fs.lstatSync)(file);
     if (stats) stats[r] = statKey(st);
     if (!algo) return null;
     if (st.isSymbolicLink()) return `link:${fs.readlinkSync(file)}`;
@@ -418,10 +418,12 @@ export function rawSnapshot(root, algo, { skip = [], stats = null, keep = new Se
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
         if (!NEVER_WALK.has(e.name) && !skipped.has(r) && !walk(path.join(dir, e.name), r)) return false;
-      } else if (isCheckFile(r)) files[r] = fileId(path.join(dir, e.name), algo, stats, r);
+      } else if (isCheckFile(r) && !skipped.has(r) && !(up && isCiFile(r))) files[r] = fileId(path.join(dir, e.name), algo, stats, r);
     }
     return true;
   };
+  // skip: folders git ignored at session start, and test code it ignored by its own name (round 12); up: in a
+  // subfolder setup, the package's own .github/workflows is not the repo's CI (round 12)
   if (!walk(root, '')) return null;
   const levels = /^\.\.(\/\.\.)*$/.test(up) ? up.split('/').length : 0;
   const entries = (dir) => {
@@ -434,7 +436,8 @@ export function rawSnapshot(root, algo, { skip = [], stats = null, keep = new Se
   for (let k = 1; k <= levels; k++) {
     const pre = '../'.repeat(k);
     const dir = path.resolve(root, pre);
-    for (const e of entries(dir)) if (e.isFile() && isCheckFile(pre + e.name) && !isTestCode(pre + e.name)) files[pre + e.name] = fileId(path.join(dir, e.name), algo, stats, pre + e.name);
+    // a parent config that is a link counts by the bytes of the file it points to (round 12)
+    for (const e of entries(dir)) if ((e.isFile() || e.isSymbolicLink()) && isCheckFile(pre + e.name) && !isTestCode(pre + e.name)) files[pre + e.name] = fileId(path.join(dir, e.name), algo, stats, pre + e.name, true);
     if (k < levels) continue;
     for (const sub of ['.github/workflows', '.circleci']) {
       for (const e of entries(path.join(dir, sub))) {
@@ -462,6 +465,10 @@ function adoptStart(root, s) {
   const r = readRecord(root, s);
   if (r && commitId(r.startHead)) s.startHead = r.startHead;
   if (r && isMap(r.baseline)) s.baseline = r.baseline;
+  // and the snapshots of its settings and team files, so a change to the agent's hooks is still reported (round 12)
+  for (const k of ['settings', 'gitSettings', 'team']) if (r && isMap(r[k])) s[k] = r[k];
+  if (r && commitId(r.teamHead)) s.teamHead = r.teamHead;
+  if (r && typeof r.startedAt === 'string') s.startedAt = r.startedAt;
 }
 
 // The record, and the start version of each file written into git's object store when it is not there yet (a
@@ -475,7 +482,11 @@ function keepRecord(root, state, s, key) {
   try {
     up = path.relative(fs.realpathSync(root), fs.realpathSync(git(root, ['rev-parse', '--show-toplevel']) || root)).split(path.sep).join('/');
   } catch {}
-  const ids = rawSnapshot(root, algo, { skip, up });
+  const first = rawSnapshot(root, algo, { skip, up });
+  // test code git ignores by its own name is build output, as an ignored folder is (round 12)
+  const ignoredByName = first ? new Set((gitRead(root, ['check-ignore', '-z', '--stdin'], Object.keys(first).filter(isTestCode).join('\0') + '\0') ?? '').split('\0').filter(Boolean)) : new Set();
+  for (const f of ignoredByName) skip.push(f), delete first[f];
+  const ids = first;
   s.record = recordName(key);
   delete s.raw; // kept in state.json before round 7
   delete s.rawAlgo;
@@ -486,7 +497,8 @@ function keepRecord(root, state, s, key) {
     fs.mkdirSync(dir, { recursive: true });
     const tmp = `${file}.${crypto.randomBytes(6).toString('hex')}.tmp`;
     // the session's start commit and snapshot too, so a session state.json loses keeps them (round 11)
-    fs.writeFileSync(tmp, JSON.stringify({ algo, ids, skip, up, startHead: s.startHead || null, baseline: s.baseline || null }), { flag: 'wx' });
+    const kept = { startHead: s.startHead || null, baseline: s.baseline || null, settings: s.settings || null, gitSettings: s.gitSettings || null, team: s.team || null, teamHead: s.teamHead || null, startedAt: s.startedAt || null };
+    fs.writeFileSync(tmp, JSON.stringify({ algo, ids, skip, up, ...kept }), { flag: 'wx' });
     fs.renameSync(tmp, file);
     // a record no session in state.json names, and older than an hour: a session starting at the same moment
     // may not be in this copy of the state yet (round 8, m2)
@@ -516,7 +528,7 @@ function builtDiff(root, file, from, algo, gone = false, known = null) {
   const abs = path.join(root, file);
   let st = null;
   try {
-    if (!gone) st = fs.lstatSync(abs);
+    if (!gone) st = (file.startsWith('../') ? fs.statSync : fs.lstatSync)(abs); // a parent config may be a link (round 12)
   } catch {}
   if ((st && !st.isFile()) || (!st && !from) || (from != null && !isBlobId(from)) || file.includes('\n')) return null;
   const head = `diff --git ${quotePath(`a/${file}`)} ${quotePath(`b/${file}`)}\n--- ${from ? quotePath(`a/${file}`) : '/dev/null'}\n+++ ${st ? quotePath(`b/${file}`) : '/dev/null'}\n`;
@@ -1196,6 +1208,7 @@ function stop(root, input) {
   const rawStats = {}; // when each file was last touched, to see one change while the tests run
   const held = new Set(record ? Object.keys(record.ids).flatMap((f) => f.split('/').slice(0, -1).map((_, i, p) => p.slice(0, i + 1).join('/'))) : []);
   const up = typeof record?.up === 'string' ? record.up : '';
+  const isCi = ciFileIn(up);
   const rawNow = record ? rawSnapshot(root, record.algo, { skip: record.skip, stats: rawStats, keep: held, up }) : null;
   // A new file in a folder git ignores now is a build or an install (tests copied, package files, a config copied: rounds
   // 8 to 10), and so is new test code git ignores by its own name (a build writing next to the sources: round 11): not
@@ -1268,7 +1281,7 @@ function stop(root, input) {
         // deletion: the new file is read from its own start (round 8, B3 and B4)
         if (recorded(to) && (!nowSet.has(nfc(to)) || rawStart.has(nfc(to)))) continue;
         kept.push(line);
-        if (!(isCiFile(from) && !isCiFile(to))) movedAway.add(nfc(from)); // a CI file moved out: its lines read as removed (round 11)
+        if (!(isCi(from) && !isCi(to))) movedAway.add(nfc(from)); // a CI file moved out: its lines read as removed (round 11)
         if (recorded(to)) renamedFrom.set(nfc(to), nfc(from));
       } else if (!recorded(from) && !(to && recorded(to))) kept.push(line);
     }
@@ -1368,7 +1381,7 @@ function stop(root, input) {
     // a lone test moved to another extension is a migration only if tests the repo had at session start use it
     let baseList = null;
     const baseTests = () => (baseList ||= (commitId(s.startHead) ? git(root, ['ls-tree', '-r', '-z', '--name-only', s.startHead], true) : '').split('\0').filter(isTestFile));
-    findings = tamperFindings(nameStatus || '', diff || '', { read, tests, testFiles: baseTests });
+    findings = tamperFindings(nameStatus || '', diff || '', { read, tests, testFiles: baseTests, command: cfg.testCommand, up });
   }
   const key = findings.join('|');
   if (findings.length && s.tamperReported !== key && mayBlock) {

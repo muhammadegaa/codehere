@@ -204,11 +204,19 @@ function filtersOn(file, line) {
   let text = null;
   let where = '';
   let script = null;
-  if (/(^|\/)package\.json$/.test(file)) ([, script = null, text = null] = TEST_SCRIPT.exec(line) || []), (where = 'by the test script');
-  else if (PYTEST_CONFIG.test(file)) (text = (ADDOPTS.exec(line) || [])[1] ?? null), (where = "by the test runner's options");
-  else if (RUNNER_CONFIG.test(file)) (text = line.slice(1)), (where = "by the test runner's config");
+  let re = FILTER;
+  if (/(^|\/)package\.json$/.test(file)) {
+    [, script = null, text = null] = TEST_SCRIPT.exec(line) || [];
+    where = 'by the test script';
+    // the script as npm runs it: \" is a quote (round 12)
+    try {
+      if (text != null) text = JSON.parse(`"${text}"`);
+    } catch {}
+    // jest's own config under package.json's "jest" key (round 12)
+    if (text == null && PKG_JEST_KEY.test(line)) (text = line.slice(1)), (where = "by the test runner's config"), (re = PKG_JEST_KEY_G);
+  } else if (PYTEST_CONFIG.test(file)) (text = (ADDOPTS.exec(line) || [])[1] ?? null), (where = "by the test runner's options");
+  else if (RUNNER_CONFIG.test(file)) (text = line.slice(1)), (where = "by the test runner's config"), (re = CONFIG_KEY);
   if (text == null) return [];
-  const re = RUNNER_CONFIG.test(file) ? CONFIG_KEY : FILTER;
   const found = [...text.matchAll(re)].map((m) => ({ option: m[1], where, script, text }));
   // jest's and vitest's -t (--testNamePattern); mocha's -t is a timeout, so only after jest or vitest as the command
   // word, not inside jest-extended or vitest.config.ts (rounds 9 and 10)
@@ -216,6 +224,8 @@ function filtersOn(file, line) {
   return found;
 }
 const JEST_T = /(?:^|[\s;&|(/])(?:jest|vitest)(?:\.[cm]?js)?\s(?:[^&|;]*?\s)?-t(?=[\s=]|$)/; // also by its path (round 11)
+const PKG_JEST_KEY = /"(testPathIgnorePatterns|testNamePattern)"\s*:/;
+const PKG_JEST_KEY_G = new RegExp(PKG_JEST_KEY.source, 'g');
 
 // Which characters of a line are inside a string literal: test code often writes another test as
 // text, and a skip in that text is not a skip. One line at a time, so a string that spans lines (a
@@ -431,18 +441,34 @@ const TEST_SETUP = /(^|\/)(conftest\.py|setupTests\.[cm]?[jt]sx?|(jest|vitest)\.
 
 // CI files, and the commands in them that run the tests
 // at the repo's top, where CI reads them: one moved elsewhere no longer runs (round 10)
-const CI_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$|^\.gitlab-ci\.ya?ml$|^\.circleci\/config\.ya?ml$|^(azure|bitbucket)-pipelines\.ya?ml$/;
+const CI_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$|^\.gitlab-ci\.yml$|^\.circleci\/config\.yml$|^(azure|bitbucket)-pipelines\.yml$/; // the names each reads by default (round 12)
 // Every file that says what the tests are or how they run: test code in a language the scan reads, test configs,
 // test setup and CI files. Codehere keeps its own record of these at session start, so a change to one is read
 // even when git does not show it (docs/finish-check-promise.md). Data in a test folder is not one.
 // A CI file at the repo's top; ../ in front when Codehere is set up in a subfolder of the repo (round 11)
 export const isCiFile = (f) => CI_FILE.test(String(f).replace(/^(\.\.\/)+/, ''));
+// The same for a known setup: up is the path from Codehere's folder to the repo's top ('' at the top, '../..' in a
+// package), so the package's own .github/workflows is not the repo's CI (round 12)
+export const ciFileIn = (up) => (f) => (up ? String(f).startsWith(`${up}/`) && CI_FILE.test(String(f).slice(up.length + 1)) : CI_FILE.test(String(f)));
 export const isCheckFile = (f) => (isTestFile(f) && languageOf(f) != null) || isTestConfig(f) || isCiFile(f) || TEST_SETUP.test(f);
 // Test code only: a check file that is not a config, setup or CI file. New test code in a folder git ignores is a
 // build or an install, not the agent's tests; a new config or setup file changes how the tests run wherever it is.
 export const isTestCode = (f) => isCheckFile(f) && !isTestConfig(f) && !isCiFile(f) && !TEST_SETUP.test(f);
-const TEST_CMD = /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|node\s+--test\b|(?:npx\s+)?(?:jest|vitest|mocha)\b|(?:python3?\s+-m\s+)?pytest\b|python3?\s+-m\s+unittest\b|go\s+test\b|cargo\s+test\b|make\s+test\b)/;
-const CI_ALWAYS_PASSES = new RegExp(TEST_CMD.source + String.raw`[^\n]*?(\|\|\s*(true|:|exit\s+0|echo\b)|;\s*(true|exit\s+0)\s*$)`);
+// the common runners, workspace tools and build tools that run the tests (round 12)
+const TEST_CMD = new RegExp(
+  [
+    String.raw`\b(?:npm|pnpm|yarn|bun)\b[^\n|&;]*?\btest\b`,
+    String.raw`\b(?:turbo|nx|lerna)\b[^\n|&;]*?\btest\b`,
+    String.raw`\bnode\s+--test\b`,
+    String.raw`\b(?:npx\s+)?(?:jest|vitest|mocha)\b`,
+    String.raw`\b(?:python3?\s+-m\s+)?pytest\b|\bpython3?\s+-m\s+unittest\b|\btox\b|\bnox\b`,
+    String.raw`\bgo\s+test\b|\bcargo\s+(?:test|nextest)\b|\bmake\s+(?:test|check)\b|\bctest\b`,
+    String.raw`\bgradlew?\b[^\n|&;]*?\b(?:test|check|build)\b|\bmvnw?\b[^\n|&;]*?\b(?:test|verify|install|package)\b`,
+    String.raw`\bdotnet\s+test\b|\b(?:bundle\s+exec\s+)?(?:rspec|rake\s+test)\b|\bmix\s+test\b|\bswift\s+test\b`,
+    String.raw`\bphpunit\b|\bpest\b|\b(?:dart|flutter)\s+test\b`,
+  ].join('|')
+);
+const CI_ALWAYS_PASSES = new RegExp(`(?:${TEST_CMD.source})` + String.raw`[^\n]*?(\|\|\s*(true|:|exit\s+0|echo\b)|;\s*(true|exit\s+0)\s*$)`);
 const CI_IGNORE = /^\s*(continue-on-error|allow_failure)\s*:\s*true\b/;
 
 // Whether the YAML block a key at line `at` belongs to (its step or job) runs the tests.
@@ -492,7 +518,9 @@ export function tamperFindings(nameStatus, diff, opts) {
 // hardcoded answer would copy. testFiles, when given, is a function returning the paths of the repo's test
 // files before the change (at session start, or at the commit's parent), called only for a test renamed to
 // another code extension.
-export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command } = {}) {
+export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command, up = '' } = {}) {
+  // CI files at the repo's top: with Codehere set up in a subfolder, a path from root that starts with up/ (round 12)
+  const isCi = ciFileIn(up);
   const events = [];
   const seen = new Set();
   const add = (kind, file, why) => {
@@ -519,39 +547,111 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
     const dropsName = TEST_NAME.test(file) && !TEST_NAME.test(to);
     if (/^R\d*$/.test(status) && to && isTestFile(file) && (!isTestFile(to) || dropsName || (ext(to) !== ext(file) && !migrated(file, to)))) add(DELETED, file, `test file renamed: ${file} to ${to}`);
   }
-  // A test:* script counts unless nothing can run it: no other script names it or holds a glob (run-s test:*), and
-  // the approved command does not name it. A side script such as test:smoke, called by nothing, is not what the
-  // tests run (round 10); a chain or a glob is (round 11). Without the file as it is now (the audit), every one counts.
+  // A test:* script counts unless nothing can run it: no other script names it or holds a glob matching it
+  // (run-s test:*; a lint glob such as "src/**/*.js" is not one: round 12), and the approved command does not name it.
+  // A side script such as test:smoke, called by nothing, is not what the tests run (round 10); a chain or a glob is
+  // (round 11). Without the file as it is now (the audit), every one counts.
   const runsTests = (script) => {
     if (!script || script === 'test' || !read) return true;
     try {
       const scripts = JSON.parse(read(current) || '{}').scripts || {};
-      const named = Object.entries(scripts).some(([k, v]) => k !== script && typeof v === 'string' && (v.includes(script) || v.includes('*')));
+      const globbed = (v) => (v.match(/[\w-]+:[\w:*-]*\*[\w:*-]*/g) || []).some((g) => new RegExp(`^${g.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`).test(script));
+      const named = Object.entries(scripts).some(([k, v]) => k !== script && typeof v === 'string' && (v.includes(script) || globbed(v)));
       return named || String(command || '').includes(script);
     } catch {
       return true;
     }
   };
   // A filter option's values: a filter that already held some is new again when a value is added, such as a second
-  // path in testPathIgnorePatterns or a second --ignore (round 11)
+  // path in testPathIgnorePatterns or a second --ignore (round 11). In a config, only the key's own value counts, not
+  // other keys on the same line (round 12).
   const filterKey = (f) => `${f.script || ''}\0${f.option}`;
+  const ownValue = (text, key) => {
+    const at = text.indexOf(key);
+    if (at < 0) return text;
+    const rest = text.slice(at + key.length).replace(/^['"]?\s*:\s*/, '');
+    const end = rest.startsWith('[') ? rest.indexOf(']') + 1 : rest.search(/[,}]/);
+    return end > 0 ? rest.slice(0, end) : rest;
+  };
+  const quoted = (text) => [...text.matchAll(/'([^']*)'|"([^"]*)"|`([^`]*)`/g)].map((m) => m[1] ?? m[2] ?? m[3]);
   const filterValues = (f) => {
-    if (f.where === "by the test runner's config") return [...f.text.matchAll(/'([^']*)'|"([^"]*)"|`([^`]*)`/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+    if (f.where === "by the test runner's config") return quoted(ownValue(f.text, f.option));
     const opt = f.option.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
     return [...f.text.matchAll(new RegExp(`(?:^|\\s)${opt}(?:=|\\s+)("[^"]*"|'[^']*'|[^\\s"']+)`, 'g'))].map((m) => m[1]);
   };
-  const filterSeen = (f) => {
-    const had = hadFilters.get(filterKey(f)) || new Set();
+  // a key line that opens a list whose items come on the next lines: the items are judged one by one
+  const opensList = (f) => f.where === "by the test runner's config" && /\[[^\]]*$/.test(ownValue(f.text, f.option));
+  const filterSeen = (had, f) => {
+    const set = had.get(filterKey(f)) || new Set();
     const vals = filterValues(f);
-    vals.forEach((v) => had.add(v));
-    if (!vals.length) had.add('');
-    hadFilters.set(filterKey(f), had);
+    vals.forEach((v) => set.add(v));
+    if (!vals.length) set.add('');
+    had.set(filterKey(f), set);
   };
-  const filterIsNew = (f) => {
+  const filterIsNew = (f, extra = new Set()) => {
     const had = hadFilters.get(filterKey(f));
     const vals = filterValues(f);
-    return runsTests(f.script) && (!had || (vals.length ? vals.some((v) => !had.has(v)) : !had.has('')));
+    if (!runsTests(f.script)) return false;
+    if (opensList(f)) return !had;
+    return !had || (vals.length ? vals.some((v) => !had.has(v) && !extra.has(v)) : !had.has(''));
   };
+  // A line inside a list or an addopts block that starts on an earlier line: the file as it is now says which key
+  // it belongs to (testPathIgnorePatterns: [ ... ], addopts = then indented lines: round 12). One pass over the file
+  // works out every line's key, so a long config costs one read (a line-by-line walk timed out on 200,000 lines).
+  // Null without the file.
+  const keyed = new Map();
+  const enclosing = (file, at) => {
+    if (!read || !at) return null;
+    if (!keyed.has(file)) {
+      const lines = (read(file) || '').split('\n');
+      const out = new Array(lines.length).fill(null);
+      const pytest = PYTEST_CONFIG.test(file);
+      const keyRe = RUNNER_CONFIG.test(file) ? new RegExp(CONFIG_KEY.source) : /(^|\/)package\.json$/.test(file) ? PKG_JEST_KEY : null;
+      const stack = [];
+      let inAddopts = false;
+      for (let k = 0; k < lines.length; k++) {
+        const line = lines[k].slice(0, 10000);
+        if (pytest) {
+          // ini continuation lines are indented under their key; pyproject's addopts = [ items are too
+          if (/^\s+\S/.test(line)) out[k] = inAddopts ? { kind: 'options', where: "by the test runner's options" } : null;
+          else if (line.trim()) inAddopts = /^\s*"?addopts"?\s*=/.test(line);
+          continue;
+        }
+        if (!keyRe) continue;
+        out[k] = stack.length ? stack[stack.length - 1] : null;
+        const m = keyRe.exec(line);
+        for (const c of line.match(/[[\]]/g) || []) {
+          if (c === '[') stack.push(m ? { kind: 'items', option: m[1], where: "by the test runner's config" } : stack[stack.length - 1] || null);
+          else stack.pop();
+        }
+      }
+      keyed.set(file, out);
+    }
+    return keyed.get(file)[at - 1] || null;
+  };
+  // Every filter a removed line of a test config held, per file, before any added line is judged: with -U0 a line
+  // that moved up comes before its removal (round 12). Quoted values on removed lines with no key are kept too, for
+  // list items that moved.
+  const removedFilters = new Map();
+  const removedItems = new Map();
+  {
+    const inPre = hunkReader();
+    let file = '';
+    let old = '';
+    for (const line of diff.split('\n')) {
+      const body = inPre(line);
+      if (!body && line.startsWith('--- ')) old = unquotePath(line.slice(4).replace(/\t$/, '')).replace(/^a\//, '');
+      else if (!body && line.startsWith('+++ ')) {
+        file = unquotePath(line.slice(4).replace(/\t$/, '')).replace(/^b\//, '');
+        if (file === '/dev/null' && isCi(old)) file = old;
+      } else if (line.startsWith('-') && !(!body && line.startsWith('--- ')) && isTestConfig(file)) {
+        const found = filtersOn(file, line.slice(0, 10000));
+        if (!removedFilters.has(file)) removedFilters.set(file, new Map());
+        found.forEach((f) => filterSeen(removedFilters.get(file), f));
+        if (!found.length) quoted(line).forEach((v) => (removedItems.get(file) || removedItems.set(file, new Set()).get(file)).add(v));
+      }
+    }
+  }
   let oldPath = ''; // the file a "--- a/" header names: a deleted CI file's lines are read under its own name (round 10)
   let current = '';
   let removedAsserts = 0;
@@ -576,7 +676,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
     const body = inHunk(line);
     if (!body && line.startsWith('+++ ')) {
       current = unquotePath(line.slice(4).replace(/\t$/, '')).replace(/^b\//, ''); // git ends a path holding a space with a tab
-      if (current === '/dev/null' && isCiFile(oldPath)) current = oldPath;
+      if (current === '/dev/null' && isCi(oldPath)) current = oldPath;
       removed = new Set();
       removedShapes = new Map();
       removedValueChecks = new Map();
@@ -584,7 +684,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       pendingCatch = 0;
       prevText = '';
       hadFallback = false;
-      hadFilters = new Map();
+      hadFilters = new Map([...(removedFilters.get(current) || new Map())].map(([k, v]) => [k, new Set(v)]));
       continue;
     }
     if (!body && line.startsWith('--- ')) {
@@ -599,7 +699,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
     if (!line.startsWith('-')) newLine++;
     if (at && at <= 20000) fileLines[at - 1] = line.slice(1);
     const inTest = isTestFile(current);
-    if (isCiFile(current) && !COMMENT.test(line)) {
+    if (isCi(current) && !COMMENT.test(line)) {
       const text = line.slice(1, 10001);
       if (line.startsWith('-') && TEST_CMD.test(text)) ciRemoved.push(current);
       if (line.startsWith('+') && TEST_CMD.test(text)) ciAdded++;
@@ -631,10 +731,20 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       if (line.startsWith('-')) hadFallback = true;
       else if (!hadFallback) add(CHECKS_OFF, current, `the test script was changed to always exit 0 in ${current}`);
     }
-    if (isTestConfig(current)) {
-      for (const f of filtersOn(current, probe)) {
-        if (line.startsWith('-')) filterSeen(f);
-        else if (line.startsWith('+') && filterIsNew(f)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+    if (isTestConfig(current) && line.startsWith('+')) {
+      const found = filtersOn(current, probe);
+      for (const f of found) if (filterIsNew(f)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+      const inside = found.length ? null : enclosing(current, at);
+      const extra = removedItems.get(current) || new Set();
+      if (inside?.kind === 'items') {
+        const f = { option: inside.option, where: inside.where, script: null, text: probe.slice(1) };
+        if (quoted(f.text).length && filterIsNew(f, extra)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+      } else if (inside?.kind === 'options') {
+        const text = probe.slice(1).replace(/["',]/g, ' ');
+        for (const m of text.matchAll(FILTER)) {
+          const f = { option: m[1], where: inside.where, script: null, text };
+          if (filterIsNew(f, extra)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+        }
       }
     }
     if (line.startsWith('+')) {

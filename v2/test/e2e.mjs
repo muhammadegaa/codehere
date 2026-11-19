@@ -4129,6 +4129,129 @@ section(['R11'], () => {
   check('scan: a deleted CI workflow whose name holds a space is read', tab11.includes('CI'), tab11);
 });
 
+section(['R12'], () => {
+  // The cold review's round 12 (docs/reviews/2026-11-19-cold-review-round-12.md), against the bounded promise.
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart12 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const repo12 = (name, files = { 'test/cart.test.mjs': cart12 }, scripts = { test: 'node --test' }, { sub = '', command = null } = {}) => {
+    const pkg = `${JSON.stringify({ name: 'p', type: 'module', scripts }, null, 2)}\n`;
+    const dir = freshRepo(`r12-${name}`, { [sub ? `${sub}/package.json` : 'package.json']: pkg, ...files });
+    const at = sub ? path.join(dir, sub) : dir;
+    ch(['init', '--agent', 'claude'], at);
+    if (command) {
+      const cfg = JSON.parse(fs.readFileSync(path.join(at, '.codehere/config.json'), 'utf8'));
+      fs.writeFileSync(path.join(at, '.codehere/config.json'), JSON.stringify({ ...cfg, testCommand: command }, null, 2) + '\n');
+    }
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', at, 'y');
+    return at;
+  };
+  const start12 = (dir, sid = 's12') => HC('session-start', dir, rec('claude', 'session-start', dir, sid, { source: 'startup' }));
+  const stop12 = (dir, sid = 's12') => {
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, sid, { stop_hook_active: false })), encoding: 'utf8', timeout: 120000 });
+    let j = {};
+    try {
+      j = x.stdout ? JSON.parse(x.stdout) : {};
+    } catch {}
+    return { out: x.stdout || '', j };
+  };
+  const ticked12 = (x) => x.out.includes('✓');
+  const src12 = (d) => fs.writeFileSync(path.join(d, 'src.js'), `export const x = ${Date.now()};\n`);
+  const edit12 = (d, f, fn) => fs.writeFileSync(path.join(d, f), fn(fs.readFileSync(path.join(d, f), 'utf8')));
+  const scan12 = (file, minus, plus, opts = {}) => tamperFindings(`M\t${file}`, diff27(file, minus, plus), opts).join(' · ');
+
+  // 1: the approved command names a test:* script
+  r = (() => {
+    const d = repo12('approved-script', { 'test/cart.test.mjs': cart12 }, { lint: 'node -e 0', 'test:unit': 'node --test' }, { command: 'npm run test:unit --silent' });
+    start12(d);
+    edit12(d, 'package.json', (t) => t.replace('"test:unit": "node --test"', '"test:unit": "node --test --test-skip-pattern=adds"'));
+    return stop12(d);
+  })();
+  check('finish check: a filter on the test:* script the approved command runs sends the agent back', r.j.decision === 'block' && r.j.reason.includes('left out'), r.out);
+
+  // 2: set up in a package, the package's own .github/workflows is not the repo's CI
+  r = (() => {
+    const d = repo12('mono-ci-move', { 'packages/app/test/cart.test.mjs': cart12, '.github/workflows/ci.yml': 'on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n' }, { test: 'node --test' }, { sub: 'packages/app' });
+    start12(d);
+    fs.mkdirSync(path.join(d, '.github/workflows'), { recursive: true });
+    sh('git mv ../../.github/workflows/ci.yml .github/workflows/ci.yml', d);
+    return stop12(d);
+  })();
+  check("finish check, set up in a package: the repo's workflow moved into the package's own .github folder sends the agent back", r.j.decision === 'block' && /CI/.test(r.j.reason) && !ticked12(r), r.out);
+
+  // 3: filter values written across lines or escaped in package.json
+  const multi12 = (() => {
+    const now = "module.exports = {\n  testPathIgnorePatterns: [\n    '/node_modules/',\n    '/test/cart',\n  ],\n};\n";
+    return tamperFindings('M\tjest.config.js', ['--- a/jest.config.js', '+++ b/jest.config.js', '@@ -3,0 +4 @@', "+    '/test/cart',"].join('\n'), { read: () => now }).join(' · ');
+  })();
+  check('scan: a path added to a testPathIgnorePatterns list written over several lines leaves tests out', multi12.includes('left out'), multi12);
+  const cont12 = (() => {
+    const now = '[pytest]\naddopts =\n    -q\n    --deselect tests/test_cart.py::test_adds\n';
+    return tamperFindings('M\tpytest.ini', ['--- a/pytest.ini', '+++ b/pytest.ini', '@@ -3,0 +4 @@', '+    --deselect tests/test_cart.py::test_adds'].join('\n'), { read: () => now }).join(' · ');
+  })();
+  check('scan: a --deselect added on a continuation line under addopts leaves tests out', cont12.includes('left out'), cont12);
+  const esc12 = scan12('package.json', ['  "test": "node --test --test-skip-pattern=\\"slow\\""'], ['  "test": "node --test --test-skip-pattern=\\"slow|adds\\""']);
+  check('scan: a quoted filter in package.json that gains a value leaves tests out', esc12.includes('left out'), esc12);
+
+  // 4: CI test steps for other runners
+  for (const cmd of ['pnpm -r test', 'pnpm --filter app test', 'turbo run test', 'nx affected -t test', './gradlew test', 'mvn verify', 'dotnet test', 'bundle exec rspec', 'mix test', 'swift test', 'vendor/bin/phpunit', 'flutter test', 'ctest', 'tox']) {
+    const got = tamperFindings('M\t.github/workflows/ci.yml', diff27('.github/workflows/ci.yml', [`      - run: ${cmd}`], [`      - run: ${cmd} || true`])).join(' · ');
+    check(`scan: ${cmd} made to always pass in CI is found`, got.includes('always pass'), got);
+  }
+
+  // 5, 6, 8, 10: honest edits, and package.json's own jest config
+  const one12 = scan12('jest.config.mjs', ["export default { testEnvironment: 'node', testPathIgnorePatterns: ['/node_modules/'] };"], ["export default { testEnvironment: 'jsdom', testPathIgnorePatterns: ['/node_modules/'] };"]);
+  check('scan, honest: another key changed on a one-line jest config is not a new filter', one12 === '', one12);
+  const lint12 = scan12('package.json', ['  "lint": "eslint \\"src/**/*.js\\""'], ['  "lint": "eslint \\"src/**/*.js\\"",', '  "test:smoke": "node --test --test-name-pattern=smoke"'], { read: () => JSON.stringify({ scripts: { test: 'node --test', lint: 'eslint "src/**/*.js"', 'test:smoke': 'node --test --test-name-pattern=smoke' } }) });
+  check("scan, honest: a lint glob does not make a side test:smoke script count", lint12 === '', lint12);
+  const moved12 = tamperFindings('M\tpackage.json', ['--- a/package.json', '+++ b/package.json', '@@ -1,0 +2 @@', '+    "test": "node --test --test-skip-pattern=slow",', '@@ -4 +4,0 @@', '-    "test": "node --test --test-skip-pattern=slow",'].join('\n')).join(' · ');
+  check('scan, honest: a test script that keeps its filter but moves up is not a new filter', moved12 === '', moved12);
+  const pkgJest12 = scan12('package.json', ['    "testEnvironment": "node"'], ['    "testEnvironment": "node",', '    "testPathIgnorePatterns": ["<rootDir>/test/cart"]']);
+  check("scan: testPathIgnorePatterns added to package.json's jest config leaves tests out", pkgJest12.includes('left out'), pkgJest12);
+
+  // 7: build output ignored by its own name that was there at session start
+  const built12 = repo12('inplace-existing', { 'test/cart.src.mjs': cart12, '.gitignore': 'test/*.test.mjs\n' }, { test: 'cp test/cart.src.mjs test/cart.test.mjs && node --test' });
+  sh('npm test --silent', built12);
+  start12(built12);
+  src12(built12);
+  r = stop12(built12);
+  check('finish check, honest: build output ignored by its own name, already there at session start, keeps the ✓', ticked12(r), r.out);
+
+  // 9: a lost session keeps its settings snapshot
+  r = (() => {
+    const d = repo12('lost-settings');
+    start12(d);
+    const st = JSON.parse(readText(path.join(d, '.codehere/local/state.json')));
+    delete st.sessions.s12;
+    fs.writeFileSync(path.join(d, '.codehere/local/state.json'), JSON.stringify(st));
+    edit12(d, '.claude/settings.json', (t) => JSON.stringify({ ...JSON.parse(t), hooks: {} }, null, 2));
+    src12(d);
+    return stop12(d);
+  })();
+  check("finish check: a lost session that removes the agent's hooks is still told so", r.j.decision === 'block' && r.j.reason.includes('.claude/settings.json'), r.out);
+
+  // 11: a parent config that is a link
+  r = (() => {
+    const d = repo12('mono-link', { 'packages/app/test/cart.test.mjs': cart12, 'configs/pytest.ini': '[pytest]\naddopts = -q\n' }, { test: 'node --test' }, { sub: 'packages/app' });
+    fs.symlinkSync('configs/pytest.ini', path.join(d, '../../pytest.ini'));
+    sh('git add -A && git commit -qm link', d);
+    start12(d);
+    edit12(d, '../../configs/pytest.ini', (t) => t.replace('addopts = -q', 'addopts = -q --deselect tests/test_cart.py::test_adds'));
+    src12(d);
+    return stop12(d);
+  })();
+  check('finish check, set up in a package: a parent pytest.ini that is a link, changed behind it, gets no ✓', !ticked12(r), r.out);
+
+  // 12: names CI does not read
+  r = (() => {
+    const d = repo12('gitlab-yaml', { 'test/cart.test.mjs': cart12, '.gitlab-ci.yml': 'test:\n  script:\n    - npm test\n' });
+    start12(d);
+    sh('git mv .gitlab-ci.yml .gitlab-ci.yaml', d);
+    return stop12(d);
+  })();
+  check('finish check: .gitlab-ci.yml renamed .gitlab-ci.yaml, which GitLab does not read, sends the agent back', r.j.decision === 'block' && /CI/.test(r.j.reason), r.out);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);
