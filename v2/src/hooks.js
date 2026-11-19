@@ -116,7 +116,15 @@ function sessionStart(root, input, agent) {
   const state = readState(root);
   const s = session(state, input.session_id);
   s.transcript = input.transcript_path || s.transcript;
-  if (isGitRepo(root) && !s.baseline) {
+  const fresh = !input.source || ['startup', 'clear', 'new'].includes(input.source);
+  const key = input.session_id || 'default';
+  if (isGitRepo(root) && !s.baseline && s.record === undefined && !fresh) {
+    // Resumed or compacted, but state.json lost the entry (pushed out by newer sessions, or written over by another
+    // session's check): a snapshot taken now would start from the agent's own changes (round 9). The record written
+    // at the session's real start is used if it is still there; otherwise this session has none, and no ✓.
+    const name = recordName(key);
+    s.record = fs.existsSync(recordFile(root, { record: name })) ? name : null;
+  } else if (isGitRepo(root) && !s.baseline && s.record === undefined) {
     // Remember what was already changed before this session, so we only
     // ever react to what the agent changes now.
     s.startHead = git(root, 'rev-parse HEAD') || null;
@@ -125,7 +133,7 @@ function sessionStart(root, input, agent) {
     s.gitSettings = gitSettingsSnapshot(root);
     s.team = teamSnapshot(root);
     s.teamHead = s.startHead;
-    keepRecord(root, state, s, input.session_id || 'default');
+    keepRecord(root, state, s, key);
   } else if (input.source === 'resume') {
     // While the session was closed only the developer or a pull could change settings. The record of the
     // test files is kept from the start: a change git hides must not become the new normal (round 6, M4).
@@ -212,6 +220,7 @@ export function dirtySnapshot(root) {
   if (listed == null) return null;
   const files = listed.filter((f) => !IGNORE(f));
   const hashes = gitHashes(root, files, { filters: false }); // no filter program of the repo's runs inside the hook
+  if (hashes == null) return null; // a hash git could not give is never read as "unchanged" (round 9)
   return Object.fromEntries(files.map((f, i) => [f, hashes[i] || 'x']));
 }
 
@@ -413,6 +422,7 @@ export function rawSnapshot(root, algo, { skip = [], stats = null, keep = new Se
   return walk(root, '') ? files : null;
 }
 
+const recordName = (key) => crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
 const recordFile = (root, s) => (typeof s.record === 'string' && /^[0-9a-f]{16}$/.test(s.record) ? path.join(paths(root).local, 'records', `${s.record}.json`) : null);
 export function readRecord(root, s) {
   const file = recordFile(root, s);
@@ -431,7 +441,7 @@ function keepRecord(root, state, s, key) {
   const ignored = (gitRead(root, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory']) ?? '').split('\0');
   const skip = ignored.filter((f) => f.endsWith('/')).map((f) => f.slice(0, -1)).slice(0, 5000);
   const ids = rawSnapshot(root, algo, { skip });
-  s.record = crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
+  s.record = recordName(key);
   delete s.raw; // kept in state.json before round 7
   delete s.rawAlgo;
   const dir = path.join(paths(root).local, 'records');
@@ -447,7 +457,8 @@ function keepRecord(root, state, s, key) {
     const named = new Set(Object.values(state.sessions).map((x) => `${x.record}.json`));
     for (const n of fs.readdirSync(dir)) {
       const at = path.join(dir, n);
-      if (!named.has(n) && Date.now() - fs.lstatSync(at).mtimeMs > 3600 * 1000) fs.rmSync(at, { force: true });
+      const st = fs.lstatSync(at, { throwIfNoEntry: false }); // another session's temporary file can go meanwhile
+      if (st && !named.has(n) && Date.now() - st.mtimeMs > 3600 * 1000) fs.rmSync(at, { force: true });
     }
   } catch {
     s.record = null;
@@ -725,7 +736,7 @@ function lessonText(root, doc) {
   const files = json(m.files);
   const hashes = json(m.file_hashes);
   if (Array.isArray(files) && files.length && files.every((f) => typeof f === 'string')) {
-    const now = gitHashes(root, files);
+    const now = gitHashes(root, files) || [];
     const changed = !Array.isArray(hashes) || files.some((f, i) => !now[i] || now[i] !== hashes[i]);
     out.push(`Files    ${files.join(', ')} · ${changed ? 'changed' : 'unchanged'} since the fix`);
   }
@@ -758,7 +769,7 @@ function lessonProofFor(root, sig, proofCommand, changed, test) {
     });
   }
   proof.files = JSON.stringify(changed);
-  proof.file_hashes = JSON.stringify(gitHashes(root, changed));
+  proof.file_hashes = JSON.stringify(gitHashes(root, changed) || changed.map(() => null));
   return proof;
 }
 
@@ -1104,6 +1115,13 @@ function stop(root, input) {
   const state = readState(root);
   const s = session(state, input.session_id);
   const mayBlock = (s.stopBlocks || 0) < 3; // never trap the agent: after 3 blocks, only observe
+  // Sessions that started while this check ran (it can run the tests for minutes) are written back with ours, not
+  // over: a lost entry cost the other session its start (round 9).
+  const save = () => {
+    const disk = readState(root).sessions || {};
+    for (const [k, x] of Object.entries(disk)) if (!(k in state.sessions)) state.sessions[k] = x;
+    return writeState(root, state);
+  };
   // The first line of each reason is kept: Copilot passes a send-back to the prompt hook as if the
   // person typed it, and the prompt hook must not take it as their answer to a draft.
   // A send-back that cannot be counted is not sent: without the count the 3-block cap would never
@@ -1112,7 +1130,7 @@ function stop(root, input) {
   // the test result is not hidden behind it.
   const sendAgentBack = (reason, message, carryOn = false) => {
     s.lastSendBack = reason.split('\n')[0];
-    if (writeState(root, state)) block(reason, message);
+    if (save()) block(reason, message);
     const found = reason.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2));
     const why = `codehere ✕ ${noTick([s.lastSendBack, ...found].join(' ')).slice(0, 160)} · not sent back · Codehere could not save its state in .codehere/local`;
     if (carryOn) return void lines.push(why);
@@ -1136,7 +1154,9 @@ function stop(root, input) {
   const rawNow = record ? rawSnapshot(root, record.algo, { skip: record.skip, stats: rawStats, keep: held }) : null;
   // new test code git ignores now is a build copying the tests or an install, not the agent's tests (round 8, M2)
   const ignoredNow = (files) => new Set((files.length ? gitRead(root, ['check-ignore', '-z', '--stdin'], files.join('\0') + '\0') : '')?.split('\0').filter(Boolean));
-  if (rawNow) for (const f of ignoredNow(Object.keys(rawNow).filter((x) => !(x in record.ids) && isTestCode(x)))) delete rawNow[f], delete rawStats[f];
+  // and a package.json a build writes there (dual ESM and CJS builds do: round 9) is not the repo's test script
+  const letOff = (x) => isTestCode(x) || path.basename(x) === 'package.json';
+  if (rawNow) for (const f of ignoredNow(Object.keys(rawNow).filter((x) => !(x in record.ids) && letOff(x)))) delete rawNow[f], delete rawStats[f];
   const noRecord = !rawNow;
   const rawStart = new Map(record ? Object.entries(record.ids).map(([f, id]) => [nfc(f), id]) : []);
   const rawChanged = rawNow ? [...new Set([...Object.keys(rawNow), ...Object.keys(record.ids)])].filter((f) => rawNow[f] !== record.ids[f]) : [];
@@ -1204,20 +1224,25 @@ function stop(root, input) {
     // bytes or mostly the same lines, so an honest move is not a deletion and a moved test is read from its start
     // (round 8, M4)
     if (rawNow) {
-      const gone = rawChanged.filter((f) => f in record.ids && !(f in rawNow) && !movedAway.has(nfc(f)) && isTestCode(f));
-      const added = rawChanged.filter((f) => !(f in record.ids) && f in rawNow && !renamedFrom.has(nfc(f)) && isTestCode(f));
+      // by the same bytes, any check file and any number of them (round 9); by shared lines, test code, up to 50
+      const gone = rawChanged.filter((f) => f in record.ids && !(f in rawNow) && !movedAway.has(nfc(f)));
+      const added = rawChanged.filter((f) => !(f in record.ids) && f in rawNow && !renamedFrom.has(nfc(f)));
+      const byId = new Map();
+      for (const g of gone) byId.set(record.ids[g], [...(byId.get(record.ids[g]) || []), g]);
       const lineSet = (text) => new Set(String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean));
       const startLines = new Map();
-      for (const a of added.slice(0, 50)) {
-        let best = gone.find((g) => !movedAway.has(nfc(g)) && rawNow[a] === record.ids[g]) ?? null;
+      let compared = 0;
+      for (const a of added) {
+        let best = (byId.get(rawNow[a]) || []).find((g) => !movedAway.has(nfc(g))) ?? null;
         let now = null;
-        if (!best) {
+        if (!best && isTestCode(a) && compared++ < 50) {
           try {
             now = lineSet(readPlain(path.join(root, a), 'utf8', 1024 * 1024));
           } catch {}
         }
-        for (let i = 0, score = 0.5; now && i < Math.min(gone.length, 50); i++) {
-          const g = gone[i];
+        const testGone = gone.filter(isTestCode).slice(0, 50);
+        for (let i = 0, score = 0.5; now && i < testGone.length; i++) {
+          const g = testGone[i];
           if (movedAway.has(nfc(g))) continue;
           if (!startLines.has(g)) startLines.set(g, isBlobId(record.ids[g]) ? lineSet(gitRead(root, ['cat-file', 'blob', record.ids[g]])) : new Set());
           const was = startLines.get(g);
@@ -1288,7 +1313,7 @@ function stop(root, input) {
   if (findings.length && s.tamperReported !== key && mayBlock) {
     s.tamperReported = key;
     s.stopBlocks++;
-    writeState(root, state);
+    save();
     sendAgentBack(
       [
         'Codehere found changes that weaken tests or checks:',
@@ -1309,7 +1334,7 @@ function stop(root, input) {
   if (sendBack && s.settingsReported !== settingsKey && mayBlock) {
     s.settingsReported = settingsKey;
     s.stopBlocks++;
-    writeState(root, state);
+    save();
     sendAgentBack(
       [
         'Codehere, hook or git settings changed during this session:',
@@ -1342,11 +1367,11 @@ function stop(root, input) {
     // (a process the agent left running, or a git hook, swapping files during the check: round 7, finding 2).
     // A file's change time cannot be set back, so a swap and a swap back are both seen.
     const after = {};
-    if (rawNow) rawSnapshot(root, null, { skip: record.skip, stats: after });
+    if (rawNow) rawSnapshot(root, null, { skip: record.skip, stats: after, keep: held });
     let touched = rawNow ? [...new Set([...Object.keys(after), ...Object.keys(rawStats)])].filter((f) => after[f] !== rawStats[f]).sort() : [];
-    const fresh = touched.filter((f) => !(f in record.ids) && isTestCode(f));
-    if (fresh.length) {
-      const ignored = ignoredNow(fresh);
+    const appeared = touched.filter((f) => !(f in record.ids)); // made during the check: let off where git ignores it (a build)
+    if (appeared.length) {
+      const ignored = ignoredNow(appeared);
       touched = touched.filter((f) => !ignored.has(f));
     }
     // saves made while the tests ran moved snapshots on disk, and this hook writes the whole state back
@@ -1354,12 +1379,12 @@ function stop(root, input) {
     for (const [k, x] of Object.entries(state.sessions)) if (isMap(disk[k]?.team)) Object.assign(x, { team: disk[k].team, teamHead: disk[k].teamHead });
     if (!t.ok && !mayBlock) {
       lines.push(`codehere ✕ ${cmd} · ${runResult(t)} · not sent back, limit of 3 reached`);
-      writeState(root, state);
+      save();
       report();
     }
     if (!t.ok) {
       s.stopBlocks++;
-      writeState(root, state);
+      save();
       const tail = t.output.split('\n').slice(-25).join('\n');
       sendAgentBack(
         [
@@ -1383,7 +1408,7 @@ function stop(root, input) {
     else if (unread) passLine = `codehere ✕ ${cmd} passed, but this session's diff could not be read · weakened tests not checked`;
     else if (gitSettings.length) passLine = `codehere ✕ ${cmd} passed, but git settings that change what a diff shows changed during this session`;
     else if (noRecord) passLine = `codehere ✕ ${cmd} passed, but Codehere has no record of the test files from session start · weakened tests may be missed`;
-    else if (touched.length) passLine = `codehere ✕ ${cmd} passed, but test files changed while Codehere ran the check · ${noTick(touched.slice(0, 3).join(' · '))}${touched.length > 3 ? ` · and ${touched.length - 3} more` : ''}`;
+    else if (touched.length) passLine = `codehere ✕ ${cmd} passed, but test files or configs changed while Codehere ran the check · ${noTick(touched.slice(0, 3).join(' · '))}${touched.length > 3 ? ` · and ${touched.length - 3} more` : ''}`;
     else if (nonePassed) passLine = `codehere ✕ ${cmd} · 0 passed · no test ran`;
     else passLine = `codehere ✓ ${cmd} · ${runResult(t)} · re-run here · ${t.seconds.toFixed(1)} s`;
     if (proven) {
@@ -1419,6 +1444,6 @@ function stop(root, input) {
     } else lines.push('codehere › repeated error solved · not offered as a lesson · limit of 3 reached');
   }
 
-  writeState(root, state);
+  save();
   report();
 }

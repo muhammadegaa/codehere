@@ -208,8 +208,12 @@ function filtersOn(file, line) {
   else if (RUNNER_CONFIG.test(file)) (text = line.slice(1)), (where = "by the test runner's config");
   if (text == null) return [];
   const re = RUNNER_CONFIG.test(file) ? CONFIG_KEY : FILTER;
-  return [...text.matchAll(re)].map((m) => ({ option: m[1], where }));
+  const found = [...text.matchAll(re)].map((m) => ({ option: m[1], where }));
+  // jest's and vitest's -t (--testNamePattern); mocha's -t is a timeout, so only after jest or vitest (round 9)
+  if (where === 'by the test script' && JEST_T.test(text)) found.push({ option: '-t', where });
+  return found;
 }
+const JEST_T = /\b(?:jest|vitest)\b[^&|;]*?\s-t(?=[\s=]|$)/;
 
 // Which characters of a line are inside a string literal: test code often writes another test as
 // text, and a skip in that text is not a skip. One line at a time, so a string that spans lines (a
@@ -726,8 +730,14 @@ const counts = (passed, failed) => (passed == null && failed == null ? null : { 
 const SUMMARIES = [
   // node --test, spec and TAP reporters: "ℹ tests 3", "ℹ pass 2", "ℹ fail 1"
   { re: /^(?:ℹ|#) tests \d+$/gm, read: (t) => counts(num(t, /^(?:ℹ|#) pass (\d+)$/m), num(t, /^(?:ℹ|#) fail (\d+)$/m)) },
-  // jest "Tests:       2 failed, 46 passed, 48 total", vitest " Tests  2 failed | 46 passed (48)"
-  { re: /^\s*Tests:?\s+.*\d+ (?:passed|failed)\b.*$/gm, read: (t, line) => counts(num(line, /(\d+) passed/), num(line, /(\d+) failed/)) },
+  // jest "Tests:       2 failed, 46 passed, 48 total", vitest " Tests  2 failed | 46 passed (48)"; a line with only
+  // skipped or todo tests is 0 passed (round 9)
+  {
+    re: /^\s*Tests:?\s+.*\d+ (?:passed|failed|skipped|todo)\b.*$/gm,
+    read: (t, line) => counts(num(line, /(\d+) passed/) ?? 0, num(line, /(\d+) failed/)),
+  },
+  // jest and vitest with --passWithNoTests: "No tests found, exiting with code 0", "No test files found, exiting with code 0"
+  { re: /^No test(?: file)?s found, exiting with code 0\b.*$/gm, read: () => counts(0, 0) },
   // pytest "===== 1 failed, 1 passed in 0.02s ====="
   {
     re: /^[=\s]*(?:\d+ \w+(?:, )?)+ in [\d.]+s\b.*$/gm,

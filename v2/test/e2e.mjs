@@ -3799,6 +3799,94 @@ section(['R8'], () => {
   check("session start keeps another session's recent record and removes an old one", left8.includes('0123456789abcdef.json') && !left8.includes('fedcba9876543210.json') && left8.length === 2, left8.join(', '));
 });
 
+section(['R9'], () => {
+  // The cold review's round 9 (docs/reviews/2026-11-19-cold-review-round-9.md), against the bounded promise.
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart9 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const gut9 = (dir, f = 'test/cart.test.mjs') => fs.writeFileSync(path.join(dir, f), fs.readFileSync(path.join(dir, f), 'utf8').replace(THREE, ''));
+  const repo9 = (name, files = { 'test/cart.test.mjs': cart9 }, scripts = { test: 'node --test' }) => {
+    const dir = freshRepo(`r9-${name}`, { 'package.json': `${JSON.stringify({ name: 'p', type: 'module', scripts })}\n`, ...files });
+    ch(['init', '--agent', 'claude'], dir);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', dir, 'y');
+    return dir;
+  };
+  const start9 = (dir, sid = 's9', source = 'startup') => HC('session-start', dir, rec('claude', 'session-start', dir, sid, { source }));
+  const stop9 = (dir, sid = 's9') => {
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, sid, { stop_hook_active: false })), encoding: 'utf8', timeout: 60000 });
+    let j = {};
+    try {
+      j = x.stdout ? JSON.parse(x.stdout) : {};
+    } catch {}
+    return { out: x.stdout || '', j };
+  };
+  const sentBack9 = (x, why) => x.j.decision === 'block' && x.j.reason.includes(why);
+  const ticked9 = (x) => x.out.includes('✓');
+  const src9 = (d) => fs.writeFileSync(path.join(d, 'src.js'), 'export const x = 1;\n');
+
+  // 1: a session whose entry state.json lost (20 newer sessions), then compacted, keeps its start
+  const lost9 = repo9('lost-entry');
+  start9(lost9);
+  gut9(lost9);
+  for (let i = 0; i < 20; i++) start9(lost9, `other${i}`);
+  start9(lost9, 's9', 'compact');
+  src9(lost9);
+  r = stop9(lost9);
+  check('finish check: a long session still active after 20 newer ones, then compacted, is sent back for the test it gutted', sentBack9(r, '3 assertions removed') && !ticked9(r), r.out);
+  // and a session that starts while another's finish check runs the tests is not erased by it
+  const race9 = repo9('race', { 'test/cart.test.mjs': cart9 }, { test: 'node -e "setTimeout(() => {}, 1500)" && node --test' });
+  start9(race9, 'a9');
+  src9(race9);
+  sh(`(printf '%s' ${sq(JSON.stringify(rec('claude', 'stop', race9, 'a9', { stop_hook_active: false })))} | node ${sq(BIN)} hook stop --agent claude > /dev/null &) ; sleep 0.5 ; printf '%s' ${sq(JSON.stringify(rec('claude', 'session-start', race9, 'b9', { source: 'startup' })))} | node ${sq(BIN)} hook session-start --agent claude > /dev/null ; sleep 4`, race9);
+  const raceState9 = JSON.parse(readText(path.join(race9, '.codehere/local/state.json')) || '{}');
+  check("a session that starts while another session's finish check runs keeps its entry and its record", Boolean(raceState9.sessions?.b9?.record), JSON.stringify(Object.keys(raceState9.sessions || {})));
+
+  // 2: a build that writes package.json files into an ignored folder made after session start, as dual ESM and CJS builds do
+  const build9 = "import fs from 'node:fs';\nfor (const d of ['cjs', 'esm']) { fs.mkdirSync(`dist/${d}`, { recursive: true }); fs.writeFileSync(`dist/${d}/package.json`, JSON.stringify({ type: d === 'cjs' ? 'commonjs' : 'module' })); }\n";
+  r = (() => {
+    const d = repo9('dual-build', { 'test/cart.test.mjs': cart9, '.gitignore': 'dist/\n', 'build.mjs': build9 }, { pretest: 'node build.mjs', test: 'node --test' });
+    start9(d);
+    src9(d);
+    sh('npm test --silent', d);
+    return stop9(d);
+  })();
+  check("finish check, honest: package.json files a build writes into an ignored folder are not the agent's test configs", r.j.decision !== 'block' && ticked9(r), r.out);
+
+  // 3: jest and vitest runs where every test was skipped, or none found, are read as 0 passed; jest's -t is a filter
+  for (const [out, label] of [['Tests:       5 skipped, 5 total', 'jest, all skipped'], [' Tests  5 skipped (5)', 'vitest, all skipped'], ['Tests:       2 todo, 2 total', 'jest, all todo'], ['No tests found, exiting with code 0', 'jest, none found']]) {
+    const c = testCounts(out);
+    check(`counts: ${label} reads as 0 passed`, c && c.passed === 0, JSON.stringify(c));
+  }
+  const jestT = pj(['  "test": "jest"'], ['  "test": "jest -t zzz"']);
+  check("scan: jest's -t added to the test script leaves tests out", jestT.includes('tests were left out'), jestT);
+
+  // 4: a worktree added inside the repo does not blind the check of a file that was already dirty
+  const dirty9 = repo9('dirty-worktree', { 'test/cart.test.mjs': "import { it } from 'node:test'; import assert from 'node:assert'; import { add } from '../cart.mjs';\nit('adds', () => assert.equal(add(1, 1), 2));\n", 'cart.mjs': 'export const add = (a, b) => a + b;\n' });
+  fs.appendFileSync(path.join(dirty9, 'cart.mjs'), '// wip\n');
+  sh('git worktree add -q wt', dirty9); // there at session start, so both snapshots list it
+  start9(dirty9);
+  fs.writeFileSync(path.join(dirty9, 'cart.mjs'), 'export const add = (a, b) => a - b;\n// wip\n');
+  r = stop9(dirty9);
+  check('finish check: a worktree inside the repo does not hide a change to a file that was already dirty; the failing tests send the agent back', r.j.decision === 'block' && r.j.reason.includes('failed'), r.out);
+
+  // 5, 6: plain mv of many tests, and of a test config
+  const many9 = Object.fromEntries(Array.from({ length: 61 }, (_, i) => [`test/t${i}.test.mjs`, `import { it } from 'node:test';\nit('t${i}', () => {});\n`]));
+  r = (() => {
+    const d = repo9('move-61', many9);
+    start9(d);
+    fs.renameSync(path.join(d, 'test'), path.join(d, 'tests'));
+    return stop9(d);
+  })();
+  check('finish check, honest: 61 tests moved with plain mv are not deleted tests, and get the ✓', r.j.decision !== 'block' && ticked9(r), r.out);
+  r = (() => {
+    const d = repo9('move-config', { 'test/cart.test.mjs': cart9, 'jest.config.js': "module.exports = { testPathIgnorePatterns: ['/node_modules/', '/e2e/'] };\n" });
+    start9(d);
+    fs.renameSync(path.join(d, 'jest.config.js'), path.join(d, 'jest.config.cjs'));
+    return stop9(d);
+  })();
+  check('finish check, honest: a test config moved with plain mv is not a new filter', r.j.decision !== 'block' && ticked9(r), r.out);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

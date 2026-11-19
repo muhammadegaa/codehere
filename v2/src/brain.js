@@ -149,11 +149,13 @@ export function session(state, id) {
   }
   state.lastSession = key;
   state.sessions[key].lastActive = new Date().toISOString();
-  // keep the state file small: drop sessions older than the 20 most recent
+  // keep the state file small: drop all but the 20 sessions active most recently (a long session still in use is
+  // kept, though newer ones started after it: round 9)
   const keys = Object.keys(state.sessions);
+  const seen = (k) => state.sessions[k].lastActive || state.sessions[k].startedAt || '';
   if (keys.length > 20) {
     keys
-      .sort((a, b) => (state.sessions[a].startedAt || '').localeCompare(state.sessions[b].startedAt || ''))
+      .sort((a, b) => seen(a).localeCompare(seen(b)))
       .slice(0, keys.length - 20)
       .forEach((k) => delete state.sessions[k]);
   }
@@ -430,17 +432,26 @@ export function statusFiles(root) {
 
 // What `git hash-object` gives for each file (git's filters applied, so a lesson's hash is the same on a teammate's
 // machine; filters: false for a session's own snapshot, so no filter program of the repo's runs), 'deleted' for a missing
-// file, null when git cannot say. One git call for all of them; absolute paths, because
+// file, null for one git cannot say; and null for all of them when the git call fails. One git call for all of them; absolute paths, because
 // --stdin-paths ignores the subfolder git was started in.
 export function gitHashes(root, files, { filters = true } = {}) {
-  const present = files.filter((f) => !f.includes('\n') && fs.existsSync(path.join(root, f)));
-  const out = present.length ? (gitRead(root, ['hash-object', ...(filters ? [] : ['--no-filters']), '--stdin-paths'], present.map((f) => path.resolve(root, f)).join('\n') + '\n') ?? '').trim().split('\n') : [];
+  // only regular files: git status lists a dirty submodule or a nested worktree as a folder, and one folder fails
+  // the whole call (round 9). A folder or another kind of entry gets its kind, not a hash.
+  const kind = (f) => {
+    try {
+      const st = fs.statSync(path.join(root, f));
+      return st.isFile() ? 'file' : st.isDirectory() ? 'folder' : 'other';
+    } catch {
+      return 'deleted';
+    }
+  };
+  const kinds = files.map((f) => (f.includes('\n') ? null : kind(f)));
+  const present = files.filter((f, i) => kinds[i] === 'file');
+  const read = present.length ? gitRead(root, ['hash-object', ...(filters ? [] : ['--no-filters']), '--stdin-paths'], present.map((f) => path.resolve(root, f)).join('\n') + '\n') : '';
+  if (read == null) return null;
+  const out = read.trim().split('\n');
   const at = new Map(present.map((f, i) => [f, i]));
-  return files.map((f) => {
-    const i = at.get(f) ?? -1;
-    if (i >= 0) return out[i] || null;
-    return f.includes('\n') ? null : 'deleted';
-  });
+  return files.map((f, i) => (kinds[i] === 'file' ? out[at.get(f)] || null : kinds[i]));
 }
 
 // A tick is Codehere's mark for a run it made on this machine (DESIGN.md §1). Text from the
