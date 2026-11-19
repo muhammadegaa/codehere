@@ -38,6 +38,8 @@ Mapped so far: the claims tonight's changes touched. The rest of the README is n
 | A git missing from PATH is reported (the design rule "it fails open" still holds: the agent carries on) | "without git: …" checks | rc.3 branch |
 | Every command in "Commands" exists, and `--help` lists no command the README leaves out | sweep on 13 Nov: the 13 commands match `codehere --help` | rc.3 branch |
 | The 9 relative links (conformance results, docs) point at files that exist | sweep on 13 Nov: 9 of 9 exist | rc.3 branch |
+| A run where the runner reports 0 passed gets no ✓ | "finish check: a passing run where no test passed gets no ✓, and the line says 0 passed" | rc.4 branch |
+| The finish check is not a sandbox against an agent defeating it through git's machinery; the promise and its out-of-scope list | a limit, stated in `docs/finish-check-promise.md`; the in-scope part is checked by the `R6`, `R7` and `R8` blocks of e2e | rc.4 branch |
 | `node demo/demo.mjs` shows the whole loop, including "done" checked | run on 13 Nov: scene 6 shows the failed run sent back (✕), scene 11 the ✓; before this fix it showed ⊘ "not approved" because the demo never approved the test command | rc.3 branch |
 
 ### "What it does" and "Design rules" (mapped 13 Nov against the 552 checks that passed at e593c83)
