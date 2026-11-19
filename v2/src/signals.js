@@ -229,8 +229,16 @@ function filtersOn(file, line) {
 // addopts as pytest splits it into arguments: in pyproject.toml a TOML list's items, or a TOML string split as a shell
 // splits it; in an ini file the text split as a shell splits it. A quoted argument stays one (-k "not slow": round
 // 14), and an argument that holds an option and its value is read as both ("-k not cart": round 15).
-// a TOML string's text: a basic string's \" and \\ are unescaped (round 15), a literal string is as written
-const tomlItems = (s) => [...s.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g)].map((m) => (m[1] != null ? m[1].replace(/\\(["\\])/g, '$1') : m[2]));
+// a TOML string's text: a basic string's \" and \\ are unescaped (round 15), a literal string is as written, and a
+// multi-line """ or ''' string is matched before the empty "" its quotes would otherwise make (round 16)
+const tomlItems = (s) => [...s.matchAll(/"""([\s\S]*?)"""|'''([\s\S]*?)'''|"((?:[^"\\]|\\.)*)"|'([^']*)'/g)].map((m) => m[1] ?? m[2] ?? (m[3] != null ? m[3].replace(/\\(["\\])/g, '$1') : m[4]));
+// a -k expression made only of `not x and not y` terms, as its set of terms
+const notTerms = (e) => (/^\s*not\s+[^\s()]+(?:\s+and\s+not\s+[^\s()]+)*\s*$/.test(e) ? new Set([...e.matchAll(/not\s+([^\s()]+)/g)].map((m) => m[1])) : null);
+const narrows = (now, start) => {
+  const a = notTerms(now);
+  const b = notTerms(start);
+  return !!a && !!b && [...a].every((t) => b.has(t));
+};
 function pytestArgs(file, text, inList = false) {
   if (!/(^|\/)pyproject\.toml$/.test(file)) return shellWords(text);
   const v = text.split('\n').map(dropComment).join('\n').trim(); // quotes inside a # comment are not items (round 15)
@@ -580,7 +588,7 @@ const ECHO_ARGS = /\b(?:echo|printf|Write-Host|Write-Output)\b(?:[ \t]+(?:"(?:[^
 const ciCommand = (text) => (/^\s*(?:-\s*)?[\w.-]+\s*:/.test(text) && !CI_STEP_KEY.test(text) ? '' : text.replace(ECHO_ARGS, '').replace(/\s#.*$/, ''));
 // a CI step or job made to pass, or not to run: continue-on-error, allow_failure, if: false, GitLab's when: manual or
 // never (round 15)
-const CI_IGNORE = /^\s*(?:-\s+)?(?:(?:continue-on-error|allow_failure)\s*:\s*(?:true\b|\$\{\{\s*true\s*\}\})|if\s*:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:#.*)?$|when\s*:\s*(?:manual|never)\b)/;
+const CI_IGNORE = /^\s*(?:-\s+)?(?:(?:continue-on-error|continueOnError|allow_failure)\s*:\s*(?:true\b|\$\{\{\s*true\s*\}\})|enabled\s*:\s*false\b|if\s*:\s*(?:false|'false'|"false"|\$\{\{\s*false\s*\}\})\s*(?:#.*)?$|when\s*:\s*(?:manual|never)\b)/; // Azure's continueOnError and enabled, a quoted 'false' (round 16)
 
 // Whether the YAML block a key at line `at` belongs to (its step or job) runs the tests.
 function blockRunsTests(lines, at, text) {
@@ -591,10 +599,17 @@ function blockRunsTests(lines, at, text) {
     i = near;
   }
   const indent = (l) => l.length - l.trimStart().length;
-  const own = indent(lines[i]);
-  let start = i;
-  while (start > 0 && !((lines[start - 1] || '').trim() && indent(lines[start - 1]) < own)) start--;
-  start = Math.max(0, start - 1);
+  const parentOf = (k) => {
+    const own = indent(lines[k] || '');
+    let p = k;
+    while (p > 0 && !((lines[p - 1] || '').trim() && indent(lines[p - 1]) < own)) p--;
+    return Math.max(0, p - 1);
+  };
+  let start = parentOf(i);
+  // GitLab's - when: never under rules: switches its whole job off; a switch that is the first key of a list item
+  // (- if: false) is that item's, not the list's (round 16)
+  if (/^\s*rules\s*:/.test(lines[start] || '')) start = parentOf(start);
+  else if (/^\s*-\s/.test(lines[i])) start = i;
   const top = indent(lines[start] || '');
   for (let k = start; k < lines.length && k < start + 200; k++) {
     if (k > start && (lines[k] || '').trim() && indent(lines[k]) <= top) break;
@@ -662,7 +677,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
   // (run-s test:*; a lint glob such as "src/**/*.js" is not one: round 12), and the approved command does not name it.
   // A side script such as test:smoke, called by nothing, is not what the tests run (round 10); a chain or a glob is
   // (round 11). Without the file as it is now (the audit), every one counts.
-  const runsTests = (script, file = current) => {
+  const runsTests = (script, file) => {
     if (!script || script === 'test' || !read) return true;
     try {
       const scripts = JSON.parse(read(file) || '{}').scripts || {};
@@ -750,7 +765,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
   const filterIsNew = (f, extra = new Set()) => {
     const had = hadFilters.get(filterKey(f));
     const vals = filterValues(f);
-    if (!runsTests(f.script)) return false;
+    if (!runsTests(f.script, current)) return false;
     // with no key line before (an item moved inside a wrapped list), the values the removed lines held count (round 13)
     if (!had) return !vals.length || vals.some((v) => !extra.has(v));
     return vals.length ? vals.some((v) => !had.has(v) && !extra.has(v)) : opensList(f) ? false : !had.has('');
@@ -790,7 +805,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       }
       out[k] = stack.length ? stack[stack.length - 1] : null;
       // a list a variable holds (const ignored = [ ... ]) is placed under its name, for a key that names it (round 15)
-      const name = m ? null : /(?:const|let|var)\s+([\w$]+)\s*=\s*\[/.exec(line);
+      const name = m ? null : /(?:const|let|var)\s+([\w$]+)\s*(?::[^=]*)?=\s*\[/.exec(line); // a type before the = (round 16)
       for (const c of line.match(/[[\]]/g) || []) {
         if (c === '[') stack.push(m ? { kind: 'items', option: m[1], where: "by the test runner's config" } : name && !stack.length ? { kind: 'items', name: name[1] } : stack[stack.length - 1] || null);
         else stack.pop();
@@ -834,10 +849,12 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
   const configFilters = (file, raw) => {
     const lines = raw.map((l) => String(l ?? '').replace(/\r$/, '')); // a CRLF file (round 15)
     const out = new Map();
+    // each value is counted by the places that set it, so a value one place sets, added in a second place (another
+    // jest project, another tox env), is new there (round 16)
     const put = (option, where, script, values) => {
       const key = `${script || ''}\0${option}`;
-      const e = out.get(key) || out.set(key, { option, where, script, values: new Set() }).get(key);
-      for (const v of values) e.values.add(v);
+      const e = out.get(key) || out.set(key, { option, where, script, values: new Map() }).get(key);
+      for (const v of new Set(values)) e.values.set(v, (e.values.get(v) || 0) + 1);
     };
     if (/(^|\/)package\.json$/.test(file)) {
       let pkg = null;
@@ -853,29 +870,38 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
         if (typeof script !== 'string' || !/^test(:|$)/.test(name)) continue;
         for (const f of filtersOn.script(name, script)) put(f.option, f.where, name, filterValues(f).length ? filterValues(f) : ['']);
       }
-      for (const key of ['testPathIgnorePatterns', 'testNamePattern']) {
-        const v = pkg.jest?.[key];
-        if (v != null) put(key, "by the test runner's config", null, (Array.isArray(v) ? v : [v]).map(String));
-      }
+      // jest's own keys, and the same keys in each of jest's projects (round 16)
+      const jest = (o) => {
+        for (const key of ['testPathIgnorePatterns', 'testNamePattern']) {
+          const v = o && typeof o === 'object' ? o[key] : null;
+          if (v != null) put(key, "by the test runner's config", null, (Array.isArray(v) ? v : [v]).map(String));
+        }
+      };
+      jest(pkg.jest);
+      if (Array.isArray(pkg.jest?.projects)) pkg.jest.projects.forEach(jest);
       return out;
     }
     if (PYTEST_CONFIG.test(file)) {
       const toml = /(^|\/)pyproject\.toml$/.test(file);
-      const tox = /(^|\/)tox\.ini$/.test(file) && /\btox\b/.test(String(command || ''));
+      // tox's commands count when the approved command runs tox, as a command word (round 16: not tox.ini)
+      const tox = /(^|\/)tox\.ini$/.test(file) && /(^|[\s;&|(])tox(?=\s|$)/.test(String(command || ''));
       const blocks = [];
       let block = null;
-      for (const raw of lines) {
-        const line = String(raw ?? '');
+      for (const line of lines) {
         if (toml) {
-          if (/^\s*#/.test(line)) continue;
-          const l = dropComment(line);
           if (block?.open) {
-            block.text.push(l);
-            block.open = !closesList(l);
+            block.text.push(block.close ? line : dropComment(line));
+            block.open = block.close ? !line.includes(block.close) : !closesList(dropComment(line));
             continue;
           }
-          const m = /^\s*"?addopts"?\s*=(.*)$/.exec(l);
-          if (m) blocks.push((block = { kind: 'addopts', text: [m[1]], open: /^\s*\[/.test(m[1]) && !closesList(m[1]) }));
+          if (/^\s*#/.test(line)) continue;
+          const m = /^\s*"?addopts"?\s*=(.*)$/.exec(dropComment(line));
+          if (!m) continue;
+          // a list, or a multi-line string between """ or ''' (round 16)
+          const triple = /^\s*("""|''')/.exec(m[1]);
+          const value = triple ? /^\s*"?addopts"?\s*=(.*)$/.exec(line)[1] : m[1];
+          const open = triple ? value.indexOf(triple[1], value.indexOf(triple[1]) + 3) < 0 : /^\s*\[/.test(value) && !closesList(value);
+          blocks.push((block = { kind: 'addopts', text: [value], open, close: triple?.[1] }));
           continue;
         }
         if (/^\s*[#;]/.test(line)) continue; // an ini comment line
@@ -888,36 +914,64 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
         if (m && (m[1] === 'addopts' || tox)) blocks.push((block = { kind: m[1], text: [m[2]] }));
       }
       for (const b of blocks) {
+        if (b.kind === 'commands') {
+          // each line is a command: only a pytest command's arguments are pytest's, not a linter's --ignore (round 16)
+          for (const cmd of b.text) {
+            const words = shellWords(cmd);
+            const at = words.findIndex((w, i) => /(^|\/)py\.?test$/.test(w) || (w === '-m' && /^py\.?test$/.test(words[i + 1] || '')));
+            if (at < 0) continue;
+            for (const f of argFilters(words.slice(at + (words[at] === '-m' ? 2 : 1)))) put(f.option, "by tox's commands", 'tox', [f.value]);
+          }
+          continue;
+        }
         const joined = b.text.join('\n');
         const args = !toml ? shellWords(joined) : /^\s*\[/.test(joined) ? tomlItems(joined) : shellWords(tomlItems(joined)[0] ?? joined);
-        for (const f of argFilters(args)) put(f.option, b.kind === 'commands' ? "by tox's commands" : "by the test runner's options", b.kind === 'commands' ? 'tox' : null, [f.value]);
+        for (const f of argFilters(args)) put(f.option, "by the test runner's options", null, [f.value]);
       }
       return out;
     }
     if (RUNNER_CONFIG.test(file)) {
       const yaml = /\.ya?ml$/.test(file);
       const where = "by the test runner's config";
-      const clean = yaml ? lines.map((l) => dropComment(String(l ?? ''))) : stripJsComments(lines.join('\n')).split('\n');
+      const clean = yaml ? lines.map((l) => dropComment(l)) : stripJsComments(lines.join('\n')).split('\n');
       const places = placeLines(file, clean);
       const lists = new Map(); // a list a variable holds: its name to its values
-      const refs = []; // a key, or a ...spread inside its list, that names a variable
+      const refs = []; // a key, or a ...spread, that names a variable
+      const keyOn = (l) => new RegExp(CONFIG_KEY.source).test(l);
+      // the next line with text, as a key's value when the key's own line holds none (Prettier breaks a long string
+      // after the colon: round 16)
+      const nextValue = (k) => {
+        for (let j = k + 1; j < clean.length; j++) if (clean[j].trim()) return keyOn(clean[j]) || /^\s*[\]}]/.test(clean[j]) ? '' : clean[j];
+        return '';
+      };
       clean.forEach((line, k) => {
         const keys = [...line.matchAll(CONFIG_KEY)];
         for (const m of keys) {
-          const v = ownValue(line, m[1], m.index + m[0].indexOf(m[1]));
-          // a YAML value is quoted or bare, never a regex (ignore: test/unit/cart.spec.js); a flow list is split; a block
-          // scalar (grep: >- with the text on the lines under it) is that text
+          const at = m.index + m[0].indexOf(m[1]);
+          // a YAML value runs to the end of the line (mocha splits ignore: a, b on the comma: round 16)
+          let v = yaml ? line.slice(m.index + m[0].length) : ownValue(line, m[1], at);
           let vals;
           if (yaml && /^\s*[|>][-+]?\d*\s*$/.test(v)) {
+            // a block scalar (grep: >- with the text on the lines under it) is that text (round 15)
             const indent = line.search(/\S/);
-            const end = clean.findIndex((l, i) => i > k && l.trim() && l.search(/\S/) <= indent);
-            vals = [clean.slice(k + 1, end < 0 ? undefined : end).map((l) => l.trim()).filter(Boolean).join(v.trim()[0] === '>' ? ' ' : '\n')];
-          } else vals = !yaml ? configValues(v) : quoted(v).length ? quoted(v) : v.replace(/^[\s[]+|[\s\]]+$/g, '').split(/\s*,\s*/).filter(Boolean);
+            let end = k + 1;
+            while (end < clean.length && (!clean[end].trim() || clean[end].search(/\S/) > indent)) end++;
+            vals = [clean.slice(k + 1, end).map((l) => l.trim()).filter(Boolean).join(v.trim()[0] === '>' ? ' ' : '\n')];
+          } else if (yaml) vals = quoted(v).length ? quoted(v) : v.replace(/^[\s[]+|[\s\]]+$/g, '').split(/\s*,\s*/).filter(Boolean);
+          else {
+            if (!v.trim()) v = nextValue(k);
+            vals = configValues(v);
+            for (const s of v.matchAll(/\.\.\.([\w$]+)/g)) refs.push([m[1], s[1]]);
+          }
           if (!yaml && vals.length === 1 && !quoted(v).length && /^[A-Za-z_$][\w$]*$/.test(vals[0])) refs.push([m[1], vals[0]]);
           else put(m[1], where, null, vals);
         }
+        if (keys.length) return;
+        // a list a variable holds: the values on its own line too, and a type before the = (round 16)
+        const decl = yaml ? null : /(?:const|let|var)\s+([\w$]+)\s*(?::[^=]*)?=\s*(\[.*)$/.exec(line);
+        if (decl) lists.set(decl[1], [...(lists.get(decl[1]) || []), ...itemValues(ownValue(`x:${decl[2]}`, 'x', 0), false)]);
         const p = places[k];
-        if (keys.length || p?.kind !== 'items') return;
+        if (p?.kind !== 'items') return;
         const spread = /^\s*\.\.\.([\w$]+)/.exec(line);
         if (spread && p.option) refs.push([p.option, spread[1]]);
         if (p.name) lists.set(p.name, [...(lists.get(p.name) || []), ...itemValues(line, false)]);
@@ -956,8 +1010,10 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       wholeFile.add(file);
       const before = configFilters(file, start.lines);
       for (const [key, f] of configFilters(file, now.split('\n'))) {
-        const had = before.get(key)?.values;
-        if ([...f.values].some((v) => !had?.has(v)) && (f.script == null || f.script === 'tox' || runsTests(f.script, file))) add(SKIPPED, file, `tests were left out ${f.where} (${f.option}) in ${file}`);
+        const had = before.get(key)?.values || new Map();
+        // set in more places than at the start; a -k narrowed back to fewer not-terms runs more tests, not fewer (round 16)
+        const added = [...f.values].some(([v, n]) => n > (had.get(v) || 0) && !(f.option === '-k' && [...had.keys()].some((s) => narrows(v, s))));
+        if (added && (f.script == null || f.script === 'tox' || runsTests(f.script, file))) add(SKIPPED, file, `tests were left out ${f.where} (${f.option}) in ${file}`);
       }
     }
     for (const { file, body } of byFile) {

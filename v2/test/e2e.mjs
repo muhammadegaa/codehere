@@ -4556,6 +4556,97 @@ section(['R15'], () => {
   check('scan: a -k widened inside a TOML string with escaped quotes is read', esc15.includes('left out'), esc15);
 });
 
+section(['R16'], () => {
+  // The cold review's round 16 (docs/reviews/2026-11-19-cold-review-round-16.md).
+  const cart16 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n    assert.equal(1 + 1, 2);\n  });\n});\n`;
+  const pkg16 = '{"name":"p","type":"module","scripts":{"test":"node --test"}}\n';
+  const lines16 = (file, hunks, now, opts = {}) => tamperFindings(`M\t${file}`, [`--- a/${file}`, `+++ b/${file}`, ...hunks].join('\n'), { read: () => now, ...opts }).join(' · ');
+  const scan16 = (file, minus, plus, opts = {}) => tamperFindings(`M\t${file}`, diff27(file, minus, plus), opts).join(' · ');
+  const loop16 = (name, files, change) => {
+    const dir = freshRepo(name, files);
+    ch(['init', '--agent', 'claude'], dir);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', dir, 'y');
+    HC('session-start', dir, rec('claude', 'session-start', dir, 's16', { source: 'startup' }));
+    change(dir);
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, 's16', { stop_hook_active: false })), encoding: 'utf8', timeout: 60000 });
+    let j = {};
+    try {
+      j = JSON.parse(x.stdout || '{}');
+    } catch {}
+    return { out: x.stdout || '', j };
+  };
+
+  // 1: a value a config sets in one place, added in another
+  const jest16 = (integration) => `module.exports = {\n  projects: [\n    { displayName: 'unit', testPathIgnorePatterns: ['/node_modules/', '/integration/'] },\n    { displayName: 'integration', testPathIgnorePatterns: [${integration}] },\n  ],\n};\n`;
+  r = loop16('r16-projects', { 'package.json': pkg16, 'test/cart.test.mjs': cart16, 'jest.config.js': jest16("'/node_modules/'") }, (d) => fs.writeFileSync(path.join(d, 'jest.config.js'), jest16("'/node_modules/', '/integration/'")));
+  check("finish check: a path one jest project ignores, added to another project's list, sends the agent back", r.j.decision === 'block' && /left out/.test(r.j.reason) && !r.out.includes('✓'), r.out);
+  const pw16 = lines16('playwright.config.ts', ['@@ -5,0 +6 @@', '      testIgnore: /checkout/,'.replace(/^/, '+')], "export default {\n  projects: [\n    {\n      name: 'chromium',\n      use: {},\n      testIgnore: /checkout/,\n    },\n    {\n      name: 'firefox',\n      testIgnore: /checkout/,\n    },\n  ],\n};\n");
+  check("scan: a playwright project's testIgnore copied to another project is read", pw16.includes('left out'), pw16);
+  const toxenv16 = lines16('tox.ini', ['@@ -6 +6 @@', '-    pytest', '+    pytest --deselect tests/t.py::test_a'], '[testenv:py311]\ncommands =\n    pytest --deselect tests/t.py::test_a\n[testenv:py312]\ncommands =\n    pytest --deselect tests/t.py::test_a\n', { command: 'tox' });
+  check('scan: a --deselect one tox env has, added to another env, is read', toxenv16.includes('left out'), toxenv16);
+
+  // 2: jest's projects inside package.json
+  const pkgp16 = lines16('package.json', ['@@ -1 +1 @@', '-{"scripts":{"test":"node --test"},"jest":{"projects":[{"displayName":"unit"}]}}', '+{"scripts":{"test":"node --test"},"jest":{"projects":[{"displayName":"unit","testPathIgnorePatterns":["cart"]}]}}'], '{"scripts":{"test":"node --test"},"jest":{"projects":[{"displayName":"unit","testPathIgnorePatterns":["cart"]}]}}\n');
+  check('scan: testPathIgnorePatterns added to a jest project inside package.json is read', pkgp16.includes('left out'), pkgp16);
+
+  // 3: a key whose value is on the next line, as Prettier writes a long string
+  const next16 = lines16('jest.config.js', ['@@ -2,0 +3,2 @@', '+  testNamePattern:', "+    '^(?!.*(adds an item to the cart|removes an item from the cart)).*$',"], "module.exports = {\n  testPathIgnorePatterns: ['/node_modules/'],\n  testNamePattern:\n    '^(?!.*(adds an item to the cart|removes an item from the cart)).*$',\n};\n");
+  check("scan: a testNamePattern added with its value on the next line is read", next16.includes('left out'), next16);
+  const nextw16 = lines16('jest.config.js', ['@@ -3 +3 @@', "-    '^(?!.*slow).*$',", "+    '^(?!.*(slow|cart)).*$',"], "module.exports = {\n  testNamePattern:\n    '^(?!.*(slow|cart)).*$',\n};\n");
+  check("scan: a testNamePattern value on its own line widened is read", nextw16.includes('left out'), nextw16);
+
+  // 4: tox's commands: only a pytest command's arguments, and tox as a command word
+  const lint16 = lines16('tox.ini', ['@@ -2 +2 @@', '-commands = flake8 --ignore=E501 src tests', '+commands = flake8 --ignore=E501,W503 src tests'], '[testenv:lint]\ncommands = flake8 --ignore=E501,W503 src tests\n', { command: 'tox' });
+  check("scan, honest: a linter's --ignore changed in tox's commands is not a test filter", lint16 === '', lint16);
+  const toxc16 = lines16('tox.ini', ['@@ -2 +2 @@', '-commands = flake8 --ignore=E501 src tests', '+commands = flake8 --ignore=E501,W503 src tests'], '[testenv:lint]\ncommands = flake8 --ignore=E501,W503 src tests\n', { command: 'python -m pytest -c tox.ini' });
+  check('scan, honest: pytest -c tox.ini approved does not make tox commands count', toxc16 === '', toxc16);
+  const pym16 = lines16('tox.ini', ['@@ -2 +2 @@', '-commands = python -m pytest', '+commands = python -m pytest --deselect tests/t.py::test_a'], '[testenv]\ncommands = python -m pytest --deselect tests/t.py::test_a\n', { command: 'tox -e py312' });
+  check('scan: a --deselect added after python -m pytest in tox commands is read', pym16.includes('left out'), pym16);
+
+  // 5, 6: CI switches: GitLab rules, quoted false, Azure's own keys; a switch as the first key of a step is that step's
+  const rules16 = lines16('.gitlab-ci.yml', ['@@ -3,0 +4,2 @@', '+  rules:', '+    - when: never'], 'test:\n  script:\n    - npm test\n  rules:\n    - when: never\n');
+  check('scan: a test job given rules: - when: never is read', rules16.includes('always pass'), rules16);
+  const quoted16 = lines16('.github/workflows/ci.yml', ['@@ -5,0 +6 @@', "+        if: 'false'"], "on: push\njobs:\n  test:\n    steps:\n      - run: npm test\n        if: 'false'\n");
+  check("scan: if: 'false' on the CI test step is read", quoted16.includes('always pass'), quoted16);
+  for (const key of ['continueOnError: true', 'enabled: false']) {
+    const got = lines16('azure-pipelines.yml', ['@@ -2,0 +3 @@', `+    ${key}`], `steps:\n  - script: npm test\n    ${key}\n`);
+    check(`scan: ${key} on the Azure test step is read`, got.includes('always pass'), got);
+  }
+  const deploy16 = lines16('.github/workflows/ci.yml', ['@@ -4,0 +5,2 @@', '+      - if: false', '+        run: ./deploy.sh'], 'on: push\njobs:\n  test:\n    steps:\n      - if: false\n        run: ./deploy.sh\n      - run: npm test\n');
+  check('scan, honest: if: false on a deploy step beside the test step is not the test step', deploy16 === '', deploy16);
+  const lintc16 = lines16('.github/workflows/ci.yml', ['@@ -5,0 +6,2 @@', '+      - continue-on-error: true', '+        run: npm run lint'], 'on: push\njobs:\n  test:\n    steps:\n      - run: npm test\n      - continue-on-error: true\n        run: npm run lint\n');
+  check('scan, honest: continue-on-error as the first key of a lint step is not the test step', lintc16 === '', lintc16);
+
+  // 7: a list a variable holds, in more forms
+  const onel16 = lines16('jest.config.js', ['@@ -1 +1 @@', "-const ignored = ['/node_modules/', '/e2e/'];", "+const ignored = ['/node_modules/', '/e2e/', '/test/cart/'];"], "const ignored = ['/node_modules/', '/e2e/', '/test/cart/'];\nmodule.exports = {\n  testPathIgnorePatterns: ignored,\n};\n");
+  check('scan: a path added to a one-line list a variable holds, which a key names, is read', onel16.includes('left out'), onel16);
+  const inl16 = lines16('jest.config.js', ['@@ -1 +0,0 @@', "-const ignored = ['/node_modules/', '/e2e/'];", '@@ -3 +2 @@', '-  testPathIgnorePatterns: ignored,', "+  testPathIgnorePatterns: ['/node_modules/', '/e2e/'],"], "module.exports = {\n  testPathIgnorePatterns: ['/node_modules/', '/e2e/'],\n};\n");
+  check('scan, honest: a one-line list a variable holds, inlined under its key, is not a new filter', inl16 === '', inl16);
+  const ts16 = lines16('playwright.config.ts', ['@@ -2,0 +3 @@', '+  /cart/,'], 'const ignored: RegExp[] = [\n  /legacy/,\n  /cart/,\n];\nexport default {\n  testIgnore: ignored,\n};\n');
+  check('scan: an item added to a typed list a variable holds (const x: T[] = [) is read', ts16.includes('left out'), ts16);
+  const spread16 = lines16('jest.config.js', ['@@ -3,0 +4 @@', "+  '/test/cart/',"], "const ignored = [\n  '/node_modules/',\n  '/e2e/',\n  '/test/cart/',\n];\nmodule.exports = {\n  testPathIgnorePatterns: [...ignored, '/dist/'],\n};\n");
+  check("scan: a path added to a list spread into a key's own value is read", spread16.includes('left out'), spread16);
+
+  // 8: a -k narrowed back
+  const narrow16 = lines16('pytest.ini', ['@@ -2 +2 @@', '-addopts = -k "not slow and not test_adds"', '+addopts = -k "not slow"'], '[pytest]\naddopts = -k "not slow"\n');
+  check('scan, honest: -k narrowed back to fewer not-terms is not a new filter', narrow16 === '', narrow16);
+
+  // 10: block scalars in linear time
+  const t16 = Date.now();
+  const many16 = 'grep: >-\n  smoke\n'.repeat(20000);
+  lines16('.mocharc.yml', ['@@ -1,0 +1 @@', '+grep: >-'], many16);
+  check('scan: a .mocharc.yml with 20,000 block-scalar keys is read in under 2 seconds', Date.now() - t16 < 2000, `${Date.now() - t16} ms`);
+
+  // on the out-of-scope list: TOML multi-line strings, and mocha's comma lists
+  const triple16 = lines16('pyproject.toml', ['@@ -2 +2 @@', '-addopts = "-q"', '+addopts = """-q --deselect tests/t.py::a"""'], '[tool.pytest.ini_options]\naddopts = """-q --deselect tests/t.py::a"""\n');
+  check('scan: a --deselect in a one-line TOML """ string is read', triple16.includes('left out'), triple16);
+  const tripm16 = lines16('pyproject.toml', ['@@ -3,0 +4 @@', '+    -k "not cart"'], '[tool.pytest.ini_options]\naddopts = """\n    -q\n    -k "not cart"\n"""\n');
+  check('scan: a -k added inside a multi-line TOML """ string is read', tripm16.includes('left out'), tripm16);
+  const comma16 = lines16('.mocharc.yml', ['@@ -2 +2 @@', '-ignore: test/legacy.spec.js', '+ignore: test/legacy.spec.js, test/cart.spec.js'], 'spec: test/**/*.spec.js\nignore: test/legacy.spec.js, test/cart.spec.js\n');
+  check("scan: a second path added to mocha's comma list is read", comma16.includes('left out'), comma16);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);
