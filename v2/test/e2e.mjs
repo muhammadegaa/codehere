@@ -4429,6 +4429,133 @@ section(['R14'], () => {
   check('scan, honest: a side test:smoke filter stays quiet beside a script holding a broken regex', bad14 === '', bad14);
 });
 
+section(['R15'], () => {
+  // The cold review's round 15 (docs/reviews/2026-11-19-cold-review-round-15.md).
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart15 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const pkg15 = '{"name":"p","type":"module","scripts":{"test":"node --test"}}\n';
+  const scan15 = (file, minus, plus, opts = {}) => tamperFindings(`M\t${file}`, diff27(file, minus, plus), opts).join(' · ');
+  const lines15 = (file, hunks, now, opts = {}) => tamperFindings(`M\t${file}`, [`--- a/${file}`, `+++ b/${file}`, ...hunks].join('\n'), now == null ? opts : { read: () => now, ...opts }).join(' · ');
+  const loop15 = (name, files, change) => {
+    const dir = freshRepo(name, files);
+    ch(['init', '--agent', 'claude'], dir);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', dir, 'y');
+    HC('session-start', dir, rec('claude', 'session-start', dir, 's15', { source: 'startup' }));
+    change(dir);
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, 's15', { stop_hook_active: false })), encoding: 'utf8', timeout: 60000 });
+    let j = {};
+    try {
+      j = JSON.parse(x.stdout || '{}');
+    } catch {}
+    return { out: x.stdout || '', j };
+  };
+  const sentBack = (r, re = /left out/) => r.j.decision === 'block' && re.test(r.j.reason) && !r.out.includes('✓');
+
+  // 1: a pyproject list item that holds an option and its value
+  r = loop15('r15-toml', { 'package.json': pkg15, 'test/cart.test.mjs': cart15, 'pyproject.toml': '[tool.pytest.ini_options]\naddopts = [\n    "-q",\n]\n' }, (d) => fs.writeFileSync(path.join(d, 'pyproject.toml'), '[tool.pytest.ini_options]\naddopts = [\n    "-q",\n    "-k not test_adds",\n]\n'));
+  check('finish check: "-k not test_adds" added as one pyproject addopts item sends the agent back', sentBack(r), r.out);
+  for (const [file, minus, plus] of [
+    ['pyproject.toml', 'addopts = ["-q"]', 'addopts = ["-q", "-k not slow"]'],
+    ['pyproject.toml', 'addopts = ["-q"]', 'addopts = ["-q", "-k=not cart"]'],
+    ['pytest.ini', 'addopts = -q', 'addopts = -q "-k not slow"'],
+  ]) {
+    const got = scan15(file, [minus], [plus]);
+    check(`scan, without the file: ${plus} in ${file} leaves tests out`, got.includes('left out'), got);
+  }
+
+  // 2: a filter appended to a config with no final newline
+  r = loop15('r15-eof', { 'package.json': pkg15, 'test/cart.test.mjs': cart15, 'pytest.ini': '[pytest]\naddopts =\n    -q' }, (d) => fs.writeFileSync(path.join(d, 'pytest.ini'), '[pytest]\naddopts =\n    -q\n    --deselect test/cart.test.mjs::adds'));
+  check('finish check: a --deselect appended to a pytest.ini with no final newline sends the agent back', sentBack(r), r.out);
+  const yeof15 = lines15('.mocharc.yml', ['@@ -3 +3,2 @@', '-  - test/legacy.spec.js', '\\ No newline at end of file', '+  - test/legacy.spec.js', '+  - test/cart.spec.js', '\\ No newline at end of file'], 'spec: test/**/*.spec.js\nignore:\n  - test/legacy.spec.js\n  - test/cart.spec.js');
+  check('scan: an item appended to a .mocharc.yml ignore list with no final newline is read', yeof15.includes('left out'), yeof15);
+
+  // 3: lines that only print a test command
+  for (const [file, minus, plus] of [
+    ['.github/workflows/ci.yml', '      - run: npm test', "      - run: echo Don\\'t run npm test until the cart fix"],
+    ['azure-pipelines.yml', '  - script: dotnet test', '  - pwsh: Write-Host "dotnet test is off until #12"'],
+    ['.github/workflows/ci.yml', '      - run: npm test', '      - run: printf "npm test is off\\n"'],
+  ]) {
+    const got = scan15(file, [minus], [plus]);
+    check(`scan: ${minus.trim()} replaced by ${plus.trim()} is a test step removed`, got.includes('removed'), got);
+  }
+
+  // 4: a list kept in a variable, inlined under its key
+  const inline15 = lines15('jest.config.js', ['@@ -1,5 +0,0 @@', '-const ignored = [', "-  '/node_modules/',", "-  '/e2e/',", '-];', '-', '@@ -7 +2,4 @@', '-  testPathIgnorePatterns: ignored,', '+  testPathIgnorePatterns: [', "+    '/node_modules/',", "+    '/e2e/',", '+  ],'], "module.exports = {\n  testPathIgnorePatterns: [\n    '/node_modules/',\n    '/e2e/',\n  ],\n};\n");
+  check('scan, honest: a list kept in a variable, inlined under its key, is not a new filter', inline15 === '', inline15);
+  const addvar15 = lines15('jest.config.js', ['@@ -3,0 +4 @@', "+  '/test/cart/',"], "const ignored = [\n  '/node_modules/',\n  '/e2e/',\n  '/test/cart/',\n];\nmodule.exports = {\n  testPathIgnorePatterns: ignored,\n};\n");
+  check('scan: a path added to a list a variable holds, which testPathIgnorePatterns names, is read', addvar15.includes('left out'), addvar15);
+
+  // 5: a file shorter than its hunks say does not stop the scan
+  let threw15 = '';
+  try {
+    lines15('pytest.ini', ['@@ -9 +9 @@', '-    -q', '+    -q --deselect t.py::a'], '[pytest]\naddopts =\n');
+  } catch (e) {
+    threw15 = e.message;
+  }
+  check('scan: a config read shorter than its hunks does not throw', threw15 === '', threw15);
+
+  // 6: ; comments in ini files, and /* */ around a list item
+  const semi15 = lines15('pytest.ini', ['@@ -4 +4 @@', '-    ; --deselect tests/test_cart.py::test_adds', '+    --deselect tests/test_cart.py::test_adds'], '[pytest]\naddopts =\n    -q\n    --deselect tests/test_cart.py::test_adds\n');
+  check('scan: a --deselect uncommented from a ; comment is read', semi15.includes('left out'), semi15);
+  const note15 = lines15('pytest.ini', ['@@ -3,0 +4 @@', '+    ; --deselect tests/test_cart.py::test_adds (flaky, see #12)'], '[pytest]\naddopts =\n    -q\n    ; --deselect tests/test_cart.py::test_adds (flaky, see #12)\n');
+  check('scan, honest: a ; note line in addopts is not a filter', note15 === '', note15);
+  const block15 = lines15('jest.config.js', ['@@ -4 +3,0 @@', '-    /*', '@@ -6 +4,0 @@', '-    */'], "module.exports = {\n  testPathIgnorePatterns: [\n    '/node_modules/',\n    '/test/cart/',\n  ],\n};\n");
+  check('scan: a list item uncommented by removing the /* and */ around it is read', block15.includes('left out'), block15);
+
+  // 7: a comment at column 0 inside a YAML block list
+  const ycol15 = lines15('.mocharc.yml', ['@@ -4,0 +5 @@', '+  - test/cart.spec.js'], 'spec: test/**/*.spec.js\nignore:\n# legacy\n  - test/legacy.spec.js\n  - test/cart.spec.js\n');
+  check('scan: an item added after a column-0 comment in a YAML ignore list is read', ycol15.includes('left out'), ycol15);
+
+  // 8: an option and its value on separate lines
+  const split15 = lines15('pyproject.toml', ['@@ -2 +2,5 @@', '-addopts = ["-q", "-k", "not slow"]', '+addopts = [', '+    "-q",', '+    "-k",', '+    "not slow",', '+]'], '[tool.pytest.ini_options]\naddopts = [\n    "-q",\n    "-k",\n    "not slow",\n]\n');
+  check('scan, honest: a one-line addopts list rewritten one item per line is not a new filter', split15 === '', split15);
+  const wide15 = lines15('pyproject.toml', ['@@ -5 +5 @@', '-    "not slow",', '+    "not slow and not cart",'], '[tool.pytest.ini_options]\naddopts = [\n    "-q",\n    "-k",\n    "not slow and not cart",\n]\n');
+  check("scan: -k's value widened on its own line is read", wide15.includes('left out'), wide15);
+  const iniw15 = lines15('pytest.ini', ['@@ -4 +4 @@', '-    "not slow"', '+    "not slow and not cart"'], '[pytest]\naddopts =\n    -k\n    "not slow and not cart"\n');
+  check("scan: -k's value widened on its own ini continuation line is read", iniw15.includes('left out'), iniw15);
+
+  // 9: addopts: with a colon
+  const colon15 = scan15('pytest.ini', ['addopts: -q'], ['addopts: -q --deselect tests/t.py::a']);
+  check('scan: a --deselect added to addopts written with a colon is read', colon15.includes('left out'), colon15);
+  const colonl15 = lines15('setup.cfg', ['@@ -3,0 +4 @@', '+    --deselect tests/t.py::a'], '[tool:pytest]\naddopts:\n    -q\n    --deselect tests/t.py::a\n');
+  check('scan: a --deselect on a continuation of addopts: is read', colonl15.includes('left out'), colonl15);
+
+  // 10: a regex item on its own line in a wrapped list
+  const rx15 = lines15('playwright.config.ts', ['@@ -3,0 +4 @@', '+    /.*cart.*/,'], 'export default {\n  testIgnore: [\n    /.*legacy.*/,\n    /.*cart.*/,\n  ],\n};\n');
+  check('scan: a regex added to a wrapped testIgnore list is read', rx15.includes('left out'), rx15);
+
+  // 11: a YAML value rewritten as a block list
+  const yblock15 = lines15('.mocharc.yml', ['@@ -2 +2,2 @@', '-ignore: test/legacy.spec.js', '+ignore:', '+  - test/legacy.spec.js'], 'spec: test/**/*.spec.js\nignore:\n  - test/legacy.spec.js\n');
+  check('scan, honest: a YAML ignore value rewritten as a block list is not a new filter', yblock15 === '', yblock15);
+
+  // 12: quotes inside a comment are not list items
+  const tomlc15 = lines15('pyproject.toml', ['@@ -3 +3 @@', '-    "-q",', '+    "-q",  # pass "-k" to filter'], '[tool.pytest.ini_options]\naddopts = [\n    "-q",  # pass "-k" to filter\n]\n');
+  check('scan, honest: quotes inside a comment on an addopts line are not a filter', tomlc15 === '', tomlc15);
+
+  // the reviewer's note on the out-of-scope list: tox's commands when the approved command is tox, and CI steps or
+  // jobs switched off
+  const tox15 = lines15('tox.ini', ['@@ -3 +3 @@', '-    pytest', '+    pytest --deselect tests/t.py::test_a'], '[testenv]\ncommands =\n    pytest --deselect tests/t.py::test_a\n', { command: 'tox' });
+  check('scan: a --deselect added to tox commands, with tox approved, is read', tox15.includes('left out'), tox15);
+  const toxp15 = lines15('tox.ini', ['@@ -3 +3 @@', '-    pytest', '+    pytest --deselect tests/t.py::test_a'], '[testenv]\ncommands =\n    pytest --deselect tests/t.py::test_a\n', { command: 'python3 -m pytest' });
+  check('scan, honest: tox commands are not read when the approved command does not run tox', toxp15 === '', toxp15);
+  const off15 = lines15('.github/workflows/ci.yml', ['@@ -5,0 +6 @@', '+        if: false'], 'on: push\njobs:\n  test:\n    steps:\n      - run: npm test\n        if: false\n');
+  check('scan: if: false on the CI test step is read', off15.includes('always pass'), off15);
+  const manual15 = lines15('.gitlab-ci.yml', ['@@ -3,0 +4 @@', '+  when: manual'], 'test:\n  script:\n    - npm test\n  when: manual\n');
+  check('scan: when: manual on the GitLab test job is read', manual15.includes('always pass'), manual15);
+
+  // found while fixing, from the reviewer's own case files run on the fix: a CRLF config (the whole-file read first
+  // missed it), a YAML block scalar, continue-on-error written as an expression, and TOML's escaped quotes
+  const crlf15 = lines15('pyproject.toml', ['@@ -3,0 +4 @@', '+    "--deselect=tests/t.py::test_a",\r'], '[tool.pytest.ini_options]\r\naddopts = [\r\n    "-q",\r\n    "--deselect=tests/t.py::test_a",\r\n]\r\n');
+  check('scan: an item added to a CRLF pyproject.toml addopts list is read', crlf15.includes('left out'), crlf15);
+  const scalar15 = lines15('.mocharc.yml', ['@@ -1 +1,2 @@', '-grep: smoke', '+grep: >-', '+  smoke'], 'grep: >-\n  smoke\nspec: test/**/*.spec.js\n');
+  check('scan, honest: a YAML grep value rewritten as a block scalar is not a new filter', scalar15 === '', scalar15);
+  const expr15 = lines15('.github/workflows/ci.yml', ['@@ -5,0 +6 @@', '+        continue-on-error: ${{ true }}'], 'on: push\njobs:\n  test:\n    steps:\n      - run: npm test\n        continue-on-error: ${{ true }}\n');
+  check('scan: continue-on-error: ${{ true }} on the CI test step is read', expr15.includes('always pass'), expr15);
+  const esc15 = lines15('pyproject.toml', ['@@ -2 +2 @@', '-addopts = "-k \\"not slow\\""', '+addopts = "-k \\"not slow and not cart\\""'], '[tool.pytest.ini_options]\naddopts = "-k \\"not slow and not cart\\""\n');
+  check('scan: a -k widened inside a TOML string with escaped quotes is read', esc15.includes('left out'), esc15);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);
