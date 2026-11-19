@@ -4252,6 +4252,81 @@ section(['R12'], () => {
   check('finish check: .gitlab-ci.yml renamed .gitlab-ci.yaml, which GitLab does not read, sends the agent back', r.j.decision === 'block' && /CI/.test(r.j.reason), r.out);
 });
 
+section(['R13'], () => {
+  // The cold review's round 13 (docs/reviews/2026-11-19-cold-review-round-13.md), against the bounded promise.
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart13 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const scan13 = (file, minus, plus, opts = {}) => tamperFindings(`M\t${file}`, diff27(file, minus, plus), opts).join(' · ');
+  const lines13 = (file, hunks, now) => tamperFindings(`M\t${file}`, [`--- a/${file}`, `+++ b/${file}`, ...hunks].join('\n'), now == null ? {} : { read: () => now }).join(' · ');
+
+  // 1: set up in a package, the repo's CI file moved into a folder between the top and the package
+  r = (() => {
+    const dir = freshRepo('r13-mono-mid', { 'packages/app/package.json': '{"name":"p","type":"module","scripts":{"test":"node --test"}}\n', 'packages/app/test/cart.test.mjs': cart13, '.gitlab-ci.yml': 'test:\n  script:\n    - npm test\n' });
+    const d = path.join(dir, 'packages/app');
+    ch(['init', '--agent', 'claude'], d);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', d, 'y');
+    HC('session-start', d, rec('claude', 'session-start', d, 's13', { source: 'startup' }));
+    sh('git mv ../../.gitlab-ci.yml ../.gitlab-ci.yml', d);
+    fs.writeFileSync(path.join(d, 'src.js'), 'export const x = 1;\n');
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: d, input: JSON.stringify(rec('claude', 'stop', d, 's13', { stop_hook_active: false })), encoding: 'utf8', timeout: 60000 });
+    let j = {};
+    try {
+      j = JSON.parse(x.stdout || '{}');
+    } catch {}
+    return { out: x.stdout || '', j };
+  })();
+  check("finish check, set up in a package: the repo's .gitlab-ci.yml moved into a folder in between sends the agent back", r.j.decision === 'block' && /CI/.test(r.j.reason) && !r.out.includes('✓'), r.out);
+
+  // 2: concurrently's npm:test:* and pnpm's /regex/ run test:* scripts
+  const reach13 = (test) => scan13('package.json', ['  "test:unit": "node --test"'], ['  "test:unit": "node --test --test-skip-pattern=adds"'], { read: () => JSON.stringify({ scripts: { test, 'test:unit': 'node --test --test-skip-pattern=adds' } }) });
+  for (const test of ['concurrently "npm:test:*"', 'pnpm run "/^test:/"']) {
+    const got = reach13(test);
+    check(`scan: a filter on test:unit, which ${test} runs, leaves tests out`, got.includes('left out'), got);
+  }
+
+  // 3: pyproject.toml filters inside a quoted string or a TOML list
+  for (const [minus, plus] of [['addopts = "-q"', 'addopts = "--deselect tests/test_cart.py::test_adds -q"'], ['addopts = ["-ra"]', 'addopts = ["-ra", "--ignore=tests/test_cart.py"]'], ["addopts = '-q'", `addopts = '-k "not cart"'`]]) {
+    const got = scan13('pyproject.toml', [minus], [plus]);
+    check(`scan: ${plus} in pyproject.toml leaves tests out`, got.includes('left out'), got);
+  }
+
+  // 4, 7: items of a wrapped list: honest rewrites are not new; a value on the line that opens the list is read
+  const comma13 = lines13('jest.config.js', ['@@ -4 +4 @@', "-    '/e2e/'", "+    '/e2e/',"], "module.exports = {\n  testPathIgnorePatterns: [\n    '/node_modules/',\n    '/e2e/',\n  ],\n};\n");
+  check('scan, honest: a trailing comma added to the last item of a wrapped list is not a new filter', comma13 === '', comma13);
+  const sorted13 = lines13('jest.config.js', ['@@ -3,2 +3,2 @@', "-    '/node_modules/',", "-    '/e2e/',", "+    '/e2e/',", "+    '/node_modules/',"], "module.exports = {\n  testPathIgnorePatterns: [\n    '/e2e/',\n    '/node_modules/',\n  ],\n};\n");
+  check('scan, honest: the items of a wrapped list sorted are not a new filter', sorted13 === '', sorted13);
+  const indent13 = lines13('pytest.ini', ['@@ -3 +3 @@', '-    --deselect tests/test_old.py::test_a', '+        --deselect tests/test_old.py::test_a'], '[pytest]\naddopts =\n        --deselect tests/test_old.py::test_a\n');
+  check('scan, honest: an addopts continuation line re-indented is not a new filter', indent13 === '', indent13);
+  const opener13 = scan13('jest.config.js', ["  testPathIgnorePatterns: ['/node_modules/'],"], ["  testPathIgnorePatterns: ['/node_modules/', '/test/cart',"]);
+  check('scan: a value added on the line that opens a wrapped list is read', opener13.includes('left out'), opener13);
+
+  // 5: the key's own value, found where the key is, with brackets inside a regex item
+  const spec13 = scan13('.mocharc.js', ["module.exports = { spec: 'test/grep.test.js', grep: 'smoke' };"], ["module.exports = { spec: 'test/grep.test.js', grep: 'cart' };"]);
+  check("scan: a changed grep value is read though the key's name appears in an earlier value", spec13.includes('left out'), spec13);
+  const rx13 = scan13('jest.config.js', ["  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/src/[a-z]+/fixtures/'],"], ["  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/src/[a-z]+/fixtures/', '<rootDir>/test/cart'],"]);
+  check('scan: a path added after a list item holding brackets is read', rx13.includes('left out'), rx13);
+
+  // 9: a test step replaced by an echo that names it is still removed
+  const echo13 = scan13('.github/workflows/ci.yml', ['      - run: npm test'], ['      - run: echo "npm test is skipped until the flaky cart test is fixed"']);
+  check('scan: a CI test step replaced by an echo that mentions it is a test step removed', echo13.includes('removed'), echo13);
+
+  // 8: long CI lines are read in linear time
+  const t13 = Date.now();
+  scan13('.github/workflows/ci.yml', [], Array.from({ length: 20 }, () => `      - run: ${'npm test '.repeat(1100)}`));
+  check('scan: twenty 10,000-character CI lines are read in under 2 seconds', Date.now() - t13 < 2000, `${Date.now() - t13} ms`);
+
+  // 10, 11: more ways filters are written
+  const two13 = scan13('package.json', ['{"scripts":{"test":"node --test","test:unit":"node --test"}}'], ['{"scripts":{"test":"node --test","test:unit":"node --test --test-skip-pattern=adds"}}'], { read: () => JSON.stringify({ scripts: { test: 'npm run test:unit', 'test:unit': 'node --test --test-skip-pattern=adds' } }) });
+  check('scan: a filter on the second script of a one-line package.json is read', two13.includes('left out'), two13);
+  const yaml13 = scan13('.mocharc.yml', ['grep: smoke'], ['grep: cart']);
+  check('scan: an unquoted YAML grep value changed is read', yaml13.includes('left out'), yaml13);
+  const re13 = scan13('playwright.config.ts', ['  grepInvert: /@flaky/,'], ['  grepInvert: /@flaky|checkout/,']);
+  check("scan: a widened playwright grepInvert regex is read", re13.includes('left out'), re13);
+  const always13 = scan13('package.json', ['  "test": "mocha \\"test/**/*.spec.js\\""'], ['  "test": "mocha \\"test/**/*.spec.js\\" || true"']);
+  check('scan: || true after an escaped quote in the test script is read', always13.includes('always exit 0'), always13);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

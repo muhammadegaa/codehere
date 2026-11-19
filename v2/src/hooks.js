@@ -437,7 +437,8 @@ export function rawSnapshot(root, algo, { skip = [], stats = null, keep = new Se
     const pre = '../'.repeat(k);
     const dir = path.resolve(root, pre);
     // a parent config that is a link counts by the bytes of the file it points to (round 12)
-    for (const e of entries(dir)) if ((e.isFile() || e.isSymbolicLink()) && isCheckFile(pre + e.name) && !isTestCode(pre + e.name)) files[pre + e.name] = fileId(path.join(dir, e.name), algo, stats, pre + e.name, true);
+    // CI files count only at the repo's top: one in a folder in between is not read by CI (round 13)
+    for (const e of entries(dir)) if ((e.isFile() || e.isSymbolicLink()) && isCheckFile(pre + e.name) && !isTestCode(pre + e.name) && (k === levels || !isCiFile(pre + e.name))) files[pre + e.name] = fileId(path.join(dir, e.name), algo, stats, pre + e.name, true);
     if (k < levels) continue;
     for (const sub of ['.github/workflows', '.circleci']) {
       for (const e of entries(path.join(dir, sub))) {
@@ -1318,7 +1319,7 @@ function stop(root, input) {
         }
         if (!best) continue;
         kept.push(`R100\t${quotePath(best)}\t${quotePath(a)}`);
-        movedAway.add(nfc(best));
+        if (!(isCi(best) && !isCi(a))) movedAway.add(nfc(best)); // a CI file moved where CI does not read it: read as removed (round 13)
         renamedFrom.set(nfc(a), nfc(best));
       }
     }
@@ -1358,6 +1359,11 @@ function stop(root, input) {
     // a test file as it is now, to see what a swallowing catch holds: plain files only, up to 1 MiB
     const read = (f, max = 1024 * 1024) => {
       try {
+        // a parent config may be a link, recorded by the file it points to: read it the same way (round 13)
+        if (f.startsWith('../')) {
+          const st = fs.statSync(path.join(root, f));
+          return st.isFile() && st.size <= max ? fs.readFileSync(path.join(root, f), 'utf8') : null;
+        }
         return readPlain(path.join(root, f), 'utf8', max);
       } catch {
         return null;
