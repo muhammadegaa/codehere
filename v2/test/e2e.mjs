@@ -4006,7 +4006,127 @@ section(['R10'], () => {
   start10(move10);
   fs.renameSync(path.join(move10, 'test'), path.join(move10, 'tests'));
   r = stop10(move10);
-  check('finish check, honest: 1,000 tests moved with plain mv get their ✓ in under 8 seconds', ticked10(r) && r.ms < 8000, `${r.ms} ms ${r.out.slice(0, 200)}`);
+  // Codehere's own time, without the test run it reports (1,000 test files take seconds to run on a busy machine)
+  const ran10 = Number((/re-run here · ([\d.]+) s/.exec(r.out) || [])[1] || 0) * 1000;
+  check("finish check, honest: 1,000 tests moved with plain mv get their ✓, with under 5 seconds of Codehere's own time", ticked10(r) && r.ms - ran10 < 5000, `${r.ms} ms in all, ${ran10} ms of tests ${r.out.slice(0, 200)}`);
+});
+
+section(['R11'], () => {
+  // The cold review's round 11 (docs/reviews/2026-11-19-cold-review-round-11.md), against the bounded promise.
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart11 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const repo11 = (name, files = { 'test/cart.test.mjs': cart11 }, scripts = { test: 'node --test' }, sub = '') => {
+    const pkg = `${JSON.stringify({ name: 'p', type: 'module', scripts }, null, 2)}\n`;
+    const dir = freshRepo(`r11-${name}`, { [sub ? `${sub}/package.json` : 'package.json']: pkg, ...files });
+    const at = sub ? path.join(dir, sub) : dir;
+    ch(['init', '--agent', 'claude'], at);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', at, 'y');
+    return at;
+  };
+  const start11 = (dir, sid = 's11') => HC('session-start', dir, rec('claude', 'session-start', dir, sid, { source: 'startup' }));
+  const stop11 = (dir, sid = 's11') => {
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, sid, { stop_hook_active: false })), encoding: 'utf8', timeout: 120000 });
+    let j = {};
+    try {
+      j = x.stdout ? JSON.parse(x.stdout) : {};
+    } catch {}
+    return { out: x.stdout || '', j };
+  };
+  const ticked11 = (x) => x.out.includes('✓');
+  const src11 = (d) => fs.writeFileSync(path.join(d, 'src.js'), `export const x = ${Date.now()};\n`);
+  const edit11 = (d, f, fn) => fs.writeFileSync(path.join(d, f), fn(fs.readFileSync(path.join(d, f), 'utf8')));
+
+  // 1: Codehere set up in a monorepo package: the top's CI workflow and a parent test config are read
+  const ci11 = 'on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n';
+  r = (() => {
+    const d = repo11('mono-ci', { 'packages/app/test/cart.test.mjs': cart11, '.github/workflows/ci.yml': ci11 }, { test: 'node --test' }, 'packages/app');
+    start11(d);
+    edit11(d, '../../.github/workflows/ci.yml', (t) => t.replace('run: npm test', 'run: echo skip'));
+    src11(d);
+    return stop11(d);
+  })();
+  check('finish check, set up in a monorepo package: the top CI workflow made to skip the tests sends the agent back', r.j.decision === 'block' && /CI/.test(r.j.reason) && !ticked11(r), r.out);
+  r = (() => {
+    const d = repo11('mono-pytest', { 'packages/app/test/cart.test.mjs': cart11, 'pytest.ini': '[pytest]\naddopts = -q\n' }, { test: 'node --test' }, 'packages/app');
+    start11(d);
+    edit11(d, '../../pytest.ini', (t) => t.replace('addopts = -q', 'addopts = -q --deselect tests/test_cart.py::test_adds'));
+    src11(d);
+    return stop11(d);
+  })();
+  check('finish check, set up in a monorepo package: a parent pytest.ini that deselects a test sends the agent back', r.j.decision === 'block' && r.j.reason.includes('left out'), r.out);
+
+  // 2, 3, 4: test scripts that npm test reaches, filters added to an existing list, jest by its path
+  const pkgScan = (scripts, minus, plus) => tamperFindings('M\tpackage.json', diff27('package.json', minus, plus), { read: () => JSON.stringify({ scripts }) }).join(' · ');
+  const chain11 = pkgScan({ test: 'npm run test:all', 'test:all': 'npm run test:unit', 'test:unit': 'node --test --test-skip-pattern=adds' }, ['  "test:unit": "node --test"'], ['  "test:unit": "node --test --test-skip-pattern=adds"']);
+  check('scan: a filter on test:unit, which npm test reaches through test:all, leaves tests out', chain11.includes('left out'), chain11);
+  const glob11 = pkgScan({ test: 'run-s test:*', 'test:unit': 'node --test --test-skip-pattern=adds' }, ['  "test:unit": "node --test"'], ['  "test:unit": "node --test --test-skip-pattern=adds"']);
+  check('scan: a filter on test:unit, which npm test reaches through run-s test:*, leaves tests out', glob11.includes('left out'), glob11);
+  const moved11 = pkgScan({ test: 'node --test --test-skip-pattern=adds' }, ['  "test": "node --test",', '  "test:fast": "node --test --test-skip-pattern=adds"'], ['  "test": "node --test --test-skip-pattern=adds",']);
+  check('scan: a filter moved from a removed test:fast onto test leaves tests out', moved11.includes('left out'), moved11);
+  const list11 = tamperFindings('M\tjest.config.js', diff27('jest.config.js', ["  testPathIgnorePatterns: ['/node_modules/'],"], ["  testPathIgnorePatterns: ['/node_modules/', '/test/cart'],"])).join(' · ');
+  check("scan: a path added to jest's existing testPathIgnorePatterns leaves tests out", list11.includes('left out'), list11);
+  const addopts11 = tamperFindings('M\tpytest.ini', diff27('pytest.ini', ['addopts = -q --ignore=tests/legacy'], ['addopts = -q --ignore=tests/legacy --ignore=tests/test_payment.py'])).join(' · ');
+  check('scan: a second --ignore added to an addopts that had one leaves tests out', addopts11.includes('left out'), addopts11);
+  const same11 = tamperFindings('M\tjest.config.js', diff27('jest.config.js', ["  testPathIgnorePatterns: ['/node_modules/'],"], ["  testPathIgnorePatterns: [ '/node_modules/' ],"])).join(' · ');
+  check('scan, honest: the same testPathIgnorePatterns list written another way is not a new filter', same11 === '', same11);
+  for (const cmd of ['node --experimental-vm-modules node_modules/jest/bin/jest.js -t cart', 'node_modules/.bin/jest -t cart']) {
+    const got = pj(['  "test": "node --test"'], [`  "test": "${cmd}"`]);
+    check(`scan: jest called by its path with -t leaves tests out (${cmd.slice(0, 30)})`, got.includes('left out'), got);
+  }
+
+  // 5: a build that writes test code next to the sources, ignored by its own name
+  const inplace11 = repo11('inplace', { 'test/cart.src.mjs': cart11, '.gitignore': 'test/*.test.mjs\n' }, { test: 'cp test/cart.src.mjs test/cart.test.mjs && node --test' });
+  start11(inplace11);
+  src11(inplace11);
+  r = stop11(inplace11);
+  src11(inplace11);
+  const again11 = stop11(inplace11);
+  check('finish check, honest: test code a build writes next to the sources, ignored by its own name, keeps the ✓ at every stop', ticked11(r) && ticked11(again11), r.out + again11.out);
+
+  // 6: a workflow that runs no tests, disabled by renaming it
+  r = (() => {
+    const d = repo11('stale-workflow', { 'test/cart.test.mjs': cart11, '.github/workflows/stale.yml': 'on: schedule\njobs:\n  stale:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/stale@v9\n' });
+    start11(d);
+    sh('git mv .github/workflows/stale.yml .github/workflows/stale.yml.disabled', d);
+    return stop11(d);
+  })();
+  check('finish check, honest: a workflow that runs no tests, disabled by renaming it, is not reported', r.j.decision !== 'block' && ticked11(r), r.out);
+
+  // 7: a session state.json lost commits a change that breaks the code: the failing tests still run
+  const lost11 = repo11('lost-source', { 'test/cart.test.mjs': "import { it } from 'node:test'; import assert from 'node:assert'; import { add } from '../cart.mjs';\nit('adds', () => assert.equal(add(1, 1), 2));\n", 'cart.mjs': 'export const add = (a, b) => a + b;\n' });
+  start11(lost11);
+  const st11 = JSON.parse(readText(path.join(lost11, '.codehere/local/state.json')));
+  delete st11.sessions.s11;
+  fs.writeFileSync(path.join(lost11, '.codehere/local/state.json'), JSON.stringify(st11));
+  fs.writeFileSync(path.join(lost11, 'cart.mjs'), 'export const add = (a, b) => a - b;\n');
+  sh('git commit -qam "tidy add"', lost11);
+  r = stop11(lost11);
+  check('finish check: a session state.json lost that commits a breaking change is sent back for the failing tests', r.j.decision === 'block' && r.j.reason.includes('failed'), r.out);
+
+  // 8: sixty tests moved with plain mv, each with its import fixed
+  const many11 = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`test/t${i}.test.mjs`, `import { it } from 'node:test'; import assert from 'node:assert'; import { one } from '../lib.mjs';\nit('t${i}', () => {\n  assert.equal(one, 1);\n  assert.equal(${i} + 0, ${i});\n});\n`]));
+  r = (() => {
+    const d = repo11('move-60-edit', { ...many11, 'lib.mjs': 'export const one = 1;\n' });
+    start11(d);
+    fs.mkdirSync(path.join(d, 'tests'));
+    fs.renameSync(path.join(d, 'test'), path.join(d, 'tests/unit'));
+    for (let i = 0; i < 60; i++) edit11(d, `tests/unit/t${i}.test.mjs`, (t) => t.replace("'../lib.mjs'", "'../../lib.mjs'"));
+    return stop11(d);
+  })();
+  check('finish check, honest: 60 tests moved with plain mv, each with its import fixed, are not deleted tests', r.j.decision !== 'block' && ticked11(r), r.out.slice(0, 400));
+
+  // 9: a brief written while another session's finish check runs is still there afterwards
+  const brief11 = repo11('brief-race', { 'test/cart.test.mjs': cart11 }, { test: 'node -e "setTimeout(() => {}, 1500)" && node --test' });
+  start11(brief11, 'a11');
+  src11(brief11);
+  sh(`(printf '%s' ${sq(JSON.stringify(rec('claude', 'stop', brief11, 'a11', { stop_hook_active: false })))} | node ${sq(BIN)} hook stop --agent claude > /dev/null &) ; sleep 0.4 ; node ${sq(BIN)} brief > /dev/null ; sleep 4`, brief11);
+  const pending11 = JSON.parse(readText(path.join(brief11, '.codehere/local/state.json')) || '{}').pendingBrief;
+  check("a restart brief written while another session's finish check runs is kept for the next session", Boolean(pending11), String(pending11));
+
+  // 10: git writes a tab after a path holding a space
+  const tab11 = tamperFindings('D\t.github/workflows/my ci.yml', ['diff --git a/.github/workflows/my ci.yml b/.github/workflows/my ci.yml', 'deleted file mode 100644', '--- a/.github/workflows/my ci.yml\t', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-on: push', '-      - run: npm test'].join('\n')).join(' · ');
+  check('scan: a deleted CI workflow whose name holds a space is read', tab11.includes('CI'), tab11);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');

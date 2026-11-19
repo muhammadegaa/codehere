@@ -12,7 +12,7 @@ import {
   removedAt, expireDrafts, draftFile, saveRecord, readPlain, readOwn, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
-  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile, isCheckFile, isTestCode,
+  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile, isCheckFile, isTestCode, isCiFile,
 } from './signals.js';
 import { languageOf } from './noskip.js';
 import { unquotePath, quotePath } from './gitpath.js';
@@ -124,6 +124,7 @@ function sessionStart(root, input, agent) {
     // at the session's real start is used if it is still there; otherwise this session has none, and no ✓.
     const name = recordName(key);
     s.record = fs.existsSync(recordFile(root, { record: name })) ? name : null;
+    adoptStart(root, s);
   } else if (isGitRepo(root) && !s.baseline && s.record === undefined) {
     // Remember what was already changed before this session, so we only
     // ever react to what the agent changes now.
@@ -191,7 +192,7 @@ function sessionStart(root, input, agent) {
     );
   }
 
-  writeState(root, state, [input.session_id || 'default']);
+  writeState(root, state, [input.session_id || 'default'], fresh ? ['lastSession', 'pendingBrief'] : ['lastSession']);
   // Rules, briefs and help cards come from the repo: none of it may show the agent Codehere's tick.
   const text = noTick(out.join('\n'), '[tick]'); // "[tick]" keeps the meaning of a spec that asks for one
   // Copilot reads only JSON here; Claude Code and Codex take the plain text
@@ -400,7 +401,9 @@ function fileId(file, algo, stats, r) {
 }
 // The check files' ids (algo given), their stat lines into stats (when given), or null over RAW_LIMIT.
 // keep: folders that held a recorded file; a .git or pyvenv.cfg made in one mid-session does not stop the walk (round 8, B1)
-export function rawSnapshot(root, algo, { skip = [], stats = null, keep = new Set() } = {}) {
+// up: from root to the repo's top ('../..') when Codehere is set up in a subfolder: the parents' test configs and
+// setup files, and the top's CI files, are recorded too, by their path from root (round 11)
+export function rawSnapshot(root, algo, { skip = [], stats = null, keep = new Set(), up = '' } = {}) {
   const files = {};
   const skipped = new Set(skip);
   let seen = 0;
@@ -419,7 +422,28 @@ export function rawSnapshot(root, algo, { skip = [], stats = null, keep = new Se
     }
     return true;
   };
-  return walk(root, '') ? files : null;
+  if (!walk(root, '')) return null;
+  const levels = /^\.\.(\/\.\.)*$/.test(up) ? up.split('/').length : 0;
+  const entries = (dir) => {
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+  };
+  for (let k = 1; k <= levels; k++) {
+    const pre = '../'.repeat(k);
+    const dir = path.resolve(root, pre);
+    for (const e of entries(dir)) if (e.isFile() && isCheckFile(pre + e.name) && !isTestCode(pre + e.name)) files[pre + e.name] = fileId(path.join(dir, e.name), algo, stats, pre + e.name);
+    if (k < levels) continue;
+    for (const sub of ['.github/workflows', '.circleci']) {
+      for (const e of entries(path.join(dir, sub))) {
+        const r = `${pre}${sub}/${e.name}`;
+        if (e.isFile() && isCiFile(r)) files[r] = fileId(path.join(dir, sub, e.name), algo, stats, r);
+      }
+    }
+  }
+  return files;
 }
 
 const recordName = (key) => crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
@@ -433,6 +457,13 @@ export function readRecord(root, s) {
   return null;
 }
 
+// A session found again by its record takes the start commit and snapshot kept with it (round 11).
+function adoptStart(root, s) {
+  const r = readRecord(root, s);
+  if (r && commitId(r.startHead)) s.startHead = r.startHead;
+  if (r && isMap(r.baseline)) s.baseline = r.baseline;
+}
+
 // The record, and the start version of each file written into git's object store when it is not there yet (a
 // file changed or untracked at session start), so a diff from it can be built at the stop. Records of sessions
 // no longer in state.json are removed.
@@ -440,7 +471,11 @@ function keepRecord(root, state, s, key) {
   const algo = git(root, ['rev-parse', '--show-object-format']) === 'sha256' ? 'sha256' : 'sha1';
   const ignored = (gitRead(root, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory']) ?? '').split('\0');
   const skip = ignored.filter((f) => f.endsWith('/')).map((f) => f.slice(0, -1)).slice(0, 5000);
-  const ids = rawSnapshot(root, algo, { skip });
+  let up = '';
+  try {
+    up = path.relative(fs.realpathSync(root), fs.realpathSync(git(root, ['rev-parse', '--show-toplevel']) || root)).split(path.sep).join('/');
+  } catch {}
+  const ids = rawSnapshot(root, algo, { skip, up });
   s.record = recordName(key);
   delete s.raw; // kept in state.json before round 7
   delete s.rawAlgo;
@@ -450,7 +485,8 @@ function keepRecord(root, state, s, key) {
   try {
     fs.mkdirSync(dir, { recursive: true });
     const tmp = `${file}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ algo, ids, skip }), { flag: 'wx' });
+    // the session's start commit and snapshot too, so a session state.json loses keeps them (round 11)
+    fs.writeFileSync(tmp, JSON.stringify({ algo, ids, skip, up, startHead: s.startHead || null, baseline: s.baseline || null }), { flag: 'wx' });
     fs.renameSync(tmp, file);
     // a record no session in state.json names, and older than an hour: a session starting at the same moment
     // may not be in this copy of the state yet (round 8, m2)
@@ -1119,7 +1155,8 @@ function stop(root, input) {
   const mayBlock = (s.stopBlocks || 0) < 3; // never trap the agent: after 3 blocks, only observe
   // Only this session is written from this copy; every other one is taken as it is on disk then, so sessions that
   // started or changed while this check ran (it can run the tests for minutes) are kept as they are (rounds 9 and 10).
-  const save = () => writeState(root, state, [sid]);
+  const top = ['lastSession']; // top-level fields this check sets: lastGreen and episodes only after a proven run
+  const save = () => writeState(root, state, [sid], top);
   // The first line of each reason is kept: Copilot passes a send-back to the prompt hook as if the
   // person typed it, and the prompt hook must not take it as their answer to a draft.
   // A send-back that cannot be counted is not sent: without the count the 3-block cap would never
@@ -1143,6 +1180,7 @@ function stop(root, input) {
   if (s.record === undefined && !s.baseline && !commitId(s.startHead)) {
     const name = recordName(sid);
     s.record = fs.existsSync(recordFile(root, { record: name })) ? name : null;
+    adoptStart(root, s);
   }
   // A session with no start Codehere knows (no start commit, no snapshot, no record) cannot be told to have changed
   // nothing: it is checked, and says there is no record, instead of staying silent (round 10).
@@ -1157,17 +1195,20 @@ function stop(root, input) {
   const record = readRecord(root, s);
   const rawStats = {}; // when each file was last touched, to see one change while the tests run
   const held = new Set(record ? Object.keys(record.ids).flatMap((f) => f.split('/').slice(0, -1).map((_, i, p) => p.slice(0, i + 1).join('/'))) : []);
-  const rawNow = record ? rawSnapshot(root, record.algo, { skip: record.skip, stats: rawStats, keep: held }) : null;
+  const up = typeof record?.up === 'string' ? record.up : '';
+  const rawNow = record ? rawSnapshot(root, record.algo, { skip: record.skip, stats: rawStats, keep: held, up }) : null;
   // A new file in a folder git ignores now is a build or an install (tests copied, package files, a config copied: rounds
-  // 8 to 10), not the agent's: let off before the test run and during it alike. A file git ignores by its own name
-  // (a new pytest.ini put in .git/info/exclude) is still read.
-  const inIgnoredFolder = (files) => {
+  // 8 to 10), and so is new test code git ignores by its own name (a build writing next to the sources: round 11): not
+  // the agent's, before the test run and during it alike. A new config or setup file git ignores by its own name (a
+  // pytest.ini put in .git/info/exclude) is still read.
+  const ignored = (paths) => new Set((paths.length ? gitRead(root, ['check-ignore', '-z', '--stdin'], paths.join('\0') + '\0') : '')?.split('\0').filter(Boolean));
+  const letOffNew = (files) => {
     const dirs = [...new Set(files.map((f) => path.posix.dirname(f)).filter((d) => d !== '.'))];
-    const out = dirs.length ? gitRead(root, ['check-ignore', '-z', '--stdin'], dirs.map((d) => `${d}/`).join('\0') + '\0') : '';
-    const ignored = new Set((out || '').split('\0').filter(Boolean).map((d) => d.replace(/\/$/, '')));
-    return new Set(files.filter((f) => ignored.has(path.posix.dirname(f))));
+    const folders = new Set([...ignored(dirs.map((d) => `${d}/`))].map((d) => d.replace(/\/$/, '')));
+    const byName = ignored(files.filter(isTestCode));
+    return new Set(files.filter((f) => folders.has(path.posix.dirname(f)) || byName.has(f)));
   };
-  if (rawNow) for (const f of inIgnoredFolder(Object.keys(rawNow).filter((x) => !(x in record.ids)))) delete rawNow[f], delete rawStats[f];
+  if (rawNow) for (const f of letOffNew(Object.keys(rawNow).filter((x) => !(x in record.ids)))) delete rawNow[f], delete rawStats[f];
   const noRecord = !rawNow;
   const rawStart = new Map(record ? Object.entries(record.ids).map(([f, id]) => [nfc(f), id]) : []);
   const rawChanged = rawNow ? [...new Set([...Object.keys(rawNow), ...Object.keys(record.ids)])].filter((f) => rawNow[f] !== record.ids[f]) : [];
@@ -1227,7 +1268,7 @@ function stop(root, input) {
         // deletion: the new file is read from its own start (round 8, B3 and B4)
         if (recorded(to) && (!nowSet.has(nfc(to)) || rawStart.has(nfc(to)))) continue;
         kept.push(line);
-        movedAway.add(nfc(from));
+        if (!(isCiFile(from) && !isCiFile(to))) movedAway.add(nfc(from)); // a CI file moved out: its lines read as removed (round 11)
         if (recorded(to)) renamedFrom.set(nfc(to), nfc(from));
       } else if (!recorded(from) && !(to && recorded(to))) kept.push(line);
     }
@@ -1235,20 +1276,20 @@ function stop(root, input) {
     // bytes or mostly the same lines, so an honest move is not a deletion and a moved test is read from its start
     // (round 8, M4)
     if (rawNow) {
-      // by the same bytes, any check file and any number of them (round 9); by shared lines, up to 50 (a config
-      // rewritten as it moves, jest.config.js to .mjs, too: round 10)
+      // by the same bytes, any check file and any number of them (round 9); by shared lines, up to 500 (a config
+      // rewritten as it moves, jest.config.js to .mjs, too: round 10; tests moved with their imports fixed: round 11)
       const gone = rawChanged.filter((f) => f in record.ids && !(f in rawNow) && !movedAway.has(nfc(f)));
       const added = rawChanged.filter((f) => !(f in record.ids) && f in rawNow && !renamedFrom.has(nfc(f)));
       const byId = new Map();
       for (const g of gone) byId.set(record.ids[g], [...(byId.get(record.ids[g]) || []), g]);
       const lineSet = (text) => new Set(String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean));
       const startLines = new Map();
-      const firstGone = gone.slice(0, 50);
+      const firstGone = gone.slice(0, 500);
       let compared = 0;
       for (const a of added) {
         let best = (byId.get(rawNow[a]) || []).find((g) => !movedAway.has(nfc(g))) ?? null;
         let now = null;
-        if (!best && compared++ < 50) {
+        if (!best && compared++ < 500) {
           try {
             now = lineSet(readPlain(path.join(root, a), 'utf8', 1024 * 1024));
           } catch {}
@@ -1387,11 +1428,11 @@ function stop(root, input) {
     // (a process the agent left running, or a git hook, swapping files during the check: round 7, finding 2).
     // A file's change time cannot be set back, so a swap and a swap back are both seen.
     const after = {};
-    if (rawNow) rawSnapshot(root, null, { skip: record.skip, stats: after, keep: held });
+    if (rawNow) rawSnapshot(root, null, { skip: record.skip, stats: after, keep: held, up });
     let touched = rawNow ? [...new Set([...Object.keys(after), ...Object.keys(rawStats)])].filter((f) => after[f] !== rawStats[f]).sort() : [];
-    const appeared = inIgnoredFolder(touched.filter((f) => !(f in record.ids))); // made during the check, by a build
+    const appeared = letOffNew(touched.filter((f) => !(f in record.ids))); // made during the check, by a build
     touched = touched.filter((f) => !appeared.has(f));
-    // saves made while the tests ran moved snapshots on disk, and this hook writes the whole state back
+    // saves made while the tests ran moved snapshots on disk, and this hook writes its own session back
     const disk = readState(root).sessions || {};
     for (const [k, x] of Object.entries(state.sessions)) if (isMap(disk[k]?.team)) Object.assign(x, { team: disk[k].team, teamHead: disk[k].teamHead });
     if (!t.ok && !mayBlock) {
@@ -1431,6 +1472,7 @@ function stop(root, input) {
     if (proven) {
       state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };
       recordGreen(state, s);
+      top.push('lastGreen', 'episodes');
     }
     lines.unshift(passLine);
   }

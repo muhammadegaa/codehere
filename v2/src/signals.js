@@ -209,13 +209,13 @@ function filtersOn(file, line) {
   else if (RUNNER_CONFIG.test(file)) (text = line.slice(1)), (where = "by the test runner's config");
   if (text == null) return [];
   const re = RUNNER_CONFIG.test(file) ? CONFIG_KEY : FILTER;
-  const found = [...text.matchAll(re)].map((m) => ({ option: m[1], where, script }));
+  const found = [...text.matchAll(re)].map((m) => ({ option: m[1], where, script, text }));
   // jest's and vitest's -t (--testNamePattern); mocha's -t is a timeout, so only after jest or vitest as the command
   // word, not inside jest-extended or vitest.config.ts (rounds 9 and 10)
-  if (where === 'by the test script' && JEST_T.test(text)) found.push({ option: '-t', where, script });
+  if (where === 'by the test script' && JEST_T.test(text)) found.push({ option: '-t', where, script, text });
   return found;
 }
-const JEST_T = /(?:^|[\s;&|(])(?:jest|vitest)\s(?:[^&|;]*?\s)?-t(?=[\s=]|$)/;
+const JEST_T = /(?:^|[\s;&|(/])(?:jest|vitest)(?:\.[cm]?js)?\s(?:[^&|;]*?\s)?-t(?=[\s=]|$)/; // also by its path (round 11)
 
 // Which characters of a line are inside a string literal: test code often writes another test as
 // text, and a skip in that text is not a skip. One line at a time, so a string that spans lines (a
@@ -435,10 +435,12 @@ const CI_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$|^\.gitlab-ci\.ya?ml$|^\.cir
 // Every file that says what the tests are or how they run: test code in a language the scan reads, test configs,
 // test setup and CI files. Codehere keeps its own record of these at session start, so a change to one is read
 // even when git does not show it (docs/finish-check-promise.md). Data in a test folder is not one.
-export const isCheckFile = (f) => (isTestFile(f) && languageOf(f) != null) || isTestConfig(f) || CI_FILE.test(f) || TEST_SETUP.test(f);
+// A CI file at the repo's top; ../ in front when Codehere is set up in a subfolder of the repo (round 11)
+export const isCiFile = (f) => CI_FILE.test(String(f).replace(/^(\.\.\/)+/, ''));
+export const isCheckFile = (f) => (isTestFile(f) && languageOf(f) != null) || isTestConfig(f) || isCiFile(f) || TEST_SETUP.test(f);
 // Test code only: a check file that is not a config, setup or CI file. New test code in a folder git ignores is a
 // build or an install, not the agent's tests; a new config or setup file changes how the tests run wherever it is.
-export const isTestCode = (f) => isCheckFile(f) && !isTestConfig(f) && !CI_FILE.test(f) && !TEST_SETUP.test(f);
+export const isTestCode = (f) => isCheckFile(f) && !isTestConfig(f) && !isCiFile(f) && !TEST_SETUP.test(f);
 const TEST_CMD = /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|node\s+--test\b|(?:npx\s+)?(?:jest|vitest|mocha)\b|(?:python3?\s+-m\s+)?pytest\b|python3?\s+-m\s+unittest\b|go\s+test\b|cargo\s+test\b|make\s+test\b)/;
 const CI_ALWAYS_PASSES = new RegExp(TEST_CMD.source + String.raw`[^\n]*?(\|\|\s*(true|:|exit\s+0|echo\b)|;\s*(true|exit\s+0)\s*$)`);
 const CI_IGNORE = /^\s*(continue-on-error|allow_failure)\s*:\s*true\b/;
@@ -490,7 +492,7 @@ export function tamperFindings(nameStatus, diff, opts) {
 // hardcoded answer would copy. testFiles, when given, is a function returning the paths of the repo's test
 // files before the change (at session start, or at the commit's parent), called only for a test renamed to
 // another code extension.
-export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) {
+export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command } = {}) {
   const events = [];
   const seen = new Set();
   const add = (kind, file, why) => {
@@ -516,19 +518,39 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
     // to test/cart.mjs), or to another extension (.off, .bak), hides the test
     const dropsName = TEST_NAME.test(file) && !TEST_NAME.test(to);
     if (/^R\d*$/.test(status) && to && isTestFile(file) && (!isTestFile(to) || dropsName || (ext(to) !== ext(file) && !migrated(file, to)))) add(DELETED, file, `test file renamed: ${file} to ${to}`);
-    // a CI file moved where CI does not read it (ci.yml to ci.yml.disabled, .gitlab-ci.yml into a folder) runs nothing
-    if (/^R\d*$/.test(status) && to && CI_FILE.test(file) && !CI_FILE.test(to)) add(CHECKS_OFF, file, `a CI file was moved where CI does not run it: ${file} to ${to}`);
   }
-  // A test:* script counts only when the test script calls it: a side script such as test:smoke with -t is not what
-  // npm test runs (round 10). Without the file as it is now (the audit), every test:* script counts.
+  // A test:* script counts unless nothing can run it: no other script names it or holds a glob (run-s test:*), and
+  // the approved command does not name it. A side script such as test:smoke, called by nothing, is not what the
+  // tests run (round 10); a chain or a glob is (round 11). Without the file as it is now (the audit), every one counts.
   const runsTests = (script) => {
     if (!script || script === 'test' || !read) return true;
     try {
-      const main = JSON.parse(read(current) || '{}').scripts?.test;
-      return typeof main !== 'string' || main.includes(script);
+      const scripts = JSON.parse(read(current) || '{}').scripts || {};
+      const named = Object.entries(scripts).some(([k, v]) => k !== script && typeof v === 'string' && (v.includes(script) || v.includes('*')));
+      return named || String(command || '').includes(script);
     } catch {
       return true;
     }
+  };
+  // A filter option's values: a filter that already held some is new again when a value is added, such as a second
+  // path in testPathIgnorePatterns or a second --ignore (round 11)
+  const filterKey = (f) => `${f.script || ''}\0${f.option}`;
+  const filterValues = (f) => {
+    if (f.where === "by the test runner's config") return [...f.text.matchAll(/'([^']*)'|"([^"]*)"|`([^`]*)`/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+    const opt = f.option.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+    return [...f.text.matchAll(new RegExp(`(?:^|\\s)${opt}(?:=|\\s+)("[^"]*"|'[^']*'|[^\\s"']+)`, 'g'))].map((m) => m[1]);
+  };
+  const filterSeen = (f) => {
+    const had = hadFilters.get(filterKey(f)) || new Set();
+    const vals = filterValues(f);
+    vals.forEach((v) => had.add(v));
+    if (!vals.length) had.add('');
+    hadFilters.set(filterKey(f), had);
+  };
+  const filterIsNew = (f) => {
+    const had = hadFilters.get(filterKey(f));
+    const vals = filterValues(f);
+    return runsTests(f.script) && (!had || (vals.length ? vals.some((v) => !had.has(v)) : !had.has('')));
   };
   let oldPath = ''; // the file a "--- a/" header names: a deleted CI file's lines are read under its own name (round 10)
   let current = '';
@@ -548,13 +570,13 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
   let ciAdded = 0; // lines running the tests added to any CI file
   const weakenedIn = new Set(); // one weakened-matcher finding per file
   let hadFallback = false; // the test script already ended in `|| true` before this session
-  let hadFilters = new Set(); // options that left tests out before this session
+  let hadFilters = new Map(); // options that left tests out before this session, with their values
   const inHunk = hunkReader();
   for (const line of diff.split('\n')) {
     const body = inHunk(line);
     if (!body && line.startsWith('+++ ')) {
-      current = unquotePath(line.slice(4)).replace(/^b\//, '');
-      if (current === '/dev/null' && CI_FILE.test(oldPath)) current = oldPath;
+      current = unquotePath(line.slice(4).replace(/\t$/, '')).replace(/^b\//, ''); // git ends a path holding a space with a tab
+      if (current === '/dev/null' && isCiFile(oldPath)) current = oldPath;
       removed = new Set();
       removedShapes = new Map();
       removedValueChecks = new Map();
@@ -562,11 +584,11 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
       pendingCatch = 0;
       prevText = '';
       hadFallback = false;
-      hadFilters = new Set();
+      hadFilters = new Map();
       continue;
     }
     if (!body && line.startsWith('--- ')) {
-      oldPath = unquotePath(line.slice(4)).replace(/^a\//, '');
+      oldPath = unquotePath(line.slice(4).replace(/\t$/, '')).replace(/^a\//, '');
       continue;
     }
     if (line.startsWith('@@')) {
@@ -577,7 +599,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
     if (!line.startsWith('-')) newLine++;
     if (at && at <= 20000) fileLines[at - 1] = line.slice(1);
     const inTest = isTestFile(current);
-    if (CI_FILE.test(current) && !COMMENT.test(line)) {
+    if (isCiFile(current) && !COMMENT.test(line)) {
       const text = line.slice(1, 10001);
       if (line.startsWith('-') && TEST_CMD.test(text)) ciRemoved.push(current);
       if (line.startsWith('+') && TEST_CMD.test(text)) ciAdded++;
@@ -611,8 +633,8 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
     }
     if (isTestConfig(current)) {
       for (const f of filtersOn(current, probe)) {
-        if (line.startsWith('-')) hadFilters.add(f.option);
-        else if (line.startsWith('+') && !hadFilters.has(f.option) && runsTests(f.script)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+        if (line.startsWith('-')) filterSeen(f);
+        else if (line.startsWith('+') && filterIsNew(f)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
       }
     }
     if (line.startsWith('+')) {
@@ -624,7 +646,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
         let pieceMask = null;
         const pmask = () => (pieceMask ||= stringMask(piece));
         for (const t of [...TAMPER_ADDED, ...(inTest ? TAMPER_ADDED_IN_TESTS : [])]) if (inCode(t.re, piece, pmask)) add(t.kind, current, `${t.why} in ${current}`);
-        if (isTestConfig(current)) for (const f of filtersOn(current, piece)) if (!hadFilters.has(f.option) && runsTests(f.script)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+        if (isTestConfig(current)) for (const f of filtersOn(current, piece)) if (filterIsNew(f)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
       }
       if (!inTest) continue;
       const text = probe.slice(1);

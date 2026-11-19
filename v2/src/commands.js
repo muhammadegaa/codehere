@@ -243,7 +243,7 @@ function saveOrExit(root, rec) {
   const after = teamSnapshot(root);
   const state = readState(root);
   const moved = Object.entries(state.sessions || {}).filter(([, x]) => keepSaved(x, before, after)).map(([k]) => k);
-  if (moved.length) writeState(root, state, moved);
+  if (moved.length) writeState(root, state, moved, []);
   return saved;
 }
 
@@ -637,7 +637,7 @@ export async function brief(flags) {
   const file = path.join(paths(root).briefs, `${stamp()}.md`);
   writePlain(root, file, text + '\n'); // briefs/ may be a committed link
   state.pendingBrief = file;
-  writeState(root, state, []); // no session changed here: every session is kept as it is on disk
+  writeState(root, state, [], ['pendingBrief']); // no session changed here: every session is kept as it is on disk
   console.log(text);
   console.log('');
   console.log(`Saved to ${path.relative(root, file)}.`);

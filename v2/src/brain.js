@@ -119,9 +119,10 @@ export function readState(root) {
 // then holds back, while what it reports still goes out.
 // owned: the sessions this writer changed. Every other session is taken from the file as it is now, under a lock, so
 // hooks running at once (two session starts, a finish check running the tests while another session starts or stops)
-// neither drop each other's sessions nor write them back stale (cold review, L13 rounds 9 and 10). Without owned,
+// neither drop each other's sessions nor write them back stale (cold review, L13 rounds 9 and 10). The top-level
+// fields are taken from the file too, except those named in fields, which this writer set (round 11). Without owned,
 // the state is written as given.
-export function writeState(root, state, owned) {
+export function writeState(root, state, owned, fields = ['lastSession']) {
   const p = paths(root);
   if (!ownPath(root, p.local)) return false;
   const tmp = `${p.state}.${crypto.randomBytes(6).toString('hex')}.tmp`;
@@ -131,7 +132,9 @@ export function writeState(root, state, owned) {
     if (owned) {
       lock = takeLock(`${p.state}.lock`);
       const mine = new Set(owned);
-      const sessions = { ...readState(root).sessions };
+      const disk = readState(root);
+      for (const [k, v] of Object.entries(disk)) if (k !== 'sessions' && !fields.includes(k)) state[k] = v;
+      const sessions = { ...disk.sessions };
       for (const k of mine) if (state.sessions[k]) sessions[k] = state.sessions[k];
       state.sessions = keepRecent(sessions, mine);
     }
@@ -474,8 +477,8 @@ export function gitHashes(root, files, { filters = true } = {}) {
   // the whole call (round 9). A folder or another kind of entry gets its kind, not a hash.
   const kind = (f) => {
     try {
-      const st = fs.statSync(path.join(root, f));
-      return st.isFile() ? 'file' : st.isDirectory() ? 'folder' : 'other';
+      const st = fs.lstatSync(path.join(root, f)); // a link is not followed: it counts by where it points (round 11)
+      return st.isSymbolicLink() ? `link:${fs.readlinkSync(path.join(root, f))}` : st.isFile() ? 'file' : st.isDirectory() ? 'folder' : 'other';
     } catch {
       return 'deleted';
     }
