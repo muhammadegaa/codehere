@@ -4769,7 +4769,7 @@ section(['R19'], () => {
   const order19 = lines19('pytest.ini', ['@@ -2 +2 @@', '-addopts = -k "not slow and not db"', '+addopts = -k "not db and not slow"'], '[pytest]\naddopts = -k "not db and not slow"\n');
   check('scan, honest: the terms of a -k reordered are the same filter', order19 === '', order19);
 
-  // 3: brackets placed over the whole line, outside quotes
+  // 3: brackets counted over the whole line (outside quoted strings since round 20)
   const long19 = `const fixtures = [${Array.from({ length: 700 }, (_, i) => `'/fixtures/case-${i}/'`).join(', ')}];`;
   const after19 = lines19('jest.config.js', ['@@ -3,0 +4 @@', "+  '/test/cart/',"], `${long19}\nconst ignored = [\n  '/legacy/',\n  '/test/cart/',\n];\nmodule.exports = {\n  testPathIgnorePatterns: ignored,\n};\n`);
   check('scan: a path added to a list after a one-line array over 10,000 characters is read', after19.includes('left out'), after19);
@@ -4793,7 +4793,8 @@ section(['R19'], () => {
   }
 
   // 6: pytest skips for a whole module and from a conftest hook
-  for (const [file, line] of [['tests/test_cart.py', 'pytestmark = pytest.mark.skip(reason="flaky")'], ['tests/conftest.py', '        item.add_marker(pytest.mark.skip(reason="flaky"))']]) {
+  // round 20: a conftest hook's add_marker is not read (its honest form is opt-in); the promise names it as a gap
+  for (const [file, line] of [['tests/test_cart.py', 'pytestmark = pytest.mark.skip(reason="flaky")']]) {
     const got = added19(file, line);
     check(`scan: ${line.trim()} skips Python tests`, got.includes('Python test was skipped'), got);
   }
@@ -4801,6 +4802,48 @@ section(['R19'], () => {
     const got = added19('tests/test_cart.py', line);
     check(`scan, honest: ${line} is not a skip`, got === '', got);
   }
+});
+
+section(['R20'], () => {
+  // The cold review's round 20 (docs/reviews/2026-11-19-cold-review-round-20.md).
+  const lines20 = (file, hunks, now, opts = {}) => tamperFindings(`M\t${file}`, [`--- a/${file}`, `+++ b/${file}`, ...hunks].join('\n'), { read: () => now, ...opts }).join(' · ');
+  const added20 = (file, plus) => tamperFindings(`M\t${file}`, diff27(file, [], [plus])).join(' · ');
+
+  // 1: tests wrapped in a describe: the same lines, only moved
+  const wrap20 = lines20('test/cart.test.mjs', ['@@ -3,4 +3,6 @@', "-test('adds', () => {", '-  assert.equal(add(1, 1), 2);', '-  assert.equal(add(2, 3), 5);', '-});', "+describe('add', () => {", "+  test('adds', () => {", '+    assert.equal(add(1, 1), 2);', '+    assert.equal(add(2, 3), 5);', '+  });', '+});'], "import { test, describe } from 'node:test';\nimport assert from 'node:assert';\ndescribe('add', () => {\n  test('adds', () => {\n    assert.equal(add(1, 1), 2);\n    assert.equal(add(2, 3), 5);\n  });\n});\n");
+  check('scan, honest: two same-shape assertions re-indented into a describe are not a changed expected value', wrap20 === '', wrap20);
+  const skipwrap20 = lines20('test/cart.test.mjs', ['@@ -3 +3,3 @@', "-it.skip('adds floats', () => {});", "+describe('cart', () => {", "+  it.skip('adds floats', () => {});", '+});'], "import { it, describe } from 'node:test';\n\ndescribe('cart', () => {\n  it.skip('adds floats', () => {});\n});\n");
+  check('scan, honest: an existing it.skip re-indented into a describe is not a new skip', skipwrap20 === '', skipwrap20);
+  const real20 = lines20('test/cart.test.mjs', ['@@ -4 +4 @@', '-  assert.equal(add(2, 3), 5);', '+  assert.equal(add(2, 3), 6);'], "import { test } from 'node:test';\nimport assert from 'node:assert';\ntest('adds', () => {\n  assert.equal(add(2, 3), 6);\n});\n");
+  check('scan: an expected value changed in place is still read', real20.includes('expected value was changed'), real20);
+  const deco20 = lines20('tests/test_cart.py', ['@@ -2 +1,0 @@', '-@pytest.mark.skip(reason="flaky")', '@@ -4,0 +4 @@', '+@pytest.mark.skip(reason="flaky")'], 'import pytest\ndef test_a():\n    assert True\n@pytest.mark.skip(reason="flaky")\ndef test_b():\n    assert add(1, 2) == 3\n');
+  check('scan: a skip decorator moved from one test to another is read', deco20.includes('Python test was skipped'), deco20);
+
+  // 2: a list declaration after another statement on its line
+  const decl20 = lines20('jest.config.cjs', ['@@ -3,0 +4 @@', "+  '/test/cart/',"], "const { defaults } = require('jest-config'); const ignored = [\n  '/node_modules/',\n  '/legacy/',\n  '/test/cart/',\n];\nmodule.exports = {\n  testPathIgnorePatterns: ignored,\n};\n");
+  check('scan: a path added to a list declared after another statement on its line is read', decl20.includes('left out'), decl20);
+
+  // 3, 8: an opt-in conftest hook is not a skip; pytestmark read without running into a comment
+  const optin20 = added20('tests/conftest.py', '            item.add_marker(pytest.mark.skip(reason="needs --integration"))');
+  check('scan, honest: a conftest hook adding a skip marker (opt-in tests) is not read as a skip', optin20 === '', optin20);
+  const pmc20 = added20('tests/test_cart.py', 'pytestmark = pytest.mark.integration  # was pytest.mark.skip');
+  check('scan, honest: pytestmark naming a skip only in its comment is not a skip', pmc20 === '', pmc20);
+
+  // 4, 5: more skip and only forms
+  for (const line of ["test.skip.concurrent('adds', async () => {", "test.only.concurrent('adds', async () => {", "it.skip.each<Case>(cases)('adds %s', (c) => {", "it.only.each<Case>(cases)('adds %s', (c) => {", "fit.each(rows)('adds %s', (r) => {", "fdescribe.each(rows)('cart %s', () => {", "test.skip.for(rows)('adds %s', (r) => {", "test.only.for(rows)('adds %s', (r) => {", "test.skip.failing('adds', () => {", "specify.only('adds', () => {", "it.todo('adds', () => {"]) {
+    const got = added20('test/cart.test.js', line);
+    check(`scan: ${line.split('(')[0]} is a skipped or focused test`, /skipped|turned off|disabled/.test(got), got);
+  }
+  const todo20 = added20('test/cart.test.js', "test.todo('adds two numbers');");
+  check("scan, honest: jest's test.todo placeholder with no function is not a skip", todo20 === '', todo20);
+
+  // 9: brackets inside a quoted string are not counted
+  const str20 = lines20('jest.config.js', ['@@ -3 +3 @@', "-  setupFiles: ['./a.js'],", "+  setupFiles: ['./a.js', './b.js'],"], "module.exports = {\n  testNamePattern: '^(?!\\\\[wip)',\n  setupFiles: ['./a.js', './b.js'],\n};\n");
+  check('scan, honest: a [ inside a quoted testNamePattern does not make later lines its values', str20 === '', str20);
+
+  // 10: a reordered -k is one filter in the line-by-line reading too
+  const order20 = tamperFindings('M\tpytest.ini', diff27('pytest.ini', ['addopts = -k "not slow and not db"'], ['addopts = -k "not db and not slow"'])).join(' · ');
+  check('scan, honest: a reordered -k without the file (the audit) is one filter', order20 === '', order20);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
