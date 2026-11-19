@@ -10,7 +10,7 @@ An agent trying to finish its task, doing what agents do while they work. Codehe
 
 Codehere prints ✓ only when all of these hold for the session:
 
-1. Codehere ran the approved test command itself, at the end of the agent's turn, it passed, and at least one test passed.
+1. Codehere ran the approved test command itself, at the end of the agent's turn, it passed, and, where Codehere can read the runner's count (node, jest, vitest, pytest, mocha, unittest, cargo), at least one test passed. Where it cannot, the ✓ line says "exit 0" instead of a count.
 2. Every test file, test config, test setup file and CI file whose bytes changed since the session started was read by the weakened-test scan, and the scan found nothing.
 3. No such file was touched while the check ran (between reading the record and the end of the test run): what ran must be what was read.
 
@@ -35,7 +35,7 @@ A review that finds one of these should name it as out of scope, not as a hole i
 - **Working against Codehere directly:** editing its installed code, its state in `.codehere/local/`, the approvals file in the user's config folder, or the agent's hook settings outside the repo; deleting or moving `.codehere/` (the hooks then find no Codehere folder and stay silent; its config and rules are tracked, so the deletion is in the diff a person reads); a process that kills or stalls the hook (the result is no line, never a false ✓).
 - **Code outside the work tree** that the tests load: global packages, the language runtime, files under the user's home folder.
 - **How much a passing test checks.** The scan looks for known ways to weaken tests (measured on CheatBench, `docs/evidence/2026-11-13-cheatbench.md`). A weakening it has no pattern for is a gap in detection, measured separately; this promise is about every changed file being read. A line longer than 10,000 characters is read in overlapping pieces, so one match across two pieces can be missed.
-- **What the record does not walk:** `.git`, `.codehere`, `node_modules` and `site-packages`; a folder holding its own `.git` or a `pyvenv.cfg` that held no test file at session start (a nested repo, a worktree, a virtual environment); and the folders git ignored at session start. New test code in a folder git ignores is not read (a build copying the tests, an install); a new test config or setup file is read wherever it is. A repo with more than 200,000 entries outside these folders gets no record: the finish check says so and prints no ✓.
+- **What the record does not walk:** `.git`, `.codehere`, `node_modules` and `site-packages`; a folder holding its own `.git` or a `pyvenv.cfg` that held no test file at session start (a nested repo, a worktree, a virtual environment); and the folders git ignored at session start. New test code, or a new `package.json`, in a folder git ignores is not read (a build copying the tests or writing package files, an install); any other new test config or setup file is read wherever the record walks. Tests the approved command runs straight from such a folder (`node --test dist/test`, with the build a separate step) are read only as their source: an edit made in the build output itself is not read. A repo with more than 200,000 entries outside these folders gets no record: the finish check says so and prints no ✓.
 
 ## Honest work
 
