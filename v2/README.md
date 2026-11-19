@@ -145,7 +145,7 @@ Everything is plain markdown, so you can read, edit, review and delete it like a
 - **No AI in the decision path.** Loops, failed tests and tampering are detected with plain rules, so Codehere doesn't inherit the agent's mistakes.
 - **It talks to the agent, not to you.** If Codehere is wrong, the agent does one extra check. You lose nothing. For team chores, you ask your agent, and it shows you a draft first.
 - **Silent on normal turns.** Your prompt gets extra context only after a failure, for a feature with no way to check it, or in a long session stuck on one error. Each at most once, under 300 tokens. After you answer a draft, you also get one line saying whether it was saved.
-- **It only reacts to this session's work.** Changes you had before the session are ignored. If the agent changed nothing, Codehere does nothing. A draft saved after your yes does not count as a change by the agent.
+- **It only reacts to this session's work.** Changes you had before the session are ignored. If the agent changed nothing, Codehere does nothing. A session Codehere did not see start (set up mid-session) is checked at each finish and says there is no record of its test files. A draft saved after your yes does not count as a change by the agent.
 - **It never traps the agent.** At most 3 "not done yet" messages per session, then it lets go.
 - **It fails open.** If anything breaks, the hook exits quietly and the agent carries on.
 - **Small model, small job.** Gemma 4 (via Ollama) is optional and only writes summaries for briefs and help cards, which you read before using. Turn it on with `--gemma`. The text goes only to a model on this machine: Codehere refuses an `OLLAMA_HOST` on another machine and Ollama cloud models, and uses the plain text instead.
