@@ -346,19 +346,23 @@ const BIG = 512 * 1024 * 1024;
 // in .git/config or .git/info/attributes (cold review, L13 round 5).
 export const PLAIN_DIFF = ['--no-color', '--no-ext-diff', '--no-textconv', '--text', '--src-prefix=a/', '--dst-prefix=b/'];
 
-// Every git call runs with these over anything the repo or the user set (cold review, L13 round 6): no
-// fsmonitor program, which git would run inside the hook; no replace objects, which can swap the session's
+// Every git call runs with these over anything the repo or the user set (cold review, L13 rounds 6 and 7): no
+// fsmonitor program or repo hook, which git would run inside the hook; no replace objects, which can swap the session's
 // start commit for one holding a gutted test; and blank context lines that keep their leading space. A call
 // that takes longer than GIT_TIMEOUT counts as failed, so the finish check says it could not read the diff.
 const extra = Number(process.env.GIT_CONFIG_COUNT) || 0;
 export const GIT_ENV = {
   ...process.env,
   GIT_NO_REPLACE_OBJECTS: '1',
-  GIT_CONFIG_COUNT: String(extra + 2),
+  GIT_OPTIONAL_LOCKS: '0', // git status does not write the index, so no index hook has a reason to run
+  GIT_CONFIG_COUNT: String(extra + 3),
   [`GIT_CONFIG_KEY_${extra}`]: 'core.fsmonitor',
   [`GIT_CONFIG_VALUE_${extra}`]: 'false',
   [`GIT_CONFIG_KEY_${extra + 1}`]: 'diff.suppressBlankEmpty',
   [`GIT_CONFIG_VALUE_${extra + 1}`]: 'false',
+  // no hook of the repo's runs inside Codehere's git calls, such as post-index-change (round 7, finding 2)
+  [`GIT_CONFIG_KEY_${extra + 2}`]: 'core.hooksPath',
+  [`GIT_CONFIG_VALUE_${extra + 2}`]: os.devNull,
 };
 export const GIT_TIMEOUT = 30000;
 
@@ -420,12 +424,13 @@ export function statusFiles(root) {
   return files;
 }
 
-// What `git hash-object` gives for each file (git's filters applied), 'deleted' for a missing
+// What `git hash-object` gives for each file (git's filters applied, so a lesson's hash is the same on a teammate's
+// machine; filters: false for a session's own snapshot, so no filter program of the repo's runs), 'deleted' for a missing
 // file, null when git cannot say. One git call for all of them; absolute paths, because
 // --stdin-paths ignores the subfolder git was started in.
-export function gitHashes(root, files) {
+export function gitHashes(root, files, { filters = true } = {}) {
   const present = files.filter((f) => !f.includes('\n') && fs.existsSync(path.join(root, f)));
-  const out = present.length ? (gitRead(root, ['hash-object', '--stdin-paths'], present.map((f) => path.resolve(root, f)).join('\n') + '\n') ?? '').trim().split('\n') : [];
+  const out = present.length ? (gitRead(root, ['hash-object', ...(filters ? [] : ['--no-filters']), '--stdin-paths'], present.map((f) => path.resolve(root, f)).join('\n') + '\n') ?? '').trim().split('\n') : [];
   const at = new Map(present.map((f, i) => [f, i]));
   return files.map((f) => {
     const i = at.get(f) ?? -1;

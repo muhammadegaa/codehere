@@ -10,6 +10,7 @@ import { readOnly, runResult } from '../src/hooks.js';
 import { pickModel, summarize } from '../src/gemma.js';
 import { lowInfoPrompt, vagueFeature, testCounts, signature, failingTest, tamperFindings, tamperEvents, plainYes } from '../src/signals.js';
 import { printable, today, slug, saveRecord } from '../src/brain.js';
+import { testChanges } from '../src/noskip.js';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'codehere.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codehere-e2e-'));
@@ -3579,6 +3580,115 @@ section(['R6'], () => {
   r = ch(['audit'], au6);
   check('audit: a lone carriage return in a line does not hide assertions deleted below it', r.out.includes(`  ${cr6} · `), r.out);
   check('audit: diff.suppressBlankEmpty does not hide assertions deleted below a blank line', r.out.includes(`  ${blank6} · `), r.out);
+});
+
+section(['R7'], () => {
+  // The cold review's round 7 (docs/reviews/2026-11-19-cold-review-round-7.md), against docs/finish-check-promise.md.
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart7 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const edit7 = (dir, f, fn) => fs.writeFileSync(path.join(dir, f), fn(fs.readFileSync(path.join(dir, f), 'utf8')));
+  const gut7 = (dir, f = 'test/cart.test.mjs') => edit7(dir, f, (t) => t.replace(THREE, ''));
+  const honest7 = (dir, f = 'test/cart.test.mjs') => edit7(dir, f, (t) => t.replace(THREE, `${THREE}    assert.equal(4 + 4, 8);\n`));
+  const repo7 = (name, files = { 'test/cart.test.mjs': cart7 }) => {
+    const dir = freshRepo(`r7-${name}`, { 'package.json': '{"name":"p","scripts":{"test":"node --test"}}\n', ...files });
+    ch(['init', '--agent', 'claude'], dir);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', dir, 'y');
+    return dir;
+  };
+  const start7 = (dir) => HC('session-start', dir, rec('claude', 'session-start', dir, 's7', { source: 'startup' }));
+  const stop7 = (dir, sid = 's7') => {
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, sid, { stop_hook_active: false })), encoding: 'utf8', timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
+    let j = {};
+    try {
+      j = x.stdout ? JSON.parse(x.stdout) : {};
+    } catch {}
+    return { out: x.stdout || '', j };
+  };
+  const session7 = (name, change, files) => {
+    const dir = repo7(name, files);
+    start7(dir);
+    change(dir);
+    return stop7(dir);
+  };
+  const sentBack7 = (x, why) => x.j.decision === 'block' && x.j.reason.includes(why);
+  const ticked7 = (x) => x.out.includes('✓');
+
+  // 1: git lists the file, but its diff is of the index; the record is the one compared
+  r = session7('staged-hidden', (d) => (honest7(d), sh('git add test/cart.test.mjs && git update-index --assume-unchanged test/cart.test.mjs', d), gut7(d)));
+  check('finish check: a staged honest edit, then assume-unchanged and the test gutted, is sent back with no ✓', sentBack7(r, '2 assertions removed') && !ticked7(r), r.out);
+  r = session7('committed-hidden', (d) => (honest7(d), sh('git commit -qam honest && git update-index --assume-unchanged test/cart.test.mjs', d), gut7(d)));
+  check('finish check: a committed honest edit, then assume-unchanged and the test gutted, is sent back with no ✓', sentBack7(r, '2 assertions removed') && !ticked7(r), r.out);
+  r = session7('renamed-hidden', (d) => (sh('git mv test/cart.test.mjs test/basket.test.mjs && git update-index --assume-unchanged test/basket.test.mjs', d), gut7(d, 'test/basket.test.mjs')));
+  check('finish check: a renamed test, then assume-unchanged and gutted, is sent back with no ✓', sentBack7(r, '3 assertions removed') && !ticked7(r), r.out);
+  r = session7('honest-staged', (d) => (honest7(d), sh('git add test/cart.test.mjs', d)));
+  check('finish check, honest: a staged edit that adds an assertion gets its ✓', r.j.decision !== 'block' && ticked7(r), r.out);
+  r = session7('honest-rename', (d) => sh('git mv test/cart.test.mjs test/basket.test.mjs', d));
+  check('finish check, honest: a test renamed to another test name is not reported and gets its ✓', r.j.decision !== 'block' && ticked7(r), r.out);
+
+  // 2: no hook of the repo's runs inside the check, and test files changed while it runs mean no ✓
+  const ran7 = path.join(tmp, 'r7-index-hook-ran');
+  r = session7('index-hook', (d) => {
+    fs.writeFileSync(path.join(d, '.git/hooks/post-index-change'), `#!/bin/sh\ntouch ${sq(ran7)}\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(d, 'src.js'), 'export const x = 1;\n');
+    fs.utimesSync(path.join(d, 'package.json'), new Date(), new Date());
+  });
+  check("finish check: the repo's post-index-change hook never runs inside the check", !fs.existsSync(ran7) && r.out !== '', `${r.out} ran: ${fs.existsSync(ran7)}`);
+  r = session7('changed-during-run', (d) => fs.writeFileSync(path.join(d, 'test/swap.test.mjs'), "import { it } from 'node:test'; import fs from 'node:fs';\nit('writes', () => fs.writeFileSync(new URL('./other.test.mjs', import.meta.url), \"import { it } from 'node:test';\\nit('o', () => {});\\n\"));\n"), { 'test/cart.test.mjs': cart7, 'test/other.test.mjs': "import { it } from 'node:test';\nit('o', () => {});\n" });
+  check('finish check: a test file that changes while Codehere runs the tests means no ✓, and the line says so', !ticked7(r) && r.out.includes('changed while'), r.out);
+
+  // 3, 4: a big new file and a long line are read whole
+  r = session7('big-config', (d) => fs.writeFileSync(path.join(d, 'pytest.ini'), `[pytest]\n${'# pad\n'.repeat(200000)}addopts = --deselect tests/test_cart.py::test_adds\n`));
+  check('finish check: a 1.2 MB new pytest.ini that deselects a test at its end is sent back', sentBack7(r, 'tests were left out') && !ticked7(r), r.out);
+  r = session7('long-line', (d) => edit7(d, 'test/cart.test.mjs', (t) => t.replace("  it('adds'", `  ${' '.repeat(10000)}it.skip('adds'`)));
+  check('finish check: a skip after 10,000 spaces on one line is sent back', sentBack7(r, 'a test was skipped') && !ticked7(r), r.out);
+
+  // 5: no record, then git stops reading the folder as a repo: the check says so
+  const bare7 = repo7('bare-no-record');
+  gut7(bare7);
+  sh('git config core.bare true', bare7);
+  r = stop7(bare7, 's7-never-started');
+  check('finish check: core.bare in a session Codehere never saw start does not silence it', r.out.includes('could not be read') && !ticked7(r), r.out);
+
+  // 6: a test path holding a quote
+  r = session7('quoted', (d) => (sh(`git update-index --assume-unchanged ${sq('test/cart"x.test.mjs')}`, d), gut7(d, 'test/cart"x.test.mjs')), { 'test/cart"x.test.mjs': cart7 });
+  check('finish check: a test whose path holds a quote, hidden and gutted, is sent back', sentBack7(r, '3 assertions removed') && !ticked7(r), r.out);
+
+  // 7: what the record leaves out, and what it must not
+  r = session7('venv', (d) => {
+    const lib = path.join(d, 'env/lib/python3.12/site-packages/pkg/tests');
+    fs.mkdirSync(lib, { recursive: true });
+    fs.writeFileSync(path.join(d, 'env/pyvenv.cfg'), 'home = /usr/bin\n');
+    fs.writeFileSync(path.join(lib, 'test_a.py'), 'import pytest\n@pytest.mark.skip\ndef test_a():\n    pass\n');
+    fs.writeFileSync(path.join(d, 'src.js'), 'export const x = 1;\n');
+  }, { 'test/cart.test.mjs': cart7, '.gitignore': 'env/\n' });
+  check('finish check, honest: a library test with a skip, installed into an ignored virtual env, is not blamed on the agent', r.j.decision !== 'block' && ticked7(r), r.out);
+  r = session7('worktree', (d) => (sh('git worktree add -q .claude/worktrees/w1', d), fs.writeFileSync(path.join(d, 'src.js'), 'export const x = 1;\n')), { 'test/cart.test.mjs': cart7, 'test/slow.test.mjs': "import { it } from 'node:test';\nit.skip('slow', () => {});\n" });
+  check('finish check, honest: a worktree added inside the repo is not read as new test files', r.j.decision !== 'block' && ticked7(r), r.out);
+  const javaTest = 'class CartTest {\n  @Test void adds() {\n    assertEquals(2, 1 + 1);\n    assertEquals(4, 2 + 2);\n    assertEquals(6, 3 + 3);\n  }\n}\n';
+  r = session7('java-build', (d) => (sh('git update-index --assume-unchanged src/test/java/com/x/build/CartTest.java', d), edit7(d, 'src/test/java/com/x/build/CartTest.java', (t) => t.replace(/ {4}assertEquals.*\n/g, ''))), { 'test/cart.test.mjs': cart7, 'src/test/java/com/x/build/CartTest.java': javaTest });
+  check('finish check: a test in a Java package named build, hidden and gutted, is sent back', sentBack7(r, '3 assertions removed') && !ticked7(r), r.out);
+
+  // 8: many new test files are read in linear time
+  const body7 = (i) => Array.from({ length: 20 }, (_, k) => `it('t${i}_${k}', () => {});`);
+  const many7 = Array.from({ length: 3000 }, (_, i) => [`diff --git a/test/n${i}.test.mjs b/test/n${i}.test.mjs`, 'new file mode 100644', '--- /dev/null', `+++ b/test/n${i}.test.mjs`, '@@ -0,0 +1,20 @@', ...body7(i).map((l) => `+${l}`)].join('\n')).join('\n');
+  const t7 = Date.now();
+  testChanges(many7, { read: (f) => `${body7(f.match(/\d+/)[0]).join('\n')}\n`, isTestFile: () => true });
+  check('noskip: 3,000 new test files of 20 tests each are read in under a second', Date.now() - t7 < 1000, `${Date.now() - t7} ms`);
+
+  // 9: the record is not kept in state.json
+  const st7 = repo7('state');
+  start7(st7);
+  check("session start keeps the record of the test files outside state.json", !readText(path.join(st7, '.codehere/local/state.json')).includes('"raw"') && fs.readdirSync(path.join(st7, '.codehere/local/records')).length === 1, readText(path.join(st7, '.codehere/local/state.json')).slice(0, 300));
+
+  // 10: test names the runners collect
+  for (const f of ['test-cart.mjs', 'cart_test.mjs', 'cart-test.mjs']) {
+    r = session7(`name-${f}`, (d) => gut7(d, f), { [f]: cart7 });
+    check(`finish check: ${f} is a test file, so gutting it is sent back`, sentBack7(r, '3 assertions removed') && !ticked7(r), r.out);
+  }
+  const csTest = 'public class CartTests {\n  [Fact] public void Adds() {\n    Assert.Equal(2, 1 + 1);\n    Assert.Equal(4, 2 + 2);\n    Assert.Equal(6, 3 + 3);\n  }\n}\n';
+  r = session7('dotnet', (d) => edit7(d, 'Cart.Tests/CartTests.cs', (t) => t.replace(/ {4}Assert\.Equal.*\n/g, '')), { 'test/cart.test.mjs': cart7, 'Cart.Tests/CartTests.cs': csTest });
+  check('finish check: a .NET test project (Cart.Tests/) is test code, so gutting it is sent back', sentBack7(r, '3 assertions removed'), r.out);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');

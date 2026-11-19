@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import {
   findRoot, paths, readConfig, readState, writeState, session, readRules, renderDoc,
   listDocs, git, gitRead, gitPaths, isGitRepo, hasGit, me, isApproved, readApprovals, printable, commitId, statusFiles, gitHashes, noTick,
-  removedAt, expireDrafts, draftFile, saveRecord, readPlain, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
+  removedAt, expireDrafts, draftFile, saveRecord, readPlain, readOwn, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
   responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile, isCheckFile,
@@ -125,7 +125,7 @@ function sessionStart(root, input, agent) {
     s.gitSettings = gitSettingsSnapshot(root);
     s.team = teamSnapshot(root);
     s.teamHead = s.startHead;
-    keepRecord(root, s);
+    keepRecord(root, state, s, input.session_id || 'default');
   } else if (input.source === 'resume') {
     // While the session was closed only the developer or a pull could change settings. The record of the
     // test files is kept from the start: a change git hides must not become the new normal (round 6, M4).
@@ -133,7 +133,7 @@ function sessionStart(root, input, agent) {
     s.gitSettings = gitSettingsSnapshot(root);
     s.team = teamSnapshot(root);
     s.teamHead = git(root, 'rev-parse HEAD') || null;
-    if (s.raw === undefined && isGitRepo(root)) keepRecord(root, s);
+    if (!readRecord(root, s) && s.record === undefined && isGitRepo(root)) keepRecord(root, state, s, input.session_id || 'default');
   }
 
   const out = [];
@@ -209,8 +209,16 @@ export function dirtySnapshot(root) {
   const listed = statusFiles(root);
   if (listed == null) return null;
   const files = listed.filter((f) => !IGNORE(f));
-  const hashes = gitHashes(root, files);
+  const hashes = gitHashes(root, files, { filters: false }); // no filter program of the repo's runs inside the hook
   return Object.fromEntries(files.map((f, i) => [f, hashes[i] || 'x']));
+}
+
+// Whether root or a folder above it holds a .git, as a repo does even when git is told it is bare.
+function hasGitDir(root) {
+  for (let d = path.resolve(root); ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git'))) return true;
+    if (path.dirname(d) === d) return false;
+  }
 }
 
 // Null when git cannot list them: the finish check then says so instead of staying silent.
@@ -363,16 +371,22 @@ function gitSettingsChanged(root, s, changed) {
 // ---------- Codehere's own record of the test files ----------
 // Each test file, test config, test setup and CI file by its bytes, kept at session start without asking git
 // and compared at the stop (docs/finish-check-promise.md). Git can be told to show a changed file as unchanged
-// (index flags, replace objects, filters, core.bare: cold review, L13 round 6); this record cannot. Ids are git
-// blob ids worked out here, so git can diff two versions by id. Folders that hold no tests of this repo are
-// skipped. A repo with more entries than RAW_LIMIT gets no record (null), and so no ✓.
-const SKIP_DIRS = new Set(['.git', '.codehere', 'node_modules', 'vendor', '.venv', 'venv', '__pycache__', '.tox', '.nox', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'target', '.gradle', '.next', '.nuxt', '.turbo', '.cache', 'coverage', 'dist', 'build']);
+// or to diff the index instead of the file (index flags, replace objects, filters, core.bare: cold review, L13
+// rounds 6 and 7); this record cannot. Ids are git blob ids worked out here, so git can diff two versions by id.
+// Not walked: .git, .codehere and node_modules; a folder holding its own .git (a nested repo or a worktree) or a
+// pyvenv.cfg (a virtual environment), and site-packages; and the folders git ignored at session start. A repo
+// with more entries than RAW_LIMIT gets no record, and so no ✓. Each session's record is its own file in
+// .codehere/local/records/, so state.json stays small (round 7, finding 9).
+const NEVER_WALK = new Set(['.git', '.codehere', 'node_modules', 'site-packages']);
 const RAW_LIMIT = 200000;
 const blobId = (algo, bytes) => crypto.createHash(algo).update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 const isBlobId = (x) => typeof x === 'string' && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(x);
-function fileId(file, algo) {
+const statKey = (st) => `${st.ino}:${st.ctimeMs}:${st.mtimeMs}:${st.size}`;
+function fileId(file, algo, stats, r) {
   try {
     const st = fs.lstatSync(file);
+    if (stats) stats[r] = statKey(st);
+    if (!algo) return null;
     if (st.isSymbolicLink()) return `link:${fs.readlinkSync(file)}`;
     if (!st.isFile()) return 'not a file';
     if (st.size > 64 * 1024 * 1024) return `size:${st.size}:${st.mtimeMs}`;
@@ -381,42 +395,76 @@ function fileId(file, algo) {
     return 'unreadable';
   }
 }
-export function rawSnapshot(root, algo) {
+// The check files' ids (algo given), their stat lines into stats (when given), or null over RAW_LIMIT.
+export function rawSnapshot(root, algo, { skip = [], stats = null } = {}) {
   const files = {};
+  const skipped = new Set(skip);
   let seen = 0;
   const walk = (dir, rel) => {
     let entries = [];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {}
+    if (rel && entries.some((e) => e.name === '.git' || e.name === 'pyvenv.cfg')) return true;
     for (const e of entries) {
       if (++seen > RAW_LIMIT) return false;
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name) && !walk(path.join(dir, e.name), r)) return false;
-      } else if (isCheckFile(r)) files[r] = fileId(path.join(dir, e.name), algo);
+        if (!NEVER_WALK.has(e.name) && !skipped.has(r) && !walk(path.join(dir, e.name), r)) return false;
+      } else if (isCheckFile(r)) files[r] = fileId(path.join(dir, e.name), algo, stats, r);
     }
     return true;
   };
   return walk(root, '') ? files : null;
 }
 
+const recordFile = (root, s) => (typeof s.record === 'string' && /^[0-9a-f]{16}$/.test(s.record) ? path.join(paths(root).local, 'records', `${s.record}.json`) : null);
+export function readRecord(root, s) {
+  const file = recordFile(root, s);
+  try {
+    const r = file && JSON.parse(readOwn(root, file, 'utf8', 256 * 1024 * 1024));
+    if (r && (r.algo === 'sha1' || r.algo === 'sha256') && isMap(r.ids) && Array.isArray(r.skip)) return r;
+  } catch {}
+  return null;
+}
+
 // The record, and the start version of each file written into git's object store when it is not there yet (a
-// file changed or untracked at session start), so a diff from it can be built at the stop.
-function keepRecord(root, s) {
-  s.rawAlgo = git(root, ['rev-parse', '--show-object-format']) === 'sha256' ? 'sha256' : 'sha1';
-  s.raw = rawSnapshot(root, s.rawAlgo);
-  const ids = Object.entries(s.raw || {}).filter(([f, id]) => isBlobId(id) && !f.includes('\n'));
-  if (!ids.length) return;
-  const out = gitRead(root, ['cat-file', '--batch-check'], ids.map(([, id]) => id).join('\n') + '\n');
+// file changed or untracked at session start), so a diff from it can be built at the stop. Records of sessions
+// no longer in state.json are removed.
+function keepRecord(root, state, s, key) {
+  const algo = git(root, ['rev-parse', '--show-object-format']) === 'sha256' ? 'sha256' : 'sha1';
+  const ignored = (gitRead(root, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory']) ?? '').split('\0');
+  const skip = ignored.filter((f) => f.endsWith('/')).map((f) => f.slice(0, -1)).slice(0, 5000);
+  const ids = rawSnapshot(root, algo, { skip });
+  s.record = crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
+  delete s.raw; // kept in state.json before round 7
+  delete s.rawAlgo;
+  const dir = path.join(paths(root).local, 'records');
+  const file = recordFile(root, s);
+  if (!ids || !ownPath(root, file)) return void (s.record = null);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = `${file}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ algo, ids, skip }), { flag: 'wx' });
+    fs.renameSync(tmp, file);
+    const keep = new Set(Object.values(state.sessions).map((x) => `${x.record}.json`));
+    for (const n of fs.readdirSync(dir)) if (!keep.has(n)) fs.rmSync(path.join(dir, n), { force: true });
+  } catch {
+    s.record = null;
+    return;
+  }
+  const blobs = Object.entries(ids).filter(([f, id]) => isBlobId(id) && !f.includes('\n'));
+  if (!blobs.length) return;
+  const out = gitRead(root, ['cat-file', '--batch-check'], blobs.map(([, id]) => id).join('\n') + '\n');
   const missing = new Set((out || '').split('\n').filter((l) => l.endsWith(' missing')).map((l) => l.split(' ')[0]));
-  const files = ids.filter(([, id]) => missing.has(id)).map(([f]) => path.resolve(root, f));
+  const files = blobs.filter(([, id]) => missing.has(id)).map(([f]) => path.resolve(root, f));
   if (files.length) gitRead(root, ['hash-object', '-w', '--no-filters', '--stdin-paths'], files.join('\n') + '\n');
 }
 
 // The diff of one file from its version at session start (a blob id, or null for a file that did not exist then)
 // to the file as it is now, built by git from the two blobs: no index flag, filter or replace object is asked.
-// Null when it cannot be built.
+// A file is read whole. Null when it cannot be built.
+const ONE_MIB = 1024 * 1024;
 function builtDiff(root, file, from, algo) {
   const abs = path.join(root, file);
   let st = null;
@@ -424,27 +472,28 @@ function builtDiff(root, file, from, algo) {
     st = fs.lstatSync(abs);
   } catch {}
   if ((st && !st.isFile()) || (!st && !from) || (from != null && !isBlobId(from)) || file.includes('\n')) return null;
-  const q = quotePath(file);
-  const head = `diff --git a/${q} b/${q}\n--- ${from ? `a/${q}` : '/dev/null'}\n+++ ${st ? `b/${q}` : '/dev/null'}\n`;
-  if (!from) {
-    // a new file: every line is added, no git needed
-    let text;
+  const head = `diff --git ${quotePath(`a/${file}`)} ${quotePath(`b/${file}`)}\n--- ${from ? quotePath(`a/${file}`) : '/dev/null'}\n+++ ${st ? quotePath(`b/${file}`) : '/dev/null'}\n`;
+  const status = `${from ? (st ? 'M' : 'D') : 'A'}\t${quotePath(file)}`;
+  if (!from && st.size <= ONE_MIB) {
+    // a small new file: every line is added, no git needed; one that grew past the limit goes through git
+    let bytes = null;
     try {
-      text = readPlain(abs, 'utf8', 1024 * 1024);
-    } catch {
-      return null;
+      bytes = readPlain(abs, null, ONE_MIB + 1);
+    } catch {}
+    if (bytes && bytes.length <= ONE_MIB) {
+      const lines = bytes.toString('utf8').split('\n');
+      if (lines.at(-1) === '') lines.pop();
+      return { status, diff: head + (lines.length ? `@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => `+${l}`).join('\n')}` : '') };
     }
-    const lines = text.split('\n');
-    if (lines.at(-1) === '') lines.pop();
-    return { status: `A\t${q}`, diff: head + (lines.length ? `@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => `+${l}`).join('\n')}` : '') };
   }
-  const now = st ? (gitRead(root, ['hash-object', '-w', '--no-filters', '--stdin-paths'], abs + '\n') ?? '').trim() : blobId(algo, Buffer.alloc(0));
+  const empty = blobId(algo, Buffer.alloc(0));
+  const now = st ? (gitRead(root, ['hash-object', '-w', '--no-filters', '--stdin-paths'], abs + '\n') ?? '').trim() : empty;
   if (!isBlobId(now)) return null;
-  const out = gitRead(root, ['diff', '-U0', from, now]);
+  const out = gitRead(root, ['diff', '-U0', from || empty, now]);
   if (out == null) return null;
   // git names the two blobs: the file's own path goes in their place
   const at = out.startsWith('@@') ? 0 : out.indexOf('\n@@') + 1;
-  return { status: `${st ? 'M' : 'D'}\t${q}`, diff: head + (at > 0 || out.startsWith('@@') ? out.slice(at) : '') };
+  return { status, diff: head + (at > 0 || out.startsWith('@@') ? out.slice(at) : '') };
 }
 
 function settingsChanged(root, s) {
@@ -1071,18 +1120,22 @@ function stop(root, input) {
   };
 
   if (!hasGit()) emitJson({ systemMessage: 'codehere ⊘ git not found · the finish check did not run' });
-  // A session that started in a repo goes on when git stops reading the folder as one (core.bare): its record
-  // of the test files still says what changed (round 6, B2).
-  if (!isGitRepo(root) && !isMap(s.raw)) quiet();
+  // A folder with a .git that git no longer reads as a repo (core.bare, core.worktree) is checked blind: the
+  // record, when there is one, still says what changed (round 6, B2), and without one the line says the diff
+  // could not be read (round 7, finding 5).
+  if (!isGitRepo(root) && !hasGitDir(root)) quiet();
   const base = commitId(s.startHead) || 'HEAD';
   const listed = changedThisSession(root, s);
   const blind = listed == null; // git could not list the changes: never read that as "nothing changed"
   const changed = listed || [];
   const nfc = (f) => f.normalize('NFC');
   // the test files whose bytes changed since session start, by Codehere's own record; none to compare means no ✓
-  const rawNow = isMap(s.raw) ? rawSnapshot(root, s.rawAlgo || 'sha1') : null;
+  const record = readRecord(root, s);
+  const rawStats = {}; // when each file was last touched, to see one change while the tests run
+  const rawNow = record ? rawSnapshot(root, record.algo, { skip: record.skip, stats: rawStats }) : null;
   const noRecord = !rawNow;
-  const rawChanged = rawNow ? [...new Set([...Object.keys(rawNow), ...Object.keys(s.raw)])].filter((f) => rawNow[f] !== s.raw[f]) : [];
+  const rawStart = new Map(record ? Object.entries(record.ids).map(([f, id]) => [nfc(f), id]) : []);
+  const rawChanged = rawNow ? [...new Set([...Object.keys(rawNow), ...Object.keys(record.ids)])].filter((f) => rawNow[f] !== record.ids[f]) : [];
   const gitSettings = gitSettingsChanged(root, s, changed);
   const settings = [...settingsChanged(root, s), ...gitSettings];
   const removed = removedAt(root);
@@ -1114,31 +1167,53 @@ function stop(root, input) {
   let findings = [];
   let unread = blind; // the session's diff could not be read, so weakened tests were not checked: never proven
   if (changed.length || rawChanged.length) {
+    // With a record, test files are read through it alone: git's diff of a test file can be of the index (an index
+    // flag on a staged file) or of a replaced commit, and git can hide the change altogether (rounds 6 and 7).
+    // Other files are read through git.
+    const recorded = (f) => rawNow != null && isCheckFile(f);
+    const gitFiles = changed.filter((f) => !recorded(f));
     let nameStatus = changed.length ? gitPaths(root, ['diff', base, '--relative', '--name-status'], changed) : '';
-    let diff = changed.length ? gitPaths(root, ['diff', base, '--relative', '-U0'], changed) : '';
+    let diff = gitFiles.length ? gitPaths(root, ['diff', base, '--relative', '-U0'], gitFiles) : '';
     unread = blind || diff === null || nameStatus === null;
-    // Files that diff leaves out, read through a diff Codehere builds: new files the agent left untracked (git diff
-    // never shows them), and test files whose bytes changed while git shows no change (round 6, B1 to B4).
-    const inDiff = new Set(String(nameStatus || '').split('\n').flatMap((l) => l.split('\t').slice(1)).map((f) => nfc(unquotePath(f))));
+    // git's statuses are kept for other files, and for a rename of a test file the record saw go (the record alone
+    // cannot tell a rename from a deletion and an addition); a test file's other statuses come from the record
+    const rawGone = new Set(rawChanged.map(nfc));
+    const renamedFrom = new Map(); // new path -> its old path, for a test file renamed this session
+    const movedAway = new Set(); // old paths of those renames: their content is read at the new path
+    const kept = [];
+    for (const line of String(nameStatus || '').split('\n')) {
+      const [status, a, b] = line.split('\t');
+      if (!status || !a) continue;
+      const [from, to] = [unquotePath(a), b && unquotePath(b)];
+      if (/^R/.test(status) && to && recorded(from)) {
+        if (!rawGone.has(nfc(from))) continue;
+        kept.push(line);
+        movedAway.add(nfc(from));
+        if (recorded(to)) renamedFrom.set(nfc(to), nfc(from));
+      } else if (!recorded(from) && !(to && recorded(to))) kept.push(line);
+    }
+    nameStatus = kept.join('\n');
+    const inStatus = new Set(kept.flatMap((l) => l.split('\t').slice(1)).map((f) => nfc(unquotePath(f))));
+    // Files git's diff does not hold, read through a diff Codehere builds: new code the agent left untracked (git
+    // diff never shows it), and every test file whose bytes changed, from its start version in the record.
     const build = new Map(); // file -> its version at session start: a blob id, or null when it is new
     if (changed.length && !blind) {
       const untracked = (gitPaths(root, ['ls-files', '-z', '--others', '--exclude-standard'], changed) ?? '').split('\0').filter(Boolean);
-      // new code and new test files; a file already untracked at session start is built from its start version
-      // when Codehere kept one (test files), and otherwise left as before
       let n = 0;
       for (const f of untracked) {
-        if (inDiff.has(nfc(f)) || !(isCheckFile(f) || languageOf(f) != null)) continue;
+        if (recorded(f) || inStatus.has(nfc(f)) || !(isCheckFile(f) || languageOf(f) != null)) continue;
         if (++n > 2000) break;
-        if (s.baseline && f in s.baseline) {
-          if (isCheckFile(f) && isMap(s.raw) && f in s.raw) build.set(f, s.raw[f]);
-        } else build.set(f, null);
+        if (!(s.baseline && f in s.baseline)) build.set(f, null); // already untracked at session start: as before
       }
     }
-    for (const f of rawChanged) if (!inDiff.has(nfc(f)) && !build.has(f)) build.set(f, f in s.raw ? s.raw[f] : null);
+    for (const f of rawChanged) {
+      if (movedAway.has(nfc(f))) continue;
+      build.set(f, rawStart.get(renamedFrom.get(nfc(f)) ?? nfc(f)) ?? null);
+    }
     for (const [f, from] of build) {
-      const built = builtDiff(root, f, from, s.rawAlgo || 'sha1');
+      const built = builtDiff(root, f, from, record ? record.algo : 'sha1');
       if (built) {
-        nameStatus = `${nameStatus || ''}\n${built.status}`;
+        if (!inStatus.has(nfc(f))) nameStatus = `${nameStatus}\n${built.status}`;
         diff = `${diff || ''}\n${built.diff}`;
       } else if (isCheckFile(f)) unread = true; // a test file changed and its change could not be read: never proven
     }
@@ -1224,6 +1299,12 @@ function stop(root, input) {
   let proven = false; // passed here, now, with intact tests and an unchanged config
   if (cfg.verifyOnStop && approved) {
     const t = runTests(root, cfg);
+    // A test file touched since the record was read at the start of this check: what ran may not be what was read
+    // (a process the agent left running, or a git hook, swapping files during the check: round 7, finding 2).
+    // A file's change time cannot be set back, so a swap and a swap back are both seen.
+    const after = {};
+    if (rawNow) rawSnapshot(root, null, { skip: record.skip, stats: after });
+    const touched = rawNow ? [...new Set([...Object.keys(after), ...Object.keys(rawStats)])].filter((f) => after[f] !== rawStats[f]).sort() : [];
     // saves made while the tests ran moved snapshots on disk, and this hook writes the whole state back
     const disk = readState(root).sessions || {};
     for (const [k, x] of Object.entries(state.sessions)) if (isMap(disk[k]?.team)) Object.assign(x, { team: disk[k].team, teamHead: disk[k].teamHead });
@@ -1249,12 +1330,13 @@ function stop(root, input) {
     }
     // ✓ only for intact evidence (DESIGN.md §1): not after a weakened test, nor after the
     // config that names the test command changed.
-    proven = !findings.length && !configChanged && !unread && !gitSettings.length && !noRecord;
+    proven = !findings.length && !configChanged && !unread && !gitSettings.length && !noRecord && !touched.length;
     if (findings.length) passLine = `codehere ✕ ${cmd} passed, but a check was weakened · ${noTick(findings.join(' · '))}`;
     else if (configChanged) passLine = `codehere ✕ ${cmd} passed, but .codehere/config.json changed during this session`;
     else if (unread) passLine = `codehere ✕ ${cmd} passed, but this session's diff could not be read · weakened tests not checked`;
     else if (gitSettings.length) passLine = `codehere ✕ ${cmd} passed, but git settings that change what a diff shows changed during this session`;
     else if (noRecord) passLine = `codehere ✕ ${cmd} passed, but Codehere has no record of the test files from session start · weakened tests may be missed`;
+    else if (touched.length) passLine = `codehere ✕ ${cmd} passed, but test files changed while Codehere ran the check · ${noTick(touched.slice(0, 3).join(' · '))}${touched.length > 3 ? ` · and ${touched.length - 3} more` : ''}`;
     else passLine = `codehere ✓ ${cmd} · ${runResult(t)} · re-run here · ${t.seconds.toFixed(1)} s`;
     if (proven) {
       state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };

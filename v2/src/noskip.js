@@ -533,6 +533,9 @@ export function testChanges(diff, { read, isTestFile }) {
       if (removed.length) removedIn.add(file.path);
       continue;
     }
+    // only a file that lost tests needs the added ones; building them for every file is quadratic in new files
+    // (cold review, L13 round 7)
+    if (!removed.length) continue;
     const own = addedIn((x) => x === file);
     const elsewhere = addedIn((x) => x !== file);
     for (const r of removed) {

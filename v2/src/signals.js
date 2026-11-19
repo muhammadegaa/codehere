@@ -133,9 +133,13 @@ export function similarity(a, b) {
 
 // ---------- test tampering ----------
 
-const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[a-z]+$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
-// The name a runner collects a test file by, wherever it is: pytest, jest and vitest do not collect test/cart.js.
-const TEST_NAME = /\.(test|spec)\.[a-z]+$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
+// The names the common runners collect (cold review, L13 round 7): a test folder, a .NET test project (Cart.Tests/),
+// .test. and .spec., _test (Go, Python, Ruby, Dart, Elixir, Deno and node --test), -test and test- (node --test),
+// a file named test.js, and pytest's test_*.py.
+const CODE_EXT = String.raw`(?:go|py|rb|dart|exs?|[cm]?[jt]sx?)`;
+const TEST_NAME = new RegExp(String.raw`\.(test|spec)\.[a-z]+$|_test\.${CODE_EXT}$|-test\.[cm]?js$|(^|\/)test-[^/]+\.[cm]?js$|(^|\/)test\.[cm]?js$|(^|\/)test_[^/]+\.py$`, 'i');
+const TEST_FILE = new RegExp(String.raw`(^|\/)(test|tests|__tests__|spec)\/|(^|\/)[^/]+\.tests?\/|${TEST_NAME.source}`, 'i');
+// TEST_NAME is the name a runner collects a test file by, wherever it is: pytest, jest and vitest do not collect test/cart.js.
 // Data the tests read, not tests: deleting or editing it is not counted as weakening a test.
 const FIXTURE = /(^|\/)(__fixtures__|fixtures?|__snapshots__|__mocks__|testdata)\//i;
 export const isTestFile = (file) => TEST_FILE.test(file) && !FIXTURE.test(file);
@@ -176,9 +180,9 @@ const TAMPER_ADDED_IN_TESTS = [
   { re: new RegExp(String.raw`\bassert\.\w+\(\s*${LITERAL}\s*,\s*\1\s*\)`), kind: WEAKENED, why: 'an assertion that cannot fail was added' },
   { re: new RegExp(String.raw`\bexpect\(\s*${LITERAL}\s*\)\.(toBe|toEqual|toStrictEqual)\(\s*\1\s*\)`), kind: WEAKENED, why: 'an assertion that cannot fail was added' },
 ];
-// assert(...), assert.equal(...), expect(...), self.assertEqual(...), and pytest's bare `assert x`;
-// not expect.objectContaining(...) and the other matchers inside one assertion
-const ASSERT = /\b(expect\s*\(|assert[\w.]*\s*\()|^[+-]\s*assert\s/;
+// assert(...), assert.equal(...), expect(...), self.assertEqual(...), .NET's Assert.Equal(...), and pytest's bare
+// `assert x`; not expect.objectContaining(...) and the other matchers inside one assertion
+const ASSERT = /\b(expect\s*\(|assert[\w.]*\s*\(|Assert\.\w+\s*\()|^[+-]\s*assert\s/;
 // package.json's test script made to pass whatever the tests do: `|| true`, `|| :`, `|| echo`, `; exit 0`
 const ALWAYS_PASSES = /"test"\s*:\s*"[^"]*(\|\|\s*(true|:|exit\s+0|echo\b[^"&|;]*)|;\s*(true|exit\s+0))\s*"/;
 const COMMENT = /^[+-]\s*(\/\/|#|\/\*|\*)\s*/;
@@ -584,6 +588,15 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles } = {}) 
     }
     if (line.startsWith('+')) {
       for (const t of TAMPER_ADDED) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
+      // the rest of a line longer than the probe, in overlapping pieces, so a skip past its first 10,000 characters
+      // is read (cold review, L13 round 7); a single match longer than the 1,000-character overlap can be missed
+      for (let from = 9000; from < line.length; from += 9000) {
+        const piece = `+${line.slice(from, from + 10000)}`;
+        let pieceMask = null;
+        const pmask = () => (pieceMask ||= stringMask(piece));
+        for (const t of [...TAMPER_ADDED, ...(inTest ? TAMPER_ADDED_IN_TESTS : [])]) if (inCode(t.re, piece, pmask)) add(t.kind, current, `${t.why} in ${current}`);
+        if (isTestConfig(current)) for (const f of filtersOn(current, piece)) if (!hadFilters.has(f.option)) add(SKIPPED, current, `tests were left out ${f.where} (${f.option}) in ${current}`);
+      }
       if (!inTest) continue;
       const text = probe.slice(1);
       let swallowAt = 0;
