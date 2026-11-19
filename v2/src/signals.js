@@ -159,11 +159,13 @@ const CHECKS_OFF = 'checks-off';
 const REPLACED = 'test-replaced';
 
 const TAMPER_ADDED = [
-  { re: /\b(it|test|describe)\.skip\s*\(/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
-  { re: /\b(xit|xdescribe|xtest)\s*\(/, kind: SKIPPED, why: 'a test was disabled (xit/xdescribe)' },
+  // with modifiers between the name and .skip, and .each after it: test.concurrent.skip, it.skip.each (round 19)
+  { re: /\b(it|test|describe)(?:\.(?:describe|concurrent|serial|parallel|sequential))*\.skip(?:\.each\s*[(`]|\s*\()/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
+  { re: /\b(xit|xdescribe|xtest)(?:\.each\s*[(`]|\s*\()/, kind: SKIPPED, why: 'a test was disabled (xit/xdescribe)' },
   // skip, and skipif or skipIf only when the condition is a literal: skipUnless(shutil.which("uv")) is a
   // test that cannot run on this machine, as { skip: process.platform === 'win32' } is in JS
-  { re: /@pytest\.mark\.skip\b|\bunittest\.skip\s*\(|\b(skipif|skipIf)\s*\(\s*True\b|\bskipUnless\s*\(\s*False\b/, kind: SKIPPED, why: 'a Python test was skipped' },
+  // a whole module (pytestmark) or every collected test (a conftest hook's add_marker) too (round 19)
+  { re: /@pytest\.mark\.skip\b|\bunittest\.skip\s*\(|\b(skipif|skipIf)\s*\(\s*True\b|\bskipUnless\s*\(\s*False\b|\bpytestmark\s*=.*\bpytest\.mark\.skip\b|\badd_marker\(\s*pytest\.mark\.skip\b/, kind: SKIPPED, why: 'a Python test was skipped' },
   { re: /@ts-nocheck/, kind: CHECKS_OFF, why: 'type checking was turned off (@ts-nocheck)' },
   { re: /--no-verify/, kind: CHECKS_OFF, why: 'git hooks were bypassed (--no-verify)' },
   { re: /expect\([^)]*\)\.(toBe|toEqual)\(\s*(true|1)\s*\)\s*;?\s*\/\/\s*(todo|temp|hack)/i, kind: WEAKENED, why: 'an assertion was replaced with a placeholder' },
@@ -172,11 +174,13 @@ const TAMPER_ADDED = [
 // Only in test files: elsewhere `{ skip: true }` or `assert.equal(1, 1)` can be ordinary code.
 const LITERAL = String.raw`(\d+(?:\.\d+)?|true|false|null|'[^']*'|"[^"]*")`;
 const TAMPER_ADDED_IN_TESTS = [
+  // mocha's other names, read only in test files: context.skip( is a plausible call in other code (round 19)
+  { re: /\b(context|suite|specify)(?:\.(?:describe|concurrent|serial|parallel|sequential))*\.skip(?:\.each\s*[(`]|\s*\()|\b(xcontext|xspecify)\s*\(/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
   // test('name', { skip: true }, ...): the name cannot run past its closing quote, so the options are this test's
   { re: /(?<![.\w])(it|test|describe|suite)\s*\(\s*(['"`])(?:(?!\2)[^\\]|\\.)*\2\s*,\s*\{[^}]*\b(skip|todo)\s*:\s*(true\b|['"`])/, kind: SKIPPED, why: 'a test was skipped ({ skip: true })' },
   // fit/fdescribe only in jest's form, starting a statement with a quoted name then a callback:
   // `fit(` alone is a common function name
-  { re: /(?<![.\w])(it|test|describe|context|suite)\.only\s*\(|^[+-]\s*(fit|fdescribe)\s*\(\s*(['"`])(?:(?!\3)[^\\]|\\.)*\3\s*,\s*(async\s+)?(\(|function\b|\w+\s*=>)/, kind: SKIPPED, why: 'other tests were turned off (.only)' },
+  { re: /(?<![.\w])(it|test|describe|context|suite)(?:\.(?:describe|concurrent|serial|parallel|sequential))*\.only(?:\.each\s*[(`]|\s*\()|^[+-]\s*(fit|fdescribe)\s*\(\s*(['"`])(?:(?!\3)[^\\]|\\.)*\3\s*,\s*(async\s+)?(\(|function\b|\w+\s*=>)/, kind: SKIPPED, why: 'other tests were turned off (.only)' },
   { re: /\bassert(\.ok)?\(\s*true\s*\)|^\+\s*assert\s+True\s*$/, kind: WEAKENED, why: 'an assertion that cannot fail was added' },
   { re: new RegExp(String.raw`\bassert\.\w+\(\s*${LITERAL}\s*,\s*\1\s*\)`), kind: WEAKENED, why: 'an assertion that cannot fail was added' },
   { re: new RegExp(String.raw`\bexpect\(\s*${LITERAL}\s*\)\.(toBe|toEqual|toStrictEqual)\(\s*\1\s*\)`), kind: WEAKENED, why: 'an assertion that cannot fail was added' },
@@ -233,13 +237,6 @@ function filtersOn(file, line) {
 // a TOML string's text: a basic string's \" and \\ are unescaped (round 15), a literal string is as written, and a
 // multi-line """ or ''' string is matched before the empty "" its quotes would otherwise make (round 16)
 const tomlItems = (s) => [...s.matchAll(/"""([\s\S]*?)"""|'''([\s\S]*?)'''|"((?:[^"\\]|\\.)*)"|'([^']*)'/g)].map((m) => m[1] ?? m[2] ?? (m[3] != null ? m[3].replace(/\\(["\\])/g, '$1') : m[4]));
-// a -k expression made only of `not x and not y` terms, as its set of terms
-const notTerms = (e) => (/^\s*not\s+[^\s()]+(?:\s+and\s+not\s+[^\s()]+)*\s*$/.test(e) ? new Set([...e.matchAll(/not\s+([^\s()]+)/g)].map((m) => m[1])) : null);
-const narrows = (now, start) => {
-  const a = notTerms(now);
-  const b = notTerms(start);
-  return !!a && !!b && [...a].every((t) => b.has(t));
-};
 function pytestArgs(file, text, inList = false) {
   if (!/\.toml$/.test(file)) return shellWords(text);
   const v = text.split('\n').map(dropComment).join('\n').trim(); // quotes inside a # comment are not items (round 15)
@@ -806,8 +803,8 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       }
       out[k] = stack.length ? stack[stack.length - 1] : null;
       // a list a variable holds (const ignored = [ ... ]) is placed under its name, for a key that names it (round 15)
-      const name = m ? null : /(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]*)?=\s*\[/.exec(line); // a type before the = (round 16)
-      for (const c of line.match(/[[\]]/g) || []) {
+      const name = m ? null : /^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]*)?=\s*\[/.exec(line); // a type before the = (round 16), at the line's start (round 19)
+      for (const c of String(lines[k] ?? '').match(/[[\]]/g) || []) { // the whole line: a long one-line array closes (round 19)
         if (c === '[') stack.push(m ? { kind: 'items', option: m[1], where: "by the test runner's config" } : name && !stack.length ? { kind: 'items', name: name[1] } : stack[stack.length - 1] || null);
         else stack.pop();
       }
@@ -852,10 +849,12 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
     const out = new Map();
     // each value is counted by the places that set it, so a value one place sets, added in a second place (another
     // jest project, another tox env), is new there (round 16)
+    // a -k made only of `not x and not y` terms is the same filter in any order: its terms sorted (round 19)
+    const same = (option, v) => (option === '-k' && /^\s*not\s+[^\s()]+(?:\s+and\s+not\s+[^\s()]+)*\s*$/.test(v) ? [...v.matchAll(/not\s+([^\s()]+)/g)].map((m) => m[1]).sort().map((t) => `not ${t}`).join(' and ') : v);
     const put = (option, where, script, values) => {
       const key = `${script || ''}\0${option}`;
       const e = out.get(key) || out.set(key, { option, where, script, values: new Map() }).get(key);
-      for (const v of new Set(values)) e.values.set(v, (e.values.get(v) || 0) + 1);
+      for (const v of new Set(values.map((x) => same(option, x)))) e.values.set(v, (e.values.get(v) || 0) + 1);
     };
     if (/(^|\/)package\.json$/.test(file)) {
       let pkg = null;
@@ -920,7 +919,12 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
           // each line is a command, read as tox reads it: a # comment cut first, then a line ending in \ (spaces after
           // it too) joined with the next (rounds 17 and 18); only a pytest command's arguments are pytest's, not a
           // linter's --ignore (round 16)
-          const text = b.text.map((l) => l.replace(/\s*(?<!\\)#.*/, '')).join('\n');
+          const text = b.text
+            .map((l) => {
+              const at = l.search(/(?<!\\)#/); // linear: a pattern with \s* before the # was quadratic on spaces (round 19)
+              return at < 0 ? l : l.slice(0, at).trimEnd();
+            })
+            .join('\n');
           for (const cmd of text.split(/(?<!\\[ \t]*)\n/).map((c) => c.replace(/\\[ \t]*\n/g, ' '))) {
             const words = shellWords(cmd);
             const at = words.findIndex((w, i) => /(^|\/)py\.?test$/.test(w) || (w === '-m' && /^py\.?test$/.test(words[i + 1] || '')));
@@ -976,7 +980,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
         // a list a variable holds: the values on its own line too, and a type before the = (round 16)
         // the declaration found in the line's first 10,000 characters (a bounded search: round 17), its list read
         // from the whole line (round 18)
-        const decl = yaml ? null : /(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]*)?=\s*\[/.exec(line.slice(0, 10000));
+        const decl = yaml ? null : /^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]*)?=\s*\[/.exec(line.slice(0, 10000));
         if (decl) lists.set(decl[1], [...(lists.get(decl[1]) || []), ...itemValues(ownValue(`x:${line.slice(decl.index + decl[0].length - 1)}`, 'x', 0), false)]);
         const p = places[k];
         if (p?.kind !== 'items') return;
@@ -1020,11 +1024,9 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       const after = configFilters(file, now.split('\n'));
       for (const [key, f] of after) {
         const had = before.get(key)?.values || new Map();
-        // a narrower -k runs more tests than the wider one it replaces: it is let off as many times as the -k values
-        // it narrows were dropped, no more (rounds 16 to 18)
-        const dropped = (v) => (f.option === '-k' ? [...had].reduce((t, [s, m]) => t + (narrows(v, s) ? Math.max(0, m - (f.values.get(s) || 0)) : 0), 0) : 0);
-        // set in more places than at the start (round 16)
-        const added = [...f.values].some(([v, n]) => n - dropped(v) > (had.get(v) || 0));
+        // set in more places than at the start (round 16); no -k is let off as narrower: that rule had holes in rounds
+        // 17 to 19, so a -k narrowed back is a named false send-back
+        const added = [...f.values].some(([v, n]) => n > (had.get(v) || 0));
         if (added && (f.script == null || f.script === 'tox' || runsTests(f.script, file))) add(SKIPPED, file, `tests were left out ${f.where} (${f.option}) in ${file}`);
       }
     }

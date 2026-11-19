@@ -4630,7 +4630,8 @@ section(['R16'], () => {
 
   // 8: a -k narrowed back
   const narrow16 = lines16('pytest.ini', ['@@ -2 +2 @@', '-addopts = -k "not slow and not test_adds"', '+addopts = -k "not slow"'], '[pytest]\naddopts = -k "not slow"\n');
-  check('scan, honest: -k narrowed back to fewer not-terms is not a new filter', narrow16 === '', narrow16);
+  // round 19: the narrowing rule was a leniency rule with two holes, so it is gone; this send-back is named in the promise
+  check('scan: -k narrowed back to fewer not-terms is sent back (a known false send-back)', narrow16.includes('left out'), narrow16);
 
   // 10: block scalars in linear time
   const t16 = Date.now();
@@ -4748,6 +4749,58 @@ section(['R18'], () => {
   const pad18 = Array.from({ length: 700 }, (_, i) => `'/fixtures/case-${i}/'`).join(', ');
   const longl18 = lines18('jest.config.js', ['@@ -1 +1 @@', `-const ignored = [${pad18}];`, `+const ignored = [${pad18}, '/test/cart/'];`], `const ignored = [${pad18}, '/test/cart/'];\nmodule.exports = {\n  testPathIgnorePatterns: ignored,\n};\n`);
   check('scan: a path added at the end of a one-line list over 10,000 characters is read', longl18.includes('left out'), longl18);
+});
+
+section(['R19'], () => {
+  // The cold review's round 19 (docs/reviews/2026-11-19-cold-review-round-19.md).
+  const lines19 = (file, hunks, now, opts = {}) => tamperFindings(`M\t${file}`, [`--- a/${file}`, `+++ b/${file}`, ...hunks].join('\n'), { read: () => now, ...opts }).join(' · ');
+  const added19 = (file, plus) => tamperFindings(`M\t${file}`, diff27(file, [], [plus])).join(' · ');
+
+  // 1: the tox comment cut in linear time
+  const t19 = Date.now();
+  const pad19 = `commands = pytest${' '.repeat(40000)}tests --deselect tests/test_cart.py::test_total`;
+  const hang19 = lines19('tox.ini', ['@@ -2 +2 @@', '-commands = pytest tests', `+${pad19}`], `[testenv]\n${pad19}\n`, { command: 'tox' });
+  check('scan: a tox command with 40,000 spaces is read in under 2 seconds', Date.now() - t19 < 2000 && hang19.includes('left out'), `${Date.now() - t19} ms ${hang19}`);
+
+  // 2: no narrowing rule for -k: two narrower values cannot both claim one dropped wider value
+  const split19 = lines19('tox.ini', ['@@ -3,2 +3,2 @@', '-    pytest tests/unit -k "not slow and not db"', '-    pytest tests/integration', '+    pytest tests/unit -k "not slow"', '+    pytest tests/integration -k "not db"'], '[testenv]\ncommands =\n    pytest tests/unit -k "not slow"\n    pytest tests/integration -k "not db"\n', { command: 'tox' });
+  check('scan: a -k split into two narrower ones across two commands is read', split19.includes('left out'), split19);
+
+  const order19 = lines19('pytest.ini', ['@@ -2 +2 @@', '-addopts = -k "not slow and not db"', '+addopts = -k "not db and not slow"'], '[pytest]\naddopts = -k "not db and not slow"\n');
+  check('scan, honest: the terms of a -k reordered are the same filter', order19 === '', order19);
+
+  // 3: brackets placed over the whole line, outside quotes
+  const long19 = `const fixtures = [${Array.from({ length: 700 }, (_, i) => `'/fixtures/case-${i}/'`).join(', ')}];`;
+  const after19 = lines19('jest.config.js', ['@@ -3,0 +4 @@', "+  '/test/cart/',"], `${long19}\nconst ignored = [\n  '/legacy/',\n  '/test/cart/',\n];\nmodule.exports = {\n  testPathIgnorePatterns: ignored,\n};\n`);
+  check('scan: a path added to a list after a one-line array over 10,000 characters is read', after19.includes('left out'), after19);
+  const longIgn19 = `const ignored = [${Array.from({ length: 700 }, (_, i) => `'/fixtures/case-${i}/'`).join(', ')}];`;
+  const env19 = lines19('jest.config.js', ['@@ -3 +3 @@', "-  testEnvironment: 'node',", "+  testEnvironment: 'jsdom',"], `${longIgn19}\nmodule.exports = {\n  testEnvironment: 'jsdom',\n  testPathIgnorePatterns: ignored,\n};\n`);
+  check('scan, honest: testEnvironment changed below a one-line list over 10,000 characters is not a filter', env19 === '', env19);
+
+  // 4: declarations found at the start of a line, in linear time
+  const t19b = Date.now();
+  lines19('jest.config.js', ['@@ -1 +1 @@', '-// x', `+${'let a: '.repeat(1400)}`], `${`${'let a: '.repeat(1400)}\n`.repeat(100)}module.exports = {};\n`);
+  check('scan: a 1 MB jest config of `let a:` lines is read in under 2 seconds', Date.now() - t19b < 2000, `${Date.now() - t19b} ms`);
+
+  // 5: skip and only with modifier chains
+  for (const line of ["test.describe.only('cart', () => {", "it.only.each(rows)('adds %s', (r) => {", 'test.only.each`a | b`(\'adds\', () => {', "describe.concurrent.only('cart', () => {", "it.skip.each(rows)('adds %s', (r) => {", 'test.skip.each`a | b`(\'adds\', () => {', "describe.skip.each(rows)('cart %s', () => {", "xit.each(rows)('adds %s', (r) => {", "test.concurrent.skip('adds', async () => {", "context.skip('cart', () => {", "suite.skip('cart', () => {", "xcontext('cart', () => {"]) {
+    const got = added19('test/cart.test.js', line);
+    check(`scan: ${line.split('(')[0].split('`')[0]} is a skipped or focused test`, /skipped|turned off|disabled/.test(got), got);
+  }
+  for (const line of ['const rest = list.skip(2);', "test.describe('cart', () => {", 'stream.only(1);']) {
+    const got = added19('test/cart.test.js', line);
+    check(`scan, honest: ${line} is not a skip`, got === '', got);
+  }
+
+  // 6: pytest skips for a whole module and from a conftest hook
+  for (const [file, line] of [['tests/test_cart.py', 'pytestmark = pytest.mark.skip(reason="flaky")'], ['tests/conftest.py', '        item.add_marker(pytest.mark.skip(reason="flaky"))']]) {
+    const got = added19(file, line);
+    check(`scan: ${line.trim()} skips Python tests`, got.includes('Python test was skipped'), got);
+  }
+  for (const line of ['pytestmark = pytest.mark.slow', 'pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="posix only")']) {
+    const got = added19('tests/test_cart.py', line);
+    check(`scan, honest: ${line} is not a skip`, got === '', got);
+  }
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
