@@ -4327,6 +4327,108 @@ section(['R13'], () => {
   check('scan: || true after an escaped quote in the test script is read', always13.includes('always exit 0'), always13);
 });
 
+section(['R14'], () => {
+  // The cold review's round 14 (docs/reviews/2026-11-19-cold-review-round-14.md): four of round 13's fixes broke rules
+  // that worked on d5dc9e7.
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart14 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const scan14 = (file, minus, plus, opts = {}) => tamperFindings(`M\t${file}`, diff27(file, minus, plus), opts).join(' · ');
+  const lines14 = (file, hunks, now) => tamperFindings(`M\t${file}`, [`--- a/${file}`, `+++ b/${file}`, ...hunks].join('\n'), now == null ? {} : { read: () => now }).join(' · ');
+  // a session through the real hooks: set up, approve, start, make the change, stop
+  const loop14 = (name, files, change) => {
+    const dir = freshRepo(name, files);
+    ch(['init', '--agent', 'claude'], dir);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', dir, 'y');
+    HC('session-start', dir, rec('claude', 'session-start', dir, 's14', { source: 'startup' }));
+    change(dir);
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, 's14', { stop_hook_active: false })), encoding: 'utf8', timeout: 60000 });
+    let j = {};
+    try {
+      j = JSON.parse(x.stdout || '{}');
+    } catch {}
+    return { out: x.stdout || '', j };
+  };
+
+  // 1: package.json's "jest" values are read from the key, not one character before it
+  const pkg14 = (list) => `{\n  "name": "p",\n  "type": "module",\n  "scripts": { "test": "node --test" },\n  "jest": { "testPathIgnorePatterns": ${list} }\n}\n`;
+  r = loop14('r14-jest', { 'package.json': pkg14('["/node_modules/"]'), 'test/cart.test.mjs': cart14 }, (d) => fs.writeFileSync(path.join(d, 'package.json'), pkg14('["/node_modules/", "<rootDir>/test/cart"]')));
+  check('finish check: a path added to package.json\'s one-line "jest" testPathIgnorePatterns sends the agent back', r.j.decision === 'block' && /left out/.test(r.j.reason) && !r.out.includes('✓'), r.out);
+  const name14 = scan14('package.json', ['  "jest": { "testNamePattern": "^(?!.*slow)" }'], ['  "jest": { "testNamePattern": "^(?!.*(slow|cart))" }']);
+  check('scan: a widened testNamePattern under package.json\'s "jest" key is read', name14.includes('left out'), name14);
+  const npm14 = lines14('package.json', ['@@ -5 +5,6 @@', '-  "jest": { "testPathIgnorePatterns": ["/node_modules/", "/e2e/"] }', '+  "jest": {', '+    "testPathIgnorePatterns": [', '+      "/node_modules/",', '+      "/e2e/"', '+    ]', '+  }'], JSON.stringify({ name: 'p', type: 'module', scripts: { test: 'node --test' }, jest: { testPathIgnorePatterns: ['/node_modules/', '/e2e/'] } }, null, 2) + '\n');
+  check('scan, honest: package.json rewritten the way npm writes it, a one-line jest list spread over lines, is not a new filter', npm14 === '', npm14);
+
+  // 2: a quoted shell argument in addopts stays one value
+  for (const [file, minus, plus] of [
+    ['pytest.ini', 'addopts = -q -p no:cacheprovider -k "not slow"', 'addopts = -q -p no:cacheprovider -k "not slow and not test_adds"'],
+    ['pytest.ini', "addopts = -k 'not slow'", "addopts = -k 'not slow and not test_adds'"],
+    ['setup.cfg', 'addopts = -k "not (slow)"', 'addopts = -k "not (slow or cart)"'],
+    ['pytest.ini', 'addopts = --deselect tests/t.py::a[1-2]', 'addopts = --deselect tests/t.py::a[1-2] --deselect tests/t.py::a[3-4]'],
+    ['pyproject.toml', 'addopts = ["-k", "not slow"]', 'addopts = ["-k", "not slow and not cart"]'],
+  ]) {
+    const got = scan14(file, [minus], [plus]);
+    check(`scan: ${plus} in ${file} leaves tests out`, got.includes('left out'), got);
+  }
+  const cont14 = lines14('pytest.ini', ['@@ -3 +3 @@', '-    -k "not slow"', '+    -k "not slow and not test_adds"'], '[pytest]\naddopts =\n    -k "not slow and not test_adds"\n');
+  check('scan: a quoted -k widened on an addopts continuation line is read', cont14.includes('left out'), cont14);
+  for (const [file, minus, plus] of [
+    ['pyproject.toml', `addopts = "-k 'not slow'"`, 'addopts = ["-k", "not slow"]'],
+    ['pytest.ini', 'addopts = -k "not slow"', 'addopts = -q -k "not slow"'],
+  ]) {
+    const got = scan14(file, [minus], [plus]);
+    check(`scan, honest: ${minus} rewritten as ${plus} is not a new filter`, got === '', got);
+  }
+
+  // 3: a commented-out line is not a value the file held
+  const toml14 = lines14('pyproject.toml', ['@@ -4 +4 @@', '-    # "--deselect=tests/test_cart.py::test_adds",', '+    "--deselect=tests/test_cart.py::test_adds",'], '[tool.pytest.ini_options]\naddopts = [\n    "-q",\n    "--deselect=tests/test_cart.py::test_adds",\n]\n');
+  check('scan: a --deselect uncommented in a pyproject.toml addopts list is read', toml14.includes('left out'), toml14);
+  const jestc14 = lines14('jest.config.js', ['@@ -4 +4 @@', "-    // '/test/cart/',", "+    '/test/cart/',"], "module.exports = {\n  testPathIgnorePatterns: [\n    '/node_modules/',\n    '/test/cart/',\n  ],\n};\n");
+  check('scan: a path uncommented in a wrapped testPathIgnorePatterns list is read', jestc14.includes('left out'), jestc14);
+  const ini14 = lines14('pytest.ini', ['@@ -4 +4 @@', '-    # --deselect tests/test_cart.py::test_adds', '+    --deselect tests/test_cart.py::test_adds'], '[pytest]\naddopts =\n    -q\n    --deselect tests/test_cart.py::test_adds\n');
+  check('scan: a --deselect uncommented on an addopts continuation line is read', ini14.includes('left out'), ini14);
+  const tox14 = lines14('tox.ini', ['@@ -3 +3 @@', '-    pytest --deselect tests/t.py::test_a', '+    pytest', '@@ -6,0 +7 @@', '+    --deselect tests/t.py::test_a'], '[testenv]\ncommands =\n    pytest\n[pytest]\naddopts =\n    -q\n    --deselect tests/t.py::test_a\n');
+  check("scan: a --deselect moved from tox's commands into addopts is read", tox14.includes('left out'), tox14);
+  const note14 = lines14('jest.config.js', ['@@ -3,0 +4 @@', "+    // '/test/cart/',"], "module.exports = {\n  testPathIgnorePatterns: [\n    '/node_modules/',\n    // '/test/cart/',\n  ],\n};\n");
+  check('scan, honest: a commented-out item added to a wrapped list is not a filter', note14 === '', note14);
+
+  // 4: Azure's step keys, and an echo cut only to its own argument
+  for (const step of ['  - bash: npm test', '  - pwsh: dotnet test']) {
+    const got = scan14('azure-pipelines.yml', [step], []);
+    check(`scan: ${step.trim()} removed from azure-pipelines.yml is a test step removed`, got.includes('removed'), got);
+  }
+  r = loop14('r14-azure', { 'package.json': '{"name":"p","type":"module","scripts":{"test":"node --test"}}\n', 'test/cart.test.mjs': cart14, 'azure-pipelines.yml': 'steps:\n  - bash: npm ci\n  - bash: npm test\n' }, (d) => fs.writeFileSync(path.join(d, 'azure-pipelines.yml'), 'steps:\n  - bash: npm ci\n'));
+  check('finish check: the bash test step removed from azure-pipelines.yml sends the agent back', r.j.decision === 'block' && /CI/.test(r.j.reason) && !r.out.includes('✓'), r.out);
+  const group14 = scan14('.github/workflows/ci.yml', ['      - run: echo "::group::tests" && npm test'], []);
+  check('scan: a step that echoes a group line, then runs npm test, removed is a test step removed', group14.includes('removed'), group14);
+  const wrap14 = scan14('.github/workflows/ci.yml', ['      - run: npm test'], ['      - run: echo "::group::tests" && npm test']);
+  check('scan, honest: npm test given an echo before it is not a test step removed', wrap14 === '', wrap14);
+
+  // 5: no length limit between the test command and || true
+  const long14 = scan14('.github/workflows/ci.yml', [], [`      - run: npx jest ${'--testPathPattern=src/a '.repeat(60)}|| true`]);
+  check('scan: || true 1,380 characters after the test command in CI is read', long14.includes('always pass'), long14);
+
+  // 6: a comment after the [ that opens a list
+  const open14 = scan14('jest.config.js', ['  testPathIgnorePatterns: ['], ['  testPathIgnorePatterns: [ // build output and deps']);
+  check('scan, honest: a comment after the [ that opens a list is not a filter value', open14 === '', open14);
+
+  // 7: more list forms, and a regex not in quotes
+  const yml14 = lines14('.mocharc.yml', ['@@ -3,0 +4 @@', '+  - test/cart.spec.js'], 'spec: test/**/*.spec.js\nignore:\n  - test/legacy.spec.js\n  - test/cart.spec.js\n');
+  check('scan: an item added to a .mocharc.yml ignore block list is read', yml14.includes('left out'), yml14);
+  const flat14 = lines14('pyproject.toml', ['@@ -3,0 +4 @@', '+"--deselect=tests/test_cart.py::test_adds",'], '[tool.pytest.ini_options]\naddopts = [\n"-q",\n"--deselect=tests/test_cart.py::test_adds",\n]\n');
+  check('scan: an unindented item added to a pyproject.toml addopts list is read', flat14.includes('left out'), flat14);
+  const rx14 = scan14('package.json', ['  "test:unit": "node --test"'], ['  "test:unit": "node --test --test-skip-pattern=adds"'], { read: () => JSON.stringify({ scripts: { test: 'pnpm run /^test:/', 'test:unit': 'node --test --test-skip-pattern=adds' } }) });
+  check('scan: a filter on test:unit, which pnpm run /^test:/ runs, leaves tests out', rx14.includes('left out'), rx14);
+  const pretty14 = lines14('jest.config.js', ['@@ -2,4 +2 @@', '-  testPathIgnorePatterns: [', "-    '/node_modules/',", "-    '/e2e/',", '-  ],', "+  testPathIgnorePatterns: ['/node_modules/', '/e2e/'],"], "module.exports = {\n  testPathIgnorePatterns: ['/node_modules/', '/e2e/'],\n};\n");
+  check('scan, honest: a wrapped list collapsed to one line, as Prettier does, is not a new filter', pretty14 === '', pretty14);
+  const moved14 = lines14('jest.config.js', ['@@ -3 +2,0 @@', "-    '/test/cart/',", '@@ -6,0 +6 @@', "+    '/test/cart/',"], "module.exports = {\n  coveragePathIgnorePatterns: [\n  ],\n  testPathIgnorePatterns: [\n    '/node_modules/',\n    '/test/cart/',\n  ],\n};\n");
+  check('scan: a path moved from coveragePathIgnorePatterns into testPathIgnorePatterns is read', moved14.includes('left out'), moved14);
+
+  // 9: a broken regex in another script does not make every test:* script count
+  const bad14 = scan14('package.json', ['  "test:smoke": "node --test"'], ['  "test:smoke": "node --test --test-skip-pattern=adds"'], { read: () => JSON.stringify({ scripts: { test: 'node --test', 'test:smoke': 'node --test --test-skip-pattern=adds', clean: 'rm -rf "/a(b/"' } }) });
+  check('scan, honest: a side test:smoke filter stays quiet beside a script holding a broken regex', bad14 === '', bad14);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);
