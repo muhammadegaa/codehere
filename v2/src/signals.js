@@ -134,10 +134,11 @@ export function similarity(a, b) {
 // ---------- test tampering ----------
 
 // The names the common runners collect (cold review, L13 round 7): a test folder, a .NET test project (Cart.Tests/),
-// .test. and .spec., _test (Go, Python, Ruby, Dart, Elixir, Deno and node --test), -test and test- (node --test),
-// a file named test.js, and pytest's test_*.py.
+// .test. and .spec., _test (Go, Python, Ruby, Dart, Elixir, Deno and node --test), and pytest's test_*.py. Not
+// node's test-*.js, *-test.js and test.js: those also name helpers and features (test-utils.js, ab-test.js), and
+// deleting one is not deleting a test (round 8, m1).
 const CODE_EXT = String.raw`(?:go|py|rb|dart|exs?|[cm]?[jt]sx?)`;
-const TEST_NAME = new RegExp(String.raw`\.(test|spec)\.[a-z]+$|_test\.${CODE_EXT}$|-test\.[cm]?js$|(^|\/)test-[^/]+\.[cm]?js$|(^|\/)test\.[cm]?js$|(^|\/)test_[^/]+\.py$`, 'i');
+const TEST_NAME = new RegExp(String.raw`\.(test|spec)\.[a-z]+$|_test\.${CODE_EXT}$|(^|\/)test_[^/]+\.py$`, 'i');
 const TEST_FILE = new RegExp(String.raw`(^|\/)(test|tests|__tests__|spec)\/|(^|\/)[^/]+\.tests?\/|${TEST_NAME.source}`, 'i');
 // TEST_NAME is the name a runner collects a test file by, wherever it is: pytest, jest and vitest do not collect test/cart.js.
 // Data the tests read, not tests: deleting or editing it is not counted as weakening a test.
@@ -428,6 +429,9 @@ const CI_FILE = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.gitlab-ci\.ya?
 // test setup and CI files. Codehere keeps its own record of these at session start, so a change to one is read
 // even when git does not show it (docs/finish-check-promise.md). Data in a test folder is not one.
 export const isCheckFile = (f) => (isTestFile(f) && languageOf(f) != null) || isTestConfig(f) || CI_FILE.test(f) || TEST_SETUP.test(f);
+// Test code only: a check file that is not a config, setup or CI file. New test code in a folder git ignores is a
+// build or an install, not the agent's tests; a new config or setup file changes how the tests run wherever it is.
+export const isTestCode = (f) => isCheckFile(f) && !isTestConfig(f) && !CI_FILE.test(f) && !TEST_SETUP.test(f);
 const TEST_CMD = /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|node\s+--test\b|(?:npx\s+)?(?:jest|vitest|mocha)\b|(?:python3?\s+-m\s+)?pytest\b|python3?\s+-m\s+unittest\b|go\s+test\b|cargo\s+test\b|make\s+test\b)/;
 const CI_ALWAYS_PASSES = new RegExp(TEST_CMD.source + String.raw`[^\n]*?(\|\|\s*(true|:|exit\s+0|echo\b)|;\s*(true|exit\s+0)\s*$)`);
 const CI_IGNORE = /^\s*(continue-on-error|allow_failure)\s*:\s*true\b/;

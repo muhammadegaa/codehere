@@ -3481,8 +3481,10 @@ section(['R6'], () => {
   // B4: new files left unstaged, or hidden from git
   r = session6('untracked-skip', (d) => fs.writeFileSync(path.join(d, 'test/extra.test.mjs'), skip6));
   check('finish check: a new test file with a skip, left unstaged, sends the agent back', sentBack6(r, 'a test was skipped') && !ticked6(r), r.out);
-  r = session6('excluded-skip', (d) => (fs.writeFileSync(path.join(d, 'test/extra.test.mjs'), skip6), fs.appendFileSync(path.join(d, '.git/info/exclude'), 'test/extra.test.mjs\n')));
-  check('finish check: a new test file with a skip, hidden through .git/info/exclude, sends the agent back', sentBack6(r, 'a test was skipped') && !ticked6(r), r.out);
+  // a new test file hidden through .git/info/exclude is git's machinery, out of scope since round 8, and new test
+  // code git ignores is not read; a new config is read wherever it is, ignored or not
+  r = session6('excluded-config', (d) => (fs.writeFileSync(path.join(d, 'pytest.ini'), '[pytest]\naddopts = --deselect tests/test_cart.py::test_total\n'), fs.appendFileSync(path.join(d, '.git/info/exclude'), 'pytest.ini\n')));
+  check('finish check: a new pytest.ini that deselects a test, hidden through .git/info/exclude, sends the agent back', sentBack6(r, 'tests were left out') && !ticked6(r), r.out);
   r = session6('untracked-config', (d) => fs.writeFileSync(path.join(d, 'pytest.ini'), '[pytest]\naddopts = --deselect tests/test_cart.py::test_total\n'));
   check('finish check: a new pytest.ini that deselects a test, left unstaged, sends the agent back', sentBack6(r, 'tests were left out') && !ticked6(r), r.out);
   r = session6('untracked-marker', (d) => fs.writeFileSync(path.join(d, 'src/total.js'), 'export function total() {\n  if (process.env.NODE_TEST_CONTEXT) return 3;\n  return 0;\n}\n'), { 'src/keep.js': '' });
@@ -3643,12 +3645,8 @@ section(['R7'], () => {
   r = session7('long-line', (d) => edit7(d, 'test/cart.test.mjs', (t) => t.replace("  it('adds'", `  ${' '.repeat(10000)}it.skip('adds'`)));
   check('finish check: a skip after 10,000 spaces on one line is sent back', sentBack7(r, 'a test was skipped') && !ticked7(r), r.out);
 
-  // 5: no record, then git stops reading the folder as a repo: the check says so
-  const bare7 = repo7('bare-no-record');
-  gut7(bare7);
-  sh('git config core.bare true', bare7);
-  r = stop7(bare7, 's7-never-started');
-  check('finish check: core.bare in a session Codehere never saw start does not silence it', r.out.includes('could not be read') && !ticked7(r), r.out);
+  // 5: core.bare in a session Codehere never saw start is out of scope since round 8 (git's machinery), and a
+  // folder git cannot read is quiet again for honest work (round 8, m3): no check here
 
   // 6: a test path holding a quote
   r = session7('quoted', (d) => (sh(`git update-index --assume-unchanged ${sq('test/cart"x.test.mjs')}`, d), gut7(d, 'test/cart"x.test.mjs')), { 'test/cart"x.test.mjs': cart7 });
@@ -3682,13 +3680,123 @@ section(['R7'], () => {
   check("session start keeps the record of the test files outside state.json", !readText(path.join(st7, '.codehere/local/state.json')).includes('"raw"') && fs.readdirSync(path.join(st7, '.codehere/local/records')).length === 1, readText(path.join(st7, '.codehere/local/state.json')).slice(0, 300));
 
   // 10: test names the runners collect
-  for (const f of ['test-cart.mjs', 'cart_test.mjs', 'cart-test.mjs']) {
+  // test-*.js and *-test.js left out again in round 8 (m1): test-utils.js and ab-test.js are not tests
+  for (const f of ['cart_test.mjs']) {
     r = session7(`name-${f}`, (d) => gut7(d, f), { [f]: cart7 });
     check(`finish check: ${f} is a test file, so gutting it is sent back`, sentBack7(r, '3 assertions removed') && !ticked7(r), r.out);
   }
   const csTest = 'public class CartTests {\n  [Fact] public void Adds() {\n    Assert.Equal(2, 1 + 1);\n    Assert.Equal(4, 2 + 2);\n    Assert.Equal(6, 3 + 3);\n  }\n}\n';
   r = session7('dotnet', (d) => edit7(d, 'Cart.Tests/CartTests.cs', (t) => t.replace(/ {4}Assert\.Equal.*\n/g, '')), { 'test/cart.test.mjs': cart7, 'Cart.Tests/CartTests.cs': csTest });
   check('finish check: a .NET test project (Cart.Tests/) is test code, so gutting it is sent back', sentBack7(r, '3 assertions removed'), r.out);
+});
+
+section(['R8'], () => {
+  // The cold review's round 8 (docs/reviews/2026-11-19-cold-review-round-8.md), against the promise as bounded
+  // after it: what an agent doing its task does is checked; honest sessions get their ✓.
+  const THREE = '    assert.equal(1 + 1, 2);\n    assert.equal(2 + 2, 4);\n    assert.equal(3 + 3, 6);\n';
+  const cart8 = `import { describe, it } from 'node:test'; import assert from 'node:assert';\ndescribe('cart', () => {\n  it('adds', () => {\n${THREE}  });\n});\n`;
+  const edit8 = (dir, f, fn) => fs.writeFileSync(path.join(dir, f), fn(fs.readFileSync(path.join(dir, f), 'utf8')));
+  const gut8 = (dir, f = 'test/cart.test.mjs') => edit8(dir, f, (t) => t.replace(THREE, ''));
+  const repo8 = (name, files = { 'test/cart.test.mjs': cart8 }, script = 'node --test') => {
+    const dir = freshRepo(`r8-${name}`, { 'package.json': `{"name":"p","scripts":{"test":${JSON.stringify(script)}}}\n`, ...files });
+    ch(['init', '--agent', 'claude'], dir);
+    sh('git add -A && git commit -qm init', dir);
+    atTerminal('approve', dir, 'y');
+    return dir;
+  };
+  const start8 = (dir, source = 'startup') => HC('session-start', dir, rec('claude', 'session-start', dir, 's8', { source }));
+  const stop8 = (dir) => {
+    const x = spawnSync('node', [BIN, 'hook', 'stop', '--agent', 'claude'], { cwd: dir, input: JSON.stringify(rec('claude', 'stop', dir, 's8', { stop_hook_active: false })), encoding: 'utf8', timeout: 60000 });
+    let j = {};
+    try {
+      j = x.stdout ? JSON.parse(x.stdout) : {};
+    } catch {}
+    return { out: x.stdout || '', j };
+  };
+  const session8 = (name, change, files, script) => {
+    const dir = repo8(name, files, script);
+    start8(dir);
+    change(dir);
+    return stop8(dir);
+  };
+  const sentBack8 = (x, why) => x.j.decision === 'block' && x.j.reason.includes(why);
+  const ticked8 = (x) => x.out.includes('✓');
+  const src8 = (d) => fs.writeFileSync(path.join(d, 'src.js'), 'export const x = 1;\n');
+
+  // what an agent doing its task does
+  r = session8('plain-mv', (d) => (fs.renameSync(path.join(d, 'test/cart.test.mjs'), path.join(d, 'test/basket.test.mjs')), src8(d)));
+  check('finish check, honest: a test moved with plain mv (not staged) is not reported and gets its ✓', r.j.decision !== 'block' && ticked8(r), r.out);
+  r = session8('plain-mv-gut', (d) => (fs.renameSync(path.join(d, 'test/cart.test.mjs'), path.join(d, 'test/basket.test.mjs')), gut8(d, 'test/basket.test.mjs')));
+  check('finish check: a test moved with plain mv and gutted is sent back', sentBack8(r, 'assertions removed') && !ticked8(r), r.out);
+  const wip8 = repo8('untracked-overwritten');
+  fs.writeFileSync(path.join(wip8, 'test/wip.test.mjs'), cart8.replace(THREE, `${THREE}    assert.equal(4 + 4, 8);\n    assert.equal(5 + 5, 10);\n    assert.equal(6 + 6, 12);\n`));
+  start8(wip8);
+  // git takes it for a rename of cart.test.mjs onto wip.test.mjs, whose own start had six assertions
+  sh('git rm -q test/cart.test.mjs && git show HEAD:test/cart.test.mjs > test/wip.test.mjs && git add -A', wip8);
+  r = stop8(wip8);
+  check("finish check: a test untracked at session start, overwritten through another test's staged removal, is read from its own start version", r.j.decision === 'block' && !ticked8(r), r.out);
+  r = session8('moved-git', (d) => (gut8(d), fs.renameSync(path.join(d, '.git'), path.join(d, '.git-old'))));
+  check('finish check: .git moved away after the session started does not silence it', r.out !== '' && !ticked8(r), r.out);
+  r = session8('linked-folder', (d) => {
+    fs.mkdirSync(path.join(d, 'node_modules/.t'), { recursive: true });
+    fs.copyFileSync(path.join(d, 'test/cart.test.mjs'), path.join(d, 'node_modules/.t/cart.test.mjs'));
+    fs.rmSync(path.join(d, 'test'), { recursive: true });
+    fs.symlinkSync(path.join(d, 'node_modules/.t'), path.join(d, 'test'));
+  });
+  check('finish check: a test folder swapped for a link reads its tests as deleted, with no ✓', sentBack8(r, 'test file deleted') && !ticked8(r), r.out);
+  r = session8('marker-folder', (d) => (fs.mkdirSync(path.join(d, 'test/.git')), sh('git mv test/cart.test.mjs test/basket.test.mjs', d), gut8(d, 'test/basket.test.mjs'), sh('git add -A', d)));
+  check('finish check: a .git folder made beside the tests mid-session does not stop the record reading them', sentBack8(r, 'assertions removed') && !ticked8(r), r.out);
+  r = session8('ghost-rename', (d) => sh('git mv test/cart.test.mjs test/basket.test.mjs && git update-index --assume-unchanged test/basket.test.mjs && rm test/basket.test.mjs', d));
+  check('finish check: a renamed test that is then deleted is read as deleted', sentBack8(r, 'test file deleted') && !ticked8(r), r.out);
+
+  // honest sessions
+  r = session8('fresh-dist', (d) => (src8(d), sh('npm test --silent', d)), { 'test/cart.test.mjs': cart8, 'test/slow.test.mjs': "import { it } from 'node:test';\nit.skip('slow', () => {});\n", '.gitignore': 'dist/\n' }, 'rm -rf dist && mkdir dist && cp -r test dist/ && node --test');
+  check('finish check, honest: tests copied into a build folder git ignores, made after session start, are not the agent\'s', r.j.decision !== 'block' && ticked8(r), r.out);
+  r = session8('helpers', (d) => (sh('git rm -q src/test-utils.js src/ab-test.js', d), src8(d)), { 'test/cart.test.mjs': cart8, 'src/test-utils.js': 'export const render = () => {};\n', 'src/ab-test.js': 'export const variant = "a";\n' });
+  check('finish check, honest: deleting src/test-utils.js and src/ab-test.js is not deleting tests', r.j.decision !== 'block' && ticked8(r), r.out);
+  const broken8 = repo8('broken-gitfile');
+  fs.renameSync(path.join(broken8, '.git'), path.join(broken8, '.git-real'));
+  fs.writeFileSync(path.join(broken8, '.git'), 'gitdir: /nonexistent/.git\n');
+  start8(broken8);
+  src8(broken8);
+  r = stop8(broken8);
+  check('finish check, honest: a folder whose .git git cannot read, from the start, stays quiet', r.out === '', r.out);
+  r = session8('zero-passed', (d) => src8(d), { 'test/cart.test.mjs': "import { it } from 'node:test';\nit.skip('adds', () => {});\n" });
+  check('finish check: a passing run where no test passed gets no ✓, and the line says 0 passed', !ticked8(r) && r.out.includes('0 passed'), r.out);
+
+  // a session started before the record was kept, resumed after the upgrade: no record, so no ✓
+  const old8 = repo8('resumed-old');
+  start8(old8);
+  const st8 = JSON.parse(fs.readFileSync(path.join(old8, '.codehere/local/state.json'), 'utf8'));
+  delete st8.sessions.s8.record;
+  fs.writeFileSync(path.join(old8, '.codehere/local/state.json'), JSON.stringify(st8));
+  fs.rmSync(path.join(old8, '.codehere/local/records'), { recursive: true, force: true });
+  gut8(old8);
+  start8(old8, 'resume');
+  r = stop8(old8);
+  check('finish check: a session started before the record, gutted, then resumed after the upgrade, is sent back', sentBack8(r, '3 assertions removed') && !ticked8(r), r.out);
+  const old8b = repo8('resumed-old-honest');
+  start8(old8b);
+  const st8b = JSON.parse(fs.readFileSync(path.join(old8b, '.codehere/local/state.json'), 'utf8'));
+  delete st8b.sessions.s8.record;
+  fs.writeFileSync(path.join(old8b, '.codehere/local/state.json'), JSON.stringify(st8b));
+  fs.rmSync(path.join(old8b, '.codehere/local/records'), { recursive: true, force: true });
+  start8(old8b, 'resume');
+  src8(old8b);
+  r = stop8(old8b);
+  check('finish check: a session started before the record and resumed after the upgrade gets no ✓, and says there is no record', !ticked8(r) && r.out.includes('no record'), r.out);
+
+  // the records of other sessions: a recent one is kept (it may be a session starting at the same moment), an old one removed
+  const pr8 = repo8('prune');
+  const recs8 = path.join(pr8, '.codehere/local/records');
+  fs.mkdirSync(recs8, { recursive: true });
+  fs.writeFileSync(path.join(recs8, '0123456789abcdef.json'), '{}');
+  fs.writeFileSync(path.join(recs8, 'fedcba9876543210.json'), '{}');
+  const old = new Date(Date.now() - 2 * 3600 * 1000);
+  fs.utimesSync(path.join(recs8, 'fedcba9876543210.json'), old, old);
+  start8(pr8);
+  const left8 = fs.readdirSync(recs8);
+  check("session start keeps another session's recent record and removes an old one", left8.includes('0123456789abcdef.json') && !left8.includes('fedcba9876543210.json') && left8.length === 2, left8.join(', '));
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');

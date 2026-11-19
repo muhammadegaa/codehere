@@ -12,7 +12,7 @@ import {
   removedAt, expireDrafts, draftFile, saveRecord, readPlain, readOwn, ownPath, teamSnapshot, teamMark, keepSaved, isMap,
 } from './brain.js';
 import {
-  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile, isCheckFile,
+  responseText, signature, errorLines, similarity, tamperFindings, failingTest, lowInfoPrompt, vagueFeature, testCounts, redact, plainYes, isTestFile, isCheckFile, isTestCode,
 } from './signals.js';
 import { languageOf } from './noskip.js';
 import { unquotePath, quotePath } from './gitpath.js';
@@ -133,7 +133,9 @@ function sessionStart(root, input, agent) {
     s.gitSettings = gitSettingsSnapshot(root);
     s.team = teamSnapshot(root);
     s.teamHead = git(root, 'rev-parse HEAD') || null;
-    if (!readRecord(root, s) && s.record === undefined && isGitRepo(root)) keepRecord(root, state, s, input.session_id || 'default');
+    // a session started before Codehere kept a record: a record taken now would start from the agent's changes
+    // (round 8, M1), so this session has none, and no ✓
+    if (s.record === undefined) s.record = null;
   }
 
   const out = [];
@@ -211,14 +213,6 @@ export function dirtySnapshot(root) {
   const files = listed.filter((f) => !IGNORE(f));
   const hashes = gitHashes(root, files, { filters: false }); // no filter program of the repo's runs inside the hook
   return Object.fromEntries(files.map((f, i) => [f, hashes[i] || 'x']));
-}
-
-// Whether root or a folder above it holds a .git, as a repo does even when git is told it is bare.
-function hasGitDir(root) {
-  for (let d = path.resolve(root); ; d = path.dirname(d)) {
-    if (fs.existsSync(path.join(d, '.git'))) return true;
-    if (path.dirname(d) === d) return false;
-  }
 }
 
 // Null when git cannot list them: the finish check then says so instead of staying silent.
@@ -396,7 +390,8 @@ function fileId(file, algo, stats, r) {
   }
 }
 // The check files' ids (algo given), their stat lines into stats (when given), or null over RAW_LIMIT.
-export function rawSnapshot(root, algo, { skip = [], stats = null } = {}) {
+// keep: folders that held a recorded file; a .git or pyvenv.cfg made in one mid-session does not stop the walk (round 8, B1)
+export function rawSnapshot(root, algo, { skip = [], stats = null, keep = new Set() } = {}) {
   const files = {};
   const skipped = new Set(skip);
   let seen = 0;
@@ -405,7 +400,7 @@ export function rawSnapshot(root, algo, { skip = [], stats = null } = {}) {
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {}
-    if (rel && entries.some((e) => e.name === '.git' || e.name === 'pyvenv.cfg')) return true;
+    if (rel && !keep.has(rel) && entries.some((e) => e.name === '.git' || e.name === 'pyvenv.cfg')) return true;
     for (const e of entries) {
       if (++seen > RAW_LIMIT) return false;
       const r = rel ? `${rel}/${e.name}` : e.name;
@@ -447,8 +442,13 @@ function keepRecord(root, state, s, key) {
     const tmp = `${file}.${crypto.randomBytes(6).toString('hex')}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify({ algo, ids, skip }), { flag: 'wx' });
     fs.renameSync(tmp, file);
-    const keep = new Set(Object.values(state.sessions).map((x) => `${x.record}.json`));
-    for (const n of fs.readdirSync(dir)) if (!keep.has(n)) fs.rmSync(path.join(dir, n), { force: true });
+    // a record no session in state.json names, and older than an hour: a session starting at the same moment
+    // may not be in this copy of the state yet (round 8, m2)
+    const named = new Set(Object.values(state.sessions).map((x) => `${x.record}.json`));
+    for (const n of fs.readdirSync(dir)) {
+      const at = path.join(dir, n);
+      if (!named.has(n) && Date.now() - fs.lstatSync(at).mtimeMs > 3600 * 1000) fs.rmSync(at, { force: true });
+    }
   } catch {
     s.record = null;
     return;
@@ -465,11 +465,11 @@ function keepRecord(root, state, s, key) {
 // to the file as it is now, built by git from the two blobs: no index flag, filter or replace object is asked.
 // A file is read whole. Null when it cannot be built.
 const ONE_MIB = 1024 * 1024;
-function builtDiff(root, file, from, algo) {
+function builtDiff(root, file, from, algo, gone = false) {
   const abs = path.join(root, file);
   let st = null;
   try {
-    st = fs.lstatSync(abs);
+    if (!gone) st = fs.lstatSync(abs);
   } catch {}
   if ((st && !st.isFile()) || (!st && !from) || (from != null && !isBlobId(from)) || file.includes('\n')) return null;
   const head = `diff --git ${quotePath(`a/${file}`)} ${quotePath(`b/${file}`)}\n--- ${from ? quotePath(`a/${file}`) : '/dev/null'}\n+++ ${st ? quotePath(`b/${file}`) : '/dev/null'}\n`;
@@ -1120,10 +1120,10 @@ function stop(root, input) {
   };
 
   if (!hasGit()) emitJson({ systemMessage: 'codehere ⊘ git not found · the finish check did not run' });
-  // A folder with a .git that git no longer reads as a repo (core.bare, core.worktree) is checked blind: the
-  // record, when there is one, still says what changed (round 6, B2), and without one the line says the diff
-  // could not be read (round 7, finding 5).
-  if (!isGitRepo(root) && !hasGitDir(root)) quiet();
+  // A session that started in a repo is checked blind when git no longer reads the folder as one (core.bare, a
+  // moved .git): the record still says what changed (rounds 6 and 8). A folder git could not read at session start
+  // stays quiet, as it did before (round 8, m3).
+  if (!isGitRepo(root) && !(commitId(s.startHead) || s.baseline || s.record)) quiet();
   const base = commitId(s.startHead) || 'HEAD';
   const listed = changedThisSession(root, s);
   const blind = listed == null; // git could not list the changes: never read that as "nothing changed"
@@ -1132,7 +1132,11 @@ function stop(root, input) {
   // the test files whose bytes changed since session start, by Codehere's own record; none to compare means no ✓
   const record = readRecord(root, s);
   const rawStats = {}; // when each file was last touched, to see one change while the tests run
-  const rawNow = record ? rawSnapshot(root, record.algo, { skip: record.skip, stats: rawStats }) : null;
+  const held = new Set(record ? Object.keys(record.ids).flatMap((f) => f.split('/').slice(0, -1).map((_, i, p) => p.slice(0, i + 1).join('/'))) : []);
+  const rawNow = record ? rawSnapshot(root, record.algo, { skip: record.skip, stats: rawStats, keep: held }) : null;
+  // new test code git ignores now is a build copying the tests or an install, not the agent's tests (round 8, M2)
+  const ignoredNow = (files) => new Set((files.length ? gitRead(root, ['check-ignore', '-z', '--stdin'], files.join('\0') + '\0') : '')?.split('\0').filter(Boolean));
+  if (rawNow) for (const f of ignoredNow(Object.keys(rawNow).filter((x) => !(x in record.ids) && isTestCode(x)))) delete rawNow[f], delete rawStats[f];
   const noRecord = !rawNow;
   const rawStart = new Map(record ? Object.entries(record.ids).map(([f, id]) => [nfc(f), id]) : []);
   const rawChanged = rawNow ? [...new Set([...Object.keys(rawNow), ...Object.keys(record.ids)])].filter((f) => rawNow[f] !== record.ids[f]) : [];
@@ -1178,6 +1182,7 @@ function stop(root, input) {
     // git's statuses are kept for other files, and for a rename of a test file the record saw go (the record alone
     // cannot tell a rename from a deletion and an addition); a test file's other statuses come from the record
     const rawGone = new Set(rawChanged.map(nfc));
+    const nowSet = new Set(Object.keys(rawNow || {}).map(nfc));
     const renamedFrom = new Map(); // new path -> its old path, for a test file renamed this session
     const movedAway = new Set(); // old paths of those renames: their content is read at the new path
     const kept = [];
@@ -1187,10 +1192,44 @@ function stop(root, input) {
       const [from, to] = [unquotePath(a), b && unquotePath(b)];
       if (/^R/.test(status) && to && recorded(from)) {
         if (!rawGone.has(nfc(from))) continue;
+        // a rename git takes from the index onto a file that is gone, or onto a file with its own start version, is a
+        // deletion: the new file is read from its own start (round 8, B3 and B4)
+        if (recorded(to) && (!nowSet.has(nfc(to)) || rawStart.has(nfc(to)))) continue;
         kept.push(line);
         movedAway.add(nfc(from));
         if (recorded(to)) renamedFrom.set(nfc(to), nfc(from));
       } else if (!recorded(from) && !(to && recorded(to))) kept.push(line);
+    }
+    // a test moved without git (plain mv) is one deleted and one new file: paired as git pairs renames, by the same
+    // bytes or mostly the same lines, so an honest move is not a deletion and a moved test is read from its start
+    // (round 8, M4)
+    if (rawNow) {
+      const gone = rawChanged.filter((f) => f in record.ids && !(f in rawNow) && !movedAway.has(nfc(f)) && isTestCode(f));
+      const added = rawChanged.filter((f) => !(f in record.ids) && f in rawNow && !renamedFrom.has(nfc(f)) && isTestCode(f));
+      const lineSet = (text) => new Set(String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean));
+      const startLines = new Map();
+      for (const a of added.slice(0, 50)) {
+        let best = gone.find((g) => !movedAway.has(nfc(g)) && rawNow[a] === record.ids[g]) ?? null;
+        let now = null;
+        if (!best) {
+          try {
+            now = lineSet(readPlain(path.join(root, a), 'utf8', 1024 * 1024));
+          } catch {}
+        }
+        for (let i = 0, score = 0.5; now && i < Math.min(gone.length, 50); i++) {
+          const g = gone[i];
+          if (movedAway.has(nfc(g))) continue;
+          if (!startLines.has(g)) startLines.set(g, isBlobId(record.ids[g]) ? lineSet(gitRead(root, ['cat-file', 'blob', record.ids[g]])) : new Set());
+          const was = startLines.get(g);
+          const both = [...now].filter((l) => was.has(l)).length;
+          const j = now.size + was.size ? both / (now.size + was.size - both) : 0;
+          if (j >= score) [best, score] = [g, j];
+        }
+        if (!best) continue;
+        kept.push(`R100\t${quotePath(best)}\t${quotePath(a)}`);
+        movedAway.add(nfc(best));
+        renamedFrom.set(nfc(a), nfc(best));
+      }
     }
     nameStatus = kept.join('\n');
     const inStatus = new Set(kept.flatMap((l) => l.split('\t').slice(1)).map((f) => nfc(unquotePath(f))));
@@ -1211,7 +1250,7 @@ function stop(root, input) {
       build.set(f, rawStart.get(renamedFrom.get(nfc(f)) ?? nfc(f)) ?? null);
     }
     for (const [f, from] of build) {
-      const built = builtDiff(root, f, from, record ? record.algo : 'sha1');
+      const built = builtDiff(root, f, from, record ? record.algo : 'sha1', recorded(f) && !(f in rawNow)); // not walked now: gone, even behind a link (round 8, B2)
       if (built) {
         if (!inStatus.has(nfc(f))) nameStatus = `${nameStatus}\n${built.status}`;
         diff = `${diff || ''}\n${built.diff}`;
@@ -1304,7 +1343,12 @@ function stop(root, input) {
     // A file's change time cannot be set back, so a swap and a swap back are both seen.
     const after = {};
     if (rawNow) rawSnapshot(root, null, { skip: record.skip, stats: after });
-    const touched = rawNow ? [...new Set([...Object.keys(after), ...Object.keys(rawStats)])].filter((f) => after[f] !== rawStats[f]).sort() : [];
+    let touched = rawNow ? [...new Set([...Object.keys(after), ...Object.keys(rawStats)])].filter((f) => after[f] !== rawStats[f]).sort() : [];
+    const fresh = touched.filter((f) => !(f in record.ids) && isTestCode(f));
+    if (fresh.length) {
+      const ignored = ignoredNow(fresh);
+      touched = touched.filter((f) => !ignored.has(f));
+    }
     // saves made while the tests ran moved snapshots on disk, and this hook writes the whole state back
     const disk = readState(root).sessions || {};
     for (const [k, x] of Object.entries(state.sessions)) if (isMap(disk[k]?.team)) Object.assign(x, { team: disk[k].team, teamHead: disk[k].teamHead });
@@ -1330,13 +1374,17 @@ function stop(root, input) {
     }
     // ✓ only for intact evidence (DESIGN.md §1): not after a weakened test, nor after the
     // config that names the test command changed.
-    proven = !findings.length && !configChanged && !unread && !gitSettings.length && !noRecord && !touched.length;
+    // a run where the runner's own count says no test passed proves nothing (every test skipped, or none found)
+    const counts = t.ok ? testCounts(t.output) : null;
+    const nonePassed = Boolean(counts && !counts.passed);
+    proven = !findings.length && !configChanged && !unread && !gitSettings.length && !noRecord && !touched.length && !nonePassed;
     if (findings.length) passLine = `codehere ✕ ${cmd} passed, but a check was weakened · ${noTick(findings.join(' · '))}`;
     else if (configChanged) passLine = `codehere ✕ ${cmd} passed, but .codehere/config.json changed during this session`;
     else if (unread) passLine = `codehere ✕ ${cmd} passed, but this session's diff could not be read · weakened tests not checked`;
     else if (gitSettings.length) passLine = `codehere ✕ ${cmd} passed, but git settings that change what a diff shows changed during this session`;
     else if (noRecord) passLine = `codehere ✕ ${cmd} passed, but Codehere has no record of the test files from session start · weakened tests may be missed`;
     else if (touched.length) passLine = `codehere ✕ ${cmd} passed, but test files changed while Codehere ran the check · ${noTick(touched.slice(0, 3).join(' · '))}${touched.length > 3 ? ` · and ${touched.length - 3} more` : ''}`;
+    else if (nonePassed) passLine = `codehere ✕ ${cmd} · 0 passed · no test ran`;
     else passLine = `codehere ✓ ${cmd} · ${runResult(t)} · re-run here · ${t.seconds.toFixed(1)} s`;
     if (proven) {
       state.lastGreen = { commit: git(root, 'rev-parse HEAD'), at: new Date().toISOString() };

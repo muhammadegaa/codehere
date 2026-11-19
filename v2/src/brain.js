@@ -355,7 +355,7 @@ export const GIT_ENV = {
   ...process.env,
   GIT_NO_REPLACE_OBJECTS: '1',
   GIT_OPTIONAL_LOCKS: '0', // git status does not write the index, so no index hook has a reason to run
-  GIT_CONFIG_COUNT: String(extra + 3),
+  GIT_CONFIG_COUNT: String(extra + 4),
   [`GIT_CONFIG_KEY_${extra}`]: 'core.fsmonitor',
   [`GIT_CONFIG_VALUE_${extra}`]: 'false',
   [`GIT_CONFIG_KEY_${extra + 1}`]: 'diff.suppressBlankEmpty',
@@ -363,6 +363,9 @@ export const GIT_ENV = {
   // no hook of the repo's runs inside Codehere's git calls, such as post-index-change (round 7, finding 2)
   [`GIT_CONFIG_KEY_${extra + 2}`]: 'core.hooksPath',
   [`GIT_CONFIG_VALUE_${extra + 2}`]: os.devNull,
+  // no signature check, which would run the repo's gpg.program inside a `git log` (round 8, m4)
+  [`GIT_CONFIG_KEY_${extra + 3}`]: 'log.showSignature',
+  [`GIT_CONFIG_VALUE_${extra + 3}`]: 'false',
 };
 export const GIT_TIMEOUT = 30000;
 
@@ -372,7 +375,8 @@ export const GIT_TIMEOUT = 30000;
 export function gitRead(root, args, input) {
   const [cmd, ...rest] = args;
   try {
-    const all = ['--literal-pathspecs', cmd, ...(cmd === 'diff' || cmd === 'log' ? PLAIN_DIFF : []), ...rest];
+    // check-ignore takes plain paths and refuses the pathspec flag
+    const all = [...(cmd === 'check-ignore' ? [] : ['--literal-pathspecs']), cmd, ...(cmd === 'diff' || cmd === 'log' ? PLAIN_DIFF : []), ...rest];
     return execFileSync('git', all, { cwd: root, input, stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'ignore'], maxBuffer: BIG, env: GIT_ENV, timeout: GIT_TIMEOUT }).toString();
   } catch {
     return null;
