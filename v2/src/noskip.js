@@ -119,7 +119,7 @@ function* nameMatches(text, lang) {
     re.lastIndex = 0;
     for (const m of text.matchAll(re)) {
       const name = (pick ? pick(m) : m[m.length - 1] ?? m[1])?.trim();
-      if (name) yield [m.index, name];
+      if (name) yield [m.index, name, m.index + m[0].length];
     }
   }
 }
@@ -412,25 +412,48 @@ function dropped(big, small) {
   return j === small.length ? gone : null;
 }
 
-// The test each line sits in: the last test whose name starts at or above it, read over the whole text (a Java, C#
-// or Rust name sits a line below its annotation), or null above the first test (round 25). Old tests are keyed by name
-// and occurrence. A new test whose name line did not change keeps its old key; the others take the old keys of their
-// name left over, in order. With more new than old, a test of one name added beside another is not that test (round
-// 26). Read once a file.
+// The test each line sits in: the last test that starts at or above it, read over the whole text (a Java, C# or Rust
+// name sits a line below its annotation; a Python test starts at its decorators, so a parametrize list is its own), or
+// null above the first test (round 25). Old tests are keyed by name and occurrence; each new test takes the old key it
+// was, by the first rule that places it (rounds 26 and 27):
+// 1. its name line did not change, nor did the line above it;
+// 2. its name line was edited in place: the old one was removed, and the lines around the test did not change;
+// 3. the line above it (its describe or class line) matches that of exactly one old test of its name and one new one;
+// 4. the old keys of its name left over, in order; with more new than old, only when the line after its name matches
+//    exactly one old test of the name and no other new one, or else a key of its own.
+// Read once a file.
 function testsOf(file) {
   if (file.tests !== undefined) return file.tests;
   if (!file.oldLines || !file.newLines) return (file.tests = null);
   const lang = languageOf(file.path);
+  const indent = (l) => /^\s*/.exec(l)[0].length;
+  const decorated = (lines, i) => {
+    let top = i;
+    for (let j = i - 1; j >= 0 && lines[j].trim(); j--) {
+      if (indent(lines[j]) < indent(lines[i])) break;
+      if (indent(lines[j]) === indent(lines[i]) && lines[j].trim().startsWith('@')) top = j;
+      else if (indent(lines[j]) === indent(lines[i]) && !/^[)\]]/.test(lines[j].trim())) break;
+    }
+    return top + 1;
+  };
   const startsOf = (lines) => {
     const matches = [...nameMatches(lines.join('\n'), lang)].sort((x, y) => x[0] - y[0]);
     const out = [];
-    let [m, at] = [0, 0];
+    let [m, e, at] = [0, 0, 0];
     lines.forEach((l, i) => {
       at += l.length;
-      for (; m < matches.length && matches[m][0] <= at; m++) out.push({ line: i + 1, name: matches[m][1] });
+      for (; m < matches.length && matches[m][0] <= at; m++) out.push({ at: i + 1, line: lang === 'py' ? decorated(lines, i) : i + 1, name: matches[m][1], stop: matches[m][2] });
+      for (; e < out.length && out[e].stop <= at + 1; e++) out[e].end = i + 1;
       at += 1;
     });
+    for (; e < out.length; e++) out[e].end = lines.length;
     return out;
+  };
+  // the nearest line that is not blank above (step -1) or below (step 1) a 1-based line, 0 or length + 1 if none
+  const near = (lines, at, step) => {
+    let i = at - 1 + step;
+    while (i >= 0 && i < lines.length && !lines[i].trim()) i += step;
+    return i + 1;
   };
   const olds = startsOf(file.oldLines);
   const count = new Map();
@@ -447,30 +470,51 @@ function testsOf(file) {
     while (removed.has(o)) o++;
     toOld.set(n, o++);
   }
-  const oldAt = new Map(olds.map((t) => [`${t.line}\0${t.name}`, t]));
   const kept = new Set();
   const news = startsOf(file.newLines);
+  const keep = (t, o) => {
+    if (o && !kept.has(o) && !t.key) kept.add(o), (t.key = o.key);
+  };
+  // 1
+  const oldAt = new Map(olds.map((t) => [`${t.at}\0${t.name}`, t]));
+  for (const t of news) if (!added.has(near(file.newLines, t.line, -1))) keep(t, oldAt.get(`${toOld.get(t.at)}\0${t.name}`));
+  // 2
+  const around = (name, up, down) => `${name}\0${up}\0${down}`;
+  const byAround = new Map();
+  for (const o of olds) {
+    if (!removed.has(o.at)) continue;
+    const k = around(o.name, near(file.oldLines, o.line, -1), near(file.oldLines, o.end, 1));
+    byAround.set(k, byAround.has(k) ? null : o);
+  }
   for (const t of news) {
-    const o = oldAt.get(`${toOld.get(t.line)}\0${t.name}`);
-    if (o && !kept.has(o)) kept.add(o), (t.key = o.key);
+    if (t.key || !added.has(t.at)) continue;
+    const [up, down] = [near(file.newLines, t.line, -1), near(file.newLines, t.end, 1)];
+    if ((up >= 1 && !toOld.has(up)) || !toOld.has(down)) continue;
+    keep(t, byAround.get(around(t.name, up >= 1 ? toOld.get(up) : 0, toOld.get(down))));
   }
   const group = (list, pick) => {
     const m = new Map();
     for (const t of list) if (pick(t)) (m.get(t.name) ?? m.set(t.name, []).get(t.name)).push(t);
     return m;
   };
-  const pool = group(olds, (t) => !kept.has(t));
-  // with more new tests of a name than old, a new one keeps an old key only when the line after its name line matches
-  // that of exactly one old test of the name and of no other new one (the route or input it checks)
-  const next = (lines, t) => normalizeLine(lines.slice(t.line).find((l) => l.trim()) ?? '');
-  const once = (list, lines) => {
+  const unique = (list, keyOf) => {
     const m = new Map();
     for (const t of list) {
-      const k = next(lines, t);
+      const k = keyOf(t);
       m.set(k, m.has(k) ? null : t);
     }
     return m;
   };
+  const lineAt = (lines, i) => (i >= 1 && i <= lines.length ? normalizeLine(lines[i - 1]) : '');
+  // 3
+  const oldPool = group(olds, (t) => !kept.has(t));
+  for (const [name, waiting] of group(news, (t) => !t.key)) {
+    const before = unique(oldPool.get(name) ?? [], (t) => lineAt(file.oldLines, near(file.oldLines, t.line, -1)));
+    for (const [k, t] of unique(waiting, (t) => lineAt(file.newLines, near(file.newLines, t.line, -1)))) if (t) keep(t, before.get(k));
+  }
+  // 4
+  const pool = group(olds, (t) => !kept.has(t));
+  const next = (lines, t) => lineAt(lines, near(lines, t.end, 1));
   let fresh = 0;
   for (const [name, waiting] of group(news, (t) => !t.key)) {
     const old = pool.get(name) ?? [];
@@ -478,7 +522,7 @@ function testsOf(file) {
       waiting.forEach((t, i) => (t.key = old[i].key));
       continue;
     }
-    const [olds1, news1] = [once(old, file.oldLines), once(waiting, file.newLines)];
+    const [olds1, news1] = [unique(old, (t) => next(file.oldLines, t)), unique(waiting, (t) => next(file.newLines, t))];
     for (const t of waiting) {
       const k = next(file.newLines, t);
       const o = news1.get(k) === t ? olds1.get(k) : null;
@@ -526,6 +570,7 @@ function pairing(file) {
   const gone = new Map(); // a removed line whose text was added nowhere
   return {
     taken,
+    mine: (r, a) => at('old', r.line) != null && at('old', r.line) === at('now', a.line),
     same: (r, a) => {
       const [x, y] = [at('old', r.line), at('now', a.line)];
       if (x == null || y == null || x === y) return true;
@@ -560,7 +605,8 @@ function tableChanges(file) {
       if (moved.has(r.line)) continue;
       const before = lists(r);
       if (!before?.lists.length) continue;
-      const a = hunk.added.find((x) => !used.has(x.line) && shapeOf(x) === before.shape && pair.same(r, x));
+      const fits = hunk.added.filter((x) => !used.has(x.line) && shapeOf(x) === before.shape && pair.same(r, x));
+      const a = fits.find((x) => pair.mine(r, x)) ?? fits[0]; // a line of its own test first (round 27)
       if (!a) continue;
       used.add(a.line);
       const after = inlineLists(a.text);

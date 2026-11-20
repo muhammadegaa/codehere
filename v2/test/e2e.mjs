@@ -5318,6 +5318,156 @@ section(['R26'], () => {
   }
 });
 
+section(['R27'], () => {
+  // The cold review's round 27 (docs/reviews/2026-11-20-cold-review-round-27.md): its own inputs.
+  const realDiff27 = (file, before, after) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'r27-'));
+    fs.mkdirSync(path.join(d, 'a', path.dirname(file)), { recursive: true });
+    fs.mkdirSync(path.join(d, 'b', path.dirname(file)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'a', file), before);
+    fs.writeFileSync(path.join(d, 'b', file), after);
+    const out = spawnSync('git', ['diff', '--no-index', '--no-color', '-U0', `a/${file}`, `b/${file}`], { cwd: d, encoding: 'utf8', maxBuffer: 1 << 30 }).stdout;
+    return out.replace(/^--- a\/a\//m, '--- a/').replace(/^\+\+\+ b\/b\//m, '+++ b/');
+  };
+  const scan27 = (file, before, after) => tamperFindings(`M\t${file}`, realDiff27(file, before, after), { read: () => after, tests: () => [] }).join(' · ');
+  const cases27 = [
+    {
+      "label": "a value changed while the tests are made async and a same-named test is added above",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 4);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "the same with the new test between",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 4);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "the same with one old test",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 4);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "the same weakened to ok",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.ok(res.body.length);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "the same with a timeout option added",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', { timeout: 1000 }, () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', { timeout: 1000 }, () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', { timeout: 1000 }, () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 4);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "the same with the new test below and the first value changed",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 1);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "a Python value changed while a fixture is added and a same-named class above",
+      "file": "tests/test_users.py",
+      "before": "from app import get\n\n\nclass TestGuest:\n    def test_lists_users(self, client):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 2\n\n\nclass TestAdmin:\n    def test_lists_users(self, client):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 3\n",
+      "after": "from app import get\n\n\nclass TestOwner:\n    def test_lists_users(self, client, db):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 3\n\n\nclass TestGuest:\n    def test_lists_users(self, client, db):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 2\n\n\nclass TestAdmin:\n    def test_lists_users(self, client, db):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 4\n",
+      "want": "found"
+    },
+    {
+      "label": "a dropped case beside a new test with a list of the same shape",
+      "file": "test/codes.test.js",
+      "before": "import { test } from 'node:test';\nimport assert from 'node:assert';\nimport { isValid, normalize } from '../src/codes.js';\n\ntest('accepts', () => {\n  const cases = ['A1-22', 'B3-44', 'C5-66'];\n  for (const c of cases) assert.ok(isValid(c));\n});\n\ntest('normalizes', () => {\n  const cases = ['A1-22', 'B3-44', 'C5-66'];\n  for (const c of cases) assert.strictEqual(normalize(c.toLowerCase()), c);\n});\n",
+      "after": "import { test } from 'node:test';\nimport assert from 'node:assert';\nimport { isValid, normalize } from '../src/codes.js';\n\ntest('accepts', () => {\n  const cases = ['A1-22', 'B3-44', 'C5-66'];\n  for (const c of cases) assert.ok(isValid(c));\n});\n\ntest('rejects', () => {\n  const cases = ['', 'A1', '22'];\n  for (const c of cases) assert.ok(!isValid(c));\n});\n\ntest('normalizes', async () => {\n  const cases = ['A1-22', 'B3-44'];\n  for (const c of cases) assert.strictEqual(normalize(c.toLowerCase()), c);\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "a parametrize case dropped right below a new parametrized test",
+      "file": "tests/test_codes.py",
+      "before": "import pytest\nfrom codes import is_valid, roundtrip\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_accepts(code):\n    assert is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_roundtrip(code):\n    assert roundtrip(code) == code\n",
+      "after": "import pytest\nfrom codes import is_valid, roundtrip\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_accepts(code):\n    assert is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"\", \"A1\", \"22\"])\ndef test_rejects(code):\n    assert not is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\"])\ndef test_roundtrip(code):\n    assert roundtrip(code) == code\n",
+      "want": "found"
+    },
+    {
+      "label": "the same with a fixture added",
+      "file": "tests/test_codes.py",
+      "before": "import pytest\nfrom codes import is_valid, roundtrip\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_accepts(code):\n    assert is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_roundtrip(code):\n    assert roundtrip(code) == code\n",
+      "after": "import pytest\nfrom codes import is_valid, roundtrip\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_accepts(code):\n    assert is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"\", \"A1\", \"22\"])\ndef test_rejects(code):\n    assert not is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\"])\ndef test_roundtrip(code, db):\n    assert roundtrip(code) == code\n",
+      "want": "found"
+    },
+    {
+      "label": "tests made async with a same-named test added above",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "want": "quiet"
+    },
+    {
+      "label": "one test made async with same-named tests added above and below",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as root', () => {\n  beforeEach(() => login('root'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "want": "quiet"
+    },
+    {
+      "label": "Python tests given a fixture beside a same-named class above",
+      "file": "tests/test_users.py",
+      "before": "from app import get\n\n\nclass TestGuest:\n    def test_lists_users(self, client):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 2\n\n\nclass TestAdmin:\n    def test_lists_users(self, client):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 3\n",
+      "after": "from app import get\n\n\nclass TestOwner:\n    def test_lists_users(self, client, db):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 3\n\n\nclass TestGuest:\n    def test_lists_users(self, client, db):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 2\n\n\nclass TestAdmin:\n    def test_lists_users(self, client, db):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n        assert len(res.json()) == 3\n",
+      "want": "quiet"
+    },
+    {
+      "label": "a same-named test added below",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as guest', () => {\n  beforeEach(() => login('guest'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', async () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "want": "quiet"
+    },
+    {
+      "label": "two describe blocks of same-named tests swapped",
+      "file": "test/api.test.js",
+      "before": "import { describe, it } from 'node:test';\nimport assert from 'node:assert';\nimport { get } from '../src/app.js';\n\ndescribe('GET /users', () => {\n  it('returns ok', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('GET /orders', () => {\n  it('returns ok', () => {\n    const res = get('/orders');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it } from 'node:test';\nimport assert from 'node:assert';\nimport { get } from '../src/app.js';\n\ndescribe('GET /orders', () => {\n  it('returns ok', () => {\n    const res = get('/orders');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('GET /users', () => {\n  it('returns ok', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n",
+      "want": "quiet"
+    },
+    {
+      "label": "the middle two of three such blocks swapped",
+      "file": "test/api.test.js",
+      "before": "import { describe, it } from 'node:test';\nimport assert from 'node:assert';\nimport { get } from '../src/app.js';\n\ndescribe('GET /users', () => {\n  it('returns ok', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('GET /orders', () => {\n  it('returns ok', () => {\n    const res = get('/orders');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('GET /items', () => {\n  it('returns ok', () => {\n    const res = get('/items');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 4);\n  });\n});\n",
+      "after": "import { describe, it } from 'node:test';\nimport assert from 'node:assert';\nimport { get } from '../src/app.js';\n\ndescribe('GET /items', () => {\n  it('returns ok', () => {\n    const res = get('/items');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 4);\n  });\n});\n\ndescribe('GET /users', () => {\n  it('returns ok', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 2);\n  });\n});\n\ndescribe('GET /orders', () => {\n  it('returns ok', () => {\n    const res = get('/orders');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "want": "quiet"
+    },
+    {
+      "label": "a parametrized test added above with a fixture",
+      "file": "tests/test_codes.py",
+      "before": "import pytest\nfrom codes import is_valid, roundtrip\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_accepts(code):\n    assert is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_roundtrip(code):\n    assert roundtrip(code) == code\n",
+      "after": "import pytest\nfrom codes import is_valid, roundtrip\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_accepts(code):\n    assert is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"\", \"A1\", \"22\"])\ndef test_rejects(code):\n    assert not is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_roundtrip(code, db):\n    assert roundtrip(code) == code\n",
+      "want": "quiet"
+    }
+  ];
+  for (const c of cases27) {
+    const got = scan27(c.file, c.before, c.after);
+    if (c.want === 'found') check(`scan: ${c.label} is read`, /changed|flipped|weakened|removed/.test(got), got);
+    else check(`scan, honest: ${c.label} is not sent back`, got === '', got);
+  }
+
+  // 6: 30,000 same-named tests made async, with one added at the end
+  const t27 = (i) => `it('works', () => {\n  expect(run(${i})).toBe(${i});\n});`;
+  const many27 = Array.from({ length: 30000 }, (_, i) => t27(i)).join('\n');
+  const before27 = "import { it, expect } from 'vitest';\n" + many27 + '\n';
+  const after27 = "import { it, expect } from 'vitest';\n" + many27.replace(/\(\) => \{/g, 'async () => {') + '\n' + t27(30000) + '\n';
+  const d27 = realDiff27('test/a.test.js', before27, after27);
+  const s27 = Date.now();
+  tamperFindings('M\ttest/a.test.js', d27, { read: () => after27, tests: () => [] });
+  check('scan: 30,000 same-named tests made async are read in under 2 seconds', Date.now() - s27 < 2000, `${Date.now() - s27} ms`);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);
