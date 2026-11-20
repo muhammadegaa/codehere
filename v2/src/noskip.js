@@ -412,36 +412,95 @@ function dropped(big, small) {
   return j === small.length ? gone : null;
 }
 
-// The test each line sits in, read over the whole text (a Java, C# or Rust name sits a line below its annotation):
-// the last test whose name starts at or above the line, keyed by its name and how many tests of that name came before
-// it (two describes can each hold a test of one name), or null above the first test. Read once a file (round 25).
+// The test each line sits in: the last test whose name starts at or above it, read over the whole text (a Java, C#
+// or Rust name sits a line below its annotation), or null above the first test (round 25). Old tests are keyed by name
+// and occurrence. A new test whose name line did not change keeps its old key; the others take the old keys of their
+// name left over, in order. With more new than old, a test of one name added beside another is not that test (round
+// 26). Read once a file.
 function testsOf(file) {
   if (file.tests !== undefined) return file.tests;
+  if (!file.oldLines || !file.newLines) return (file.tests = null);
   const lang = languageOf(file.path);
-  const walk = (lines) => {
-    const starts = [...nameMatches(lines.join('\n'), lang)].sort((x, y) => x[0] - y[0]);
-    const seen = new Map();
-    let [s, at, cur] = [0, 0, null];
-    return lines.map((l) => {
+  const startsOf = (lines) => {
+    const matches = [...nameMatches(lines.join('\n'), lang)].sort((x, y) => x[0] - y[0]);
+    const out = [];
+    let [m, at] = [0, 0];
+    lines.forEach((l, i) => {
       at += l.length;
-      for (; s < starts.length && starts[s][0] <= at; s++) {
-        const n = (seen.get(starts[s][1]) || 0) + 1;
-        seen.set(starts[s][1], n);
-        cur = `${starts[s][1]}\0${n}`;
-      }
+      for (; m < matches.length && matches[m][0] <= at; m++) out.push({ line: i + 1, name: matches[m][1] });
       at += 1;
+    });
+    return out;
+  };
+  const olds = startsOf(file.oldLines);
+  const count = new Map();
+  for (const t of olds) {
+    count.set(t.name, (count.get(t.name) || 0) + 1);
+    t.key = `${t.name}\0${count.get(t.name)}`;
+  }
+  // each unchanged line of the new file and the old line it was
+  const added = new Set(file.added.map((x) => x.line));
+  const removed = new Set(file.removed.map((x) => x.line));
+  const toOld = new Map();
+  for (let o = 1, n = 1; n <= file.newLines.length; n++) {
+    if (added.has(n)) continue;
+    while (removed.has(o)) o++;
+    toOld.set(n, o++);
+  }
+  const oldAt = new Map(olds.map((t) => [`${t.line}\0${t.name}`, t]));
+  const kept = new Set();
+  const news = startsOf(file.newLines);
+  for (const t of news) {
+    const o = oldAt.get(`${toOld.get(t.line)}\0${t.name}`);
+    if (o && !kept.has(o)) kept.add(o), (t.key = o.key);
+  }
+  const group = (list, pick) => {
+    const m = new Map();
+    for (const t of list) if (pick(t)) (m.get(t.name) ?? m.set(t.name, []).get(t.name)).push(t);
+    return m;
+  };
+  const pool = group(olds, (t) => !kept.has(t));
+  // with more new tests of a name than old, a new one keeps an old key only when the line after its name line matches
+  // that of exactly one old test of the name and of no other new one (the route or input it checks)
+  const next = (lines, t) => normalizeLine(lines.slice(t.line).find((l) => l.trim()) ?? '');
+  const once = (list, lines) => {
+    const m = new Map();
+    for (const t of list) {
+      const k = next(lines, t);
+      m.set(k, m.has(k) ? null : t);
+    }
+    return m;
+  };
+  let fresh = 0;
+  for (const [name, waiting] of group(news, (t) => !t.key)) {
+    const old = pool.get(name) ?? [];
+    if (waiting.length <= old.length) {
+      waiting.forEach((t, i) => (t.key = old[i].key));
+      continue;
+    }
+    const [olds1, news1] = [once(old, file.oldLines), once(waiting, file.newLines)];
+    for (const t of waiting) {
+      const k = next(file.newLines, t);
+      const o = news1.get(k) === t ? olds1.get(k) : null;
+      t.key = o ? o.key : `${name}\0+${++fresh}`;
+    }
+  }
+  const spread = (lines, starts) => {
+    let [s, cur] = [0, null];
+    return lines.map((_, i) => {
+      for (; s < starts.length && starts[s].line <= i + 1; s++) cur = starts[s].key;
       return cur;
     });
   };
-  file.tests = file.oldLines && file.newLines ? { old: walk(file.oldLines), now: walk(file.newLines) } : null;
+  file.tests = { old: spread(file.oldLines, olds), now: spread(file.newLines, news) };
   return file.tests;
 }
 
 // A removed line pairs first with its exact copy in the same test, so a test that only moved keeps its lines (round
-// 24). It pairs with a line of another test only when its text is left nowhere in the file: a value changed or
-// swapped between two tests is read, and a list or helper outside any test, which a new test above moves into
-// another one's span, is still compared (round 25). A line in no test, or without the file read, looks for its copy
-// in its own hunk.
+// 24). It pairs with a line of another test only when its text was added nowhere (a copy on an unchanged line did
+// not move: round 26): a value changed or swapped between two tests is read, and a list or helper outside any test,
+// which a new test above moves into another one's span, is still compared (round 25). A line in no test, or without
+// the file read, looks for its copy in its own hunk.
 function pairing(file) {
   const tests = testsOf(file);
   const at = (side, line) => (tests ? (tests[side][line - 1] ?? null) : null);
@@ -462,9 +521,9 @@ function pairing(file) {
     return line !== undefined;
   };
   const whole = tests && index(file.added, (a) => `${at('now', a.line)}\0${normalizeLine(a.text)}`);
-  const left = tests && new Set(file.newLines.map(normalizeLine));
+  const left = tests && new Set(file.added.map((a) => normalizeLine(a.text)));
   const perHunk = new Map();
-  const gone = new Map(); // a removed line whose text is left nowhere in the file
+  const gone = new Map(); // a removed line whose text was added nowhere
   return {
     taken,
     same: (r, a) => {

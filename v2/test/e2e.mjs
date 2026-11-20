@@ -5197,6 +5197,127 @@ section(['R25'], () => {
   check('scan: a rewritten file of 4,000 list lines is read in under 3 seconds', Date.now() - t25 < 3000, `${Date.now() - t25} ms`);
 });
 
+section(['R26'], () => {
+  // The cold review's round 26 (docs/reviews/2026-11-20-cold-review-round-26.md): its own inputs.
+  const realDiff26 = (file, before, after) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'r26-'));
+    fs.mkdirSync(path.join(d, 'a', path.dirname(file)), { recursive: true });
+    fs.mkdirSync(path.join(d, 'b', path.dirname(file)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'a', file), before);
+    fs.writeFileSync(path.join(d, 'b', file), after);
+    const out = spawnSync('git', ['diff', '--no-index', '--no-color', '-U0', `a/${file}`, `b/${file}`], { cwd: d, encoding: 'utf8' }).stdout;
+    return out.replace(/^--- a\/a\//m, '--- a/').replace(/^\+\+\+ b\/b\//m, '+++ b/');
+  };
+  const cases26 = [
+    {
+      "label": "a test copied above under the same name while the old one is weakened",
+      "want": "found",
+      "file": "test/api.test.js",
+      "before": "import { describe, it } from 'node:test';\nimport assert from 'node:assert';\nimport { get } from '../src/app.js';\n\ndescribe('GET /users', () => {\n  it('returns ok', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n  });\n});\n",
+      "after": "import { describe, it } from 'node:test';\nimport assert from 'node:assert';\nimport { get } from '../src/app.js';\n\ndescribe('GET /health', () => {\n  it('returns ok', () => {\n    const res = get('/health');\n    assert.strictEqual(res.status, 200);\n  });\n});\n\ndescribe('GET /users', () => {\n  it('returns ok', () => {\n    const res = get('/users');\n    assert.ok(res.status);\n  });\n});\n"
+    },
+    {
+      "label": "a value changed in a test while a same-named one is added above it",
+      "want": "found",
+      "file": "test/api.test.js",
+      "before": "import { describe, it, expect } from 'vitest';\nimport request from 'supertest';\nimport { app } from '../src/app.js';\n\ndescribe('GET /users', () => {\n  it('returns ok', async () => {\n    const res = await request(app).get('/users');\n    expect(res.status).toBe(200);\n  });\n});\n\ndescribe('GET /orders', () => {\n  it('returns ok', async () => {\n    const res = await request(app).get('/orders');\n    expect(res.status).toBe(200);\n    expect(res.body.length).toBe(3);\n  });\n});\n",
+      "after": "import { describe, it, expect } from 'vitest';\nimport request from 'supertest';\nimport { app } from '../src/app.js';\n\ndescribe('GET /health', () => {\n  it('returns ok', async () => {\n    const res = await request(app).get('/health');\n    expect(res.status).toBe(200);\n  });\n});\n\ndescribe('GET /users', () => {\n  it('returns ok', async () => {\n    const res = await request(app).get('/users');\n    expect(res.status).toBe(200);\n  });\n});\n\ndescribe('GET /orders', () => {\n  it('returns ok', async () => {\n    const res = await request(app).get('/orders');\n    expect(res.status).toBe(404);\n    expect(res.body.length).toBe(3);\n  });\n});\n"
+    },
+    {
+      "label": "a Python method weakened while a class above holds a copy of it",
+      "want": "found",
+      "file": "tests/test_api.py",
+      "before": "from app import client\n\n\nclass TestUsers:\n    def test_returns_ok(self, client):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n",
+      "after": "from app import client\n\n\nclass TestHealth:\n    def test_returns_ok(self, client):\n        res = client.get(\"/health\")\n        assert res.status_code == 200\n\n\nclass TestUsers:\n    def test_returns_ok(self, client):\n        res = client.get(\"/users\")\n        assert res.status_code\n"
+    },
+    {
+      "label": "a Python value changed while a class above holds a copy of it",
+      "want": "found",
+      "file": "tests/test_api.py",
+      "before": "from app import client\n\n\nclass TestUsers:\n    def test_returns_ok(self, client):\n        res = client.get(\"/users\")\n        assert res.status_code == 200\n",
+      "after": "from app import client\n\n\nclass TestHealth:\n    def test_returns_ok(self, client):\n        res = client.get(\"/health\")\n        assert res.status_code == 200\n\n\nclass TestUsers:\n    def test_returns_ok(self, client):\n        res = client.get(\"/users\")\n        assert res.status_code == 500\n"
+    },
+    {
+      "label": "a Go check weakened while another table's test keeps the old line",
+      "want": "found",
+      "file": "calc/calc_test.go",
+      "before": "package calc\n\nimport (\n\t\"testing\"\n\n\t\"github.com/stretchr/testify/assert\"\n)\n\nfunc TestDouble(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 2},\n\t\t{name: \"two\", in: 2, want: 4},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Double(tt.in)\n\t\t\tassert.Equal(t, tt.want, got)\n\t\t})\n\t}\n}\n\nfunc TestTriple(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 3},\n\t\t{name: \"two\", in: 2, want: 6},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Triple(tt.in)\n\t\t\tassert.Equal(t, tt.want, got)\n\t\t})\n\t}\n}\n",
+      "after": "package calc\n\nimport (\n\t\"testing\"\n\n\t\"github.com/stretchr/testify/assert\"\n)\n\nfunc TestDouble(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 2},\n\t\t{name: \"two\", in: 2, want: 4},\n\t\t{name: \"zero\", in: 0, want: 0},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Double(tt.in)\n\t\t\tassert.NotNil(t, got)\n\t\t})\n\t}\n}\n\nfunc TestTriple(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 3},\n\t\t{name: \"two\", in: 2, want: 6},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Triple(tt.in)\n\t\t\tassert.Equal(t, tt.want, got)\n\t\t})\n\t}\n}\n"
+    },
+    {
+      "label": "a Go check flipped while another table's test keeps the old line",
+      "want": "found",
+      "file": "calc/calc_test.go",
+      "before": "package calc\n\nimport (\n\t\"testing\"\n\n\t\"github.com/stretchr/testify/assert\"\n)\n\nfunc TestDouble(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 2},\n\t\t{name: \"two\", in: 2, want: 4},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Double(tt.in)\n\t\t\tassert.Equal(t, tt.want, got)\n\t\t})\n\t}\n}\n\nfunc TestTriple(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 3},\n\t\t{name: \"two\", in: 2, want: 6},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Triple(tt.in)\n\t\t\tassert.Equal(t, tt.want, got)\n\t\t})\n\t}\n}\n",
+      "after": "package calc\n\nimport (\n\t\"testing\"\n\n\t\"github.com/stretchr/testify/assert\"\n)\n\nfunc TestDouble(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 2},\n\t\t{name: \"two\", in: 2, want: 4},\n\t\t{name: \"zero\", in: 0, want: 0},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Double(tt.in)\n\t\t\tassert.NotEqual(t, tt.want, got)\n\t\t})\n\t}\n}\n\nfunc TestTriple(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 3},\n\t\t{name: \"two\", in: 2, want: 6},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Triple(tt.in)\n\t\t\tassert.Equal(t, tt.want, got)\n\t\t})\n\t}\n}\n"
+    },
+    {
+      "label": "a Go row's want changed while a same-named row is added to an earlier table",
+      "want": "found",
+      "file": "text/text_test.go",
+      "before": "package text\n\nimport \"testing\"\n\nfunc TestWords(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   string\n\t\twant int\n\t}{\n\t\t{\n\t\t\tname: \"one word\",\n\t\t\tin:   \"a\",\n\t\t\twant: 1,\n\t\t},\n\t\t{\n\t\t\tname: \"two words\",\n\t\t\tin:   \"a b\",\n\t\t\twant: 2,\n\t\t},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tif got := Words(tt.in); got != tt.want {\n\t\t\t\tt.Errorf(\"got %d, want %d\", got, tt.want)\n\t\t\t}\n\t\t})\n\t}\n}\n\nfunc TestLines(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   string\n\t\twant int\n\t}{\n\t\t{\n\t\t\tname: \"empty\",\n\t\t\tin:   \"\",\n\t\t\twant: 0,\n\t\t},\n\t\t{\n\t\t\tname: \"one line\",\n\t\t\tin:   \"a\",\n\t\t\twant: 1,\n\t\t},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tif got := Lines(tt.in); got != tt.want {\n\t\t\t\tt.Errorf(\"got %d, want %d\", got, tt.want)\n\t\t\t}\n\t\t})\n\t}\n}\n",
+      "after": "package text\n\nimport \"testing\"\n\nfunc TestWords(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   string\n\t\twant int\n\t}{\n\t\t{\n\t\t\tname: \"empty\",\n\t\t\tin:   \"\",\n\t\t\twant: 0,\n\t\t},\n\t\t{\n\t\t\tname: \"one word\",\n\t\t\tin:   \"a\",\n\t\t\twant: 1,\n\t\t},\n\t\t{\n\t\t\tname: \"two words\",\n\t\t\tin:   \"a b\",\n\t\t\twant: 2,\n\t\t},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tif got := Words(tt.in); got != tt.want {\n\t\t\t\tt.Errorf(\"got %d, want %d\", got, tt.want)\n\t\t\t}\n\t\t})\n\t}\n}\n\nfunc TestLines(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   string\n\t\twant int\n\t}{\n\t\t{\n\t\t\tname: \"empty\",\n\t\t\tin:   \"\",\n\t\t\twant: 1,\n\t\t},\n\t\t{\n\t\t\tname: \"one line\",\n\t\t\tin:   \"a\",\n\t\t\twant: 1,\n\t\t},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tif got := Lines(tt.in); got != tt.want {\n\t\t\t\tt.Errorf(\"got %d, want %d\", got, tt.want)\n\t\t\t}\n\t\t})\n\t}\n}\n"
+    },
+    {
+      "label": "a parametrize case dropped while another test keeps the same decorator",
+      "want": "found",
+      "file": "tests/test_codes.py",
+      "before": "import pytest\nfrom codes import is_valid, roundtrip\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_accepts(code):\n    assert is_valid(code)\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_roundtrip(code):\n    assert roundtrip(code) == code\n",
+      "after": "import pytest\nfrom codes import is_valid, roundtrip\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_accepts(code):\n    assert is_valid(code)\n\n\ndef test_rejects_none():\n    assert not is_valid(None)\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\"])\ndef test_roundtrip(code):\n    assert roundtrip(code) == code\n"
+    },
+    {
+      "label": "a case dropped from the second of two loops over one list, a test added between",
+      "want": "found",
+      "file": "test/codes.test.js",
+      "before": "import { test } from 'node:test';\nimport assert from 'node:assert';\nimport { isValid, normalize } from '../src/codes.js';\n\nfor (const code of ['A1-22', 'B3-44', 'C5-66']) {\n  test(`accepts ${code}`, () => {\n    assert.strictEqual(isValid(code), true);\n  });\n}\n\nfor (const code of ['A1-22', 'B3-44', 'C5-66']) {\n  test(`normalizes ${code}`, () => {\n    assert.strictEqual(normalize(code.toLowerCase()), code);\n  });\n}\n",
+      "after": "import { test } from 'node:test';\nimport assert from 'node:assert';\nimport { isValid, normalize } from '../src/codes.js';\n\nfor (const code of ['A1-22', 'B3-44', 'C5-66']) {\n  test(`accepts ${code}`, () => {\n    assert.strictEqual(isValid(code), true);\n  });\n}\n\ntest('rejects empty', () => {\n  assert.strictEqual(isValid(''), false);\n});\n\nfor (const code of ['A1-22', 'B3-44']) {\n  test(`normalizes ${code}`, () => {\n    assert.strictEqual(normalize(code.toLowerCase()), code);\n  });\n}\n"
+    },
+    {
+      "label": "tests wrapped with a same-named test in a new group above",
+      "want": "quiet",
+      "file": "test/parse.test.js",
+      "before": "import { describe, it, expect } from 'vitest';\nimport { parse } from '../src/parse.js';\n\ndescribe('strict mode', () => {\n  it('handles a trailing comma', () => {\n    const result = parse('[1,]', { strict: true });\n    expect(result).toBe(false);\n  });\n});\n",
+      "after": "import { describe, it, expect } from 'vitest';\nimport { parse } from '../src/parse.js';\n\ndescribe('parse', () => {\n  describe('lenient mode', () => {\n    it('handles a trailing comma', () => {\n      const result = parse('[1,]', { strict: false });\n      expect(result).toBe(true);\n    });\n  });\n\n  describe('strict mode', () => {\n    it('handles a trailing comma', () => {\n      const result = parse('[1,]', { strict: true });\n      expect(result).toBe(false);\n    });\n  });\n});\n"
+    },
+    {
+      "label": "tests wrapped with a same-named test in a new group below",
+      "want": "quiet",
+      "file": "test/parse.test.js",
+      "before": "import { describe, it, expect } from 'vitest';\nimport { parse } from '../src/parse.js';\n\ndescribe('strict mode', () => {\n  it('handles a trailing comma', () => {\n    const result = parse('[1,]', { strict: true });\n    expect(result).toBe(false);\n  });\n});\n",
+      "after": "import { describe, it, expect } from 'vitest';\nimport { parse } from '../src/parse.js';\n\ndescribe('parse', () => {\n  describe('strict mode', () => {\n    it('handles a trailing comma', () => {\n      const result = parse('[1,]', { strict: true });\n      expect(result).toBe(false);\n    });\n  });\n\n  describe('lenient mode', () => {\n    it('handles a trailing comma', () => {\n      const result = parse('[1,]', { strict: false });\n      expect(result).toBe(true);\n    });\n  });\n});\n"
+    },
+    {
+      "label": "a Python test moved into a class with a same-named one in a new class above",
+      "want": "quiet",
+      "file": "tests/test_parse.py",
+      "before": "from parse import parse\n\n\ndef test_trailing_comma():\n    result = parse(\"[1,]\", strict=True)\n    assert result is False\n",
+      "after": "from parse import parse\n\n\nclass TestLenient:\n    def test_trailing_comma(self):\n        result = parse(\"[1,]\", strict=False)\n        assert result is True\n\n\nclass TestStrict:\n    def test_trailing_comma(self):\n        result = parse(\"[1,]\", strict=True)\n        assert result is False\n"
+    },
+    {
+      "label": "two same-named tests wrapped with a third added at the top",
+      "want": "quiet",
+      "file": "test/parse.test.js",
+      "before": "import { describe, it, expect } from 'vitest';\nimport { parse } from '../src/parse.js';\n\ndescribe('strict mode', () => {\n  it('handles a trailing comma', () => {\n    const result = parse('[1,]', { strict: true });\n    expect(result).toBe(false);\n  });\n});\n\ndescribe('loose mode', () => {\n  it('handles a trailing comma', () => {\n    const result = parse('[1,]', { strict: false });\n    expect(result).toBe(true);\n  });\n});\n",
+      "after": "import { describe, it, expect } from 'vitest';\nimport { parse } from '../src/parse.js';\n\ndescribe('parse', () => {\n  describe('json5 mode', () => {\n    it('handles a trailing comma', () => {\n      const result = parse('[1,]', { strict: null });\n      expect(result).toBe(true);\n    });\n  });\n\n  describe('strict mode', () => {\n    it('handles a trailing comma', () => {\n      const result = parse('[1,]', { strict: true });\n      expect(result).toBe(false);\n    });\n  });\n\n  describe('loose mode', () => {\n    it('handles a trailing comma', () => {\n      const result = parse('[1,]', { strict: false });\n      expect(result).toBe(true);\n    });\n  });\n});\n"
+    }
+  ];
+  for (const c of cases26) {
+    const got = tamperFindings(`M\t${c.file}`, realDiff26(c.file, c.before, c.after), { read: () => c.after, tests: () => [] }).join(' · ');
+    if (c.want === 'found') check(`scan: ${c.label} is read`, /changed|flipped|weakened|removed/.test(got), got);
+    else check(`scan, honest: ${c.label} is not sent back`, got === '', got);
+  }
+
+  // tests wrapped while a test of the same name is copied beside the old one, which is weakened
+  const head26 = "import { describe, it } from 'node:test';\nimport assert from 'node:assert';\n";
+  const blk26 = (route, check, ind) => [`describe('GET ${route}', () => {`, "  it('returns ok', () => {", `    const res = get('${route}');`, `    ${check}`, '  });', '});'].map((l) => ind + l).join('\n');
+  const old26 = `${head26}\n${blk26('/users', 'assert.strictEqual(res.status, 200);', '')}\n`;
+  const copy26 = blk26('/health', 'assert.strictEqual(res.status, 200);', '  ');
+  for (const [where, after] of [['above', `${head26}\ndescribe('api', () => {\n${copy26}\n\n${blk26('/users', 'assert.ok(res.status);', '  ')}\n});\n`], ['below', `${head26}\ndescribe('api', () => {\n${blk26('/users', 'assert.ok(res.status);', '  ')}\n\n${copy26}\n});\n`]]) {
+    const got = tamperFindings('M\ttest/api.test.js', realDiff26('test/api.test.js', old26, after), { read: () => after, tests: () => [] }).join(' · ');
+    check(`scan: tests wrapped with a same-named copy ${where} the old test, which is weakened, is read`, got.includes('weakened'), got);
+  }
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);
