@@ -4991,6 +4991,71 @@ section(['R23'], () => {
   check("scan: a wrapped toThrow( whose message is dropped is read as weakened", drop23.includes('weakened'), drop23);
 });
 
+section(['R24'], () => {
+  // The cold review's round 24 (docs/reviews/2026-11-20-cold-review-round-24.md).
+  const realDiff24 = (file, before, after) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'r24-'));
+    fs.mkdirSync(path.join(d, 'a', path.dirname(file)), { recursive: true });
+    fs.mkdirSync(path.join(d, 'b', path.dirname(file)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'a', file), before);
+    fs.writeFileSync(path.join(d, 'b', file), after);
+    const out = spawnSync('git', ['diff', '--no-index', '--no-color', '-U0', `a/${file}`, `b/${file}`], { cwd: d, encoding: 'utf8' }).stdout;
+    return out.replace(/^--- a\/a\//m, '--- a/').replace(/^\+\+\+ b\/b\//m, '+++ b/');
+  };
+  const scan24 = (file, before, after) => tamperFindings(`M\t${file}`, realDiff24(file, before, after), { read: () => after, tests: () => [] }).join(' · ');
+  const head = "import { test, describe, expect } from 'vitest';\n";
+  const t24 = (n, arg, v, ind) => [`test('${n}', () => {`, `  const result = isValidCode('${arg}');`, `  expect(result).toBe(${v});`, '});'].map((l) => ind + l).join('\n');
+
+  // 1: two tests' expected values swapped, in place and while wrapping
+  const swapB = `${head}\n${t24('accepts', 'A1-22', true, '')}\n\n${t24('rejects', 'A1', false, '')}\n`;
+  for (const [name, after] of [['in place', `${head}\n${t24('accepts', 'A1-22', false, '')}\n\n${t24('rejects', 'A1', true, '')}\n`], ['while wrapping', `${head}\ndescribe('code', () => {\n${t24('accepts', 'A1-22', false, '  ')}\n\n${t24('rejects', 'A1', true, '  ')}\n});\n`]]) {
+    const got = scan24('test/code.test.js', swapB, after);
+    check(`scan: two tests' expected values swapped (${name}) is read`, /changed|flipped/.test(got), got);
+  }
+  const pySwapB = 'def test_accepts():\n    result = is_valid("A1-22")\n    assert result is True\n\ndef test_rejects():\n    result = is_valid("A1")\n    assert result is False\n';
+  const pySwap = scan24('tests/test_code.py', pySwapB, pySwapB.replace('is True', '@@').replace('is False', 'is True').replace('@@', 'is False'));
+  check("scan: two Python tests' expected values swapped is read", /changed|flipped/.test(pySwap), pySwap);
+
+  // 2: a wrap with a new test above whose list is shorter
+  const sh = "import { test, describe, expect } from 'vitest';\nimport { stats } from '../src/stats.js';\n";
+  const statsOld = `${sh}\ntest('averages', () => {\n  expect(stats([1, 2, 3])).toEqual({\n    mean: 2,\n    max: 3,\n  });\n});\n`;
+  const statsNew = `${sh}\ndescribe('stats', () => {\n  test('one value', () => {\n    expect(stats([1])).toEqual({\n      mean: 1,\n      max: 1,\n    });\n  });\n\n  test('averages', () => {\n    expect(stats([1, 2, 3])).toEqual({\n      mean: 2,\n      max: 3,\n    });\n  });\n});\n`;
+  const shorter = scan24('test/stats.test.js', statsOld, statsNew);
+  check('scan, honest: a wrap with a new test above whose list is shorter is not a dropped case', shorter === '', shorter);
+  const pyShorter = scan24('tests/test_stats.py', 'def test_averages():\n    assert stats([1, 2, 3]) == {\n        "mean": 2,\n        "max": 3,\n    }\n', 'class TestStats:\n    def test_one(self):\n        assert stats([1]) == {\n            "mean": 1,\n            "max": 1,\n        }\n\n    def test_averages(self):\n        assert stats([1, 2, 3]) == {\n            "mean": 2,\n            "max": 3,\n        }\n');
+  check('scan, honest: Python tests moved into a class with a new test above whose list is shorter is not a dropped case', pyShorter === '', pyShorter);
+  const listCheat = scan24('test/stats.test.js', statsOld, `${sh}\ndescribe('stats', () => {\n  test('one value', () => {\n    expect(stats([1, 2, 3])).toEqual({\n      mean: 2,\n      max: 3,\n    });\n  });\n\n  test('averages', () => {\n    expect(stats([1, 2])).toEqual({\n      mean: 2,\n      max: 3,\n    });\n  });\n});\n`);
+  check("scan: a case dropped from a test's list while its old line moves to a new test is read", listCheat.includes('case was removed'), listCheat);
+
+  // 3: the round 23 wrap with a new test, with blank lines between tests (git's diff splits the wrap there)
+  const ph = "import { test, describe, expect } from 'vitest';\nimport { parse } from '../src/parse.js';\n";
+  const pt = [['parses one', "parse('a=1')", ['  expect(result).toEqual({ a: 1 });']], ['parses two', "parse('a=1;b=2')", ['  expect(result).toEqual({ a: 1, b: 2 });']], ['parses nested', "parse('a.b=1')", ['  expect(result).toEqual({', '    a: { b: 1 },', '  });']]];
+  const empty = ['empty', "parse('')", ['  expect(result).toBeNull();']];
+  const pbody = ([n, call, as], i) => [`test('${n}', () => {`, `  const result = ${call};`, ...as, '});'].map((l) => i + l).join('\n');
+  for (const [count, at] of [[2, 2], [3, 0]]) {
+    const olds = pt.slice(0, count);
+    const list = [...olds];
+    list.splice(at, 0, empty);
+    const got = scan24('test/parse.test.js', `${ph}\n${olds.map((x) => pbody(x, '')).join('\n\n')}\n`, `${ph}\ndescribe('parse', () => {\n${list.map((x) => pbody(x, '  ')).join('\n\n')}\n});\n`);
+    check(`scan, honest: ${count} tests wrapped with a new test at ${at}, blank lines between them, is not a changed assertion`, got === '', got);
+  }
+
+  // 5: a value changed while a new test keeps the old line
+  const fh = "import { test, describe, expect } from 'vitest';\nimport { f } from '../src/f.js';\n";
+  const keep = scan24('test/f.test.js', `${fh}\ntest('a', () => {\n  const result = f(1);\n  expect(result).toBe(3);\n});\n`, `${fh}\ndescribe('f', () => {\n  test('a', () => {\n    const result = f(1);\n    expect(result).toBe(4);\n  });\n  test('b', () => {\n    const result = f(2);\n    expect(result).toBe(3);\n  });\n});\n`);
+  check("scan: a value changed while a new test keeps the old assertion's text is read", keep.includes('changed'), keep);
+
+  // 6: tests reordered inside a new describe, blank lines between them
+  const ts = [['parses one', "parse('a=1')", ['  expect(result).toEqual({ a: 1 });']], ['parses two', "parse('a=1;b=2')", ['  expect(result).toEqual({ a: 1, b: 2 });']], ['empty', "parse('')", ['  expect(result).toBeNull();']], ['parses nested', "parse('a.b=1')", ['  expect(result).toEqual({', '    a: { b: 1 },', '  });']]];
+  const body = ([n, call, as], i) => [`test('${n}', () => {`, `  const result = ${call};`, ...as, '});'].map((l) => i + l).join('\n');
+  const reorder = scan24('test/parse.test.js', `${head}\n${ts.map((x) => body(x, '')).join('\n\n')}\n`, `${head}\ndescribe('parse', () => {\n${[...ts].reverse().map((x) => body(x, '  ')).join('\n\n')}\n});\n`);
+  check('scan, honest: tests reordered inside a new describe, blank lines between them, is not a changed assertion', reorder === '', reorder);
+
+  // 7: a stale comment naming an assertion deleted beside a wrapped placeholder
+  const stale = scan24('test/sanity.test.js', `${head}// TODO: expect(foo()).toBe(2) once fixed\ntest('sanity', () => {\n  expect(true).toBe(true);\n});\n`, `${head}describe('sanity', () => {\n  test('sanity', () => {\n    expect(true).toBe(true);\n  });\n});\n`);
+  check('scan, honest: a deleted comment is not a lost assertion', stale === '', stale);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

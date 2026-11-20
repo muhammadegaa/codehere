@@ -406,18 +406,74 @@ function dropped(big, small) {
   return j === small.length ? gone : null;
 }
 
+// The test each line sits in: the name on the nearest line at or above it that names one, or null. Read once a file.
+function testsOf(file) {
+  if (file.tests !== undefined) return file.tests;
+  const lang = languageOf(file.path);
+  const walk = (lines) => {
+    let cur = null;
+    return lines.map((l) => {
+      const names = extractTestNames(l, lang);
+      if (names.size) cur = names.keys().next().value;
+      return cur;
+    });
+  };
+  file.tests = file.oldLines && file.newLines ? { old: walk(file.oldLines), now: walk(file.newLines) } : null;
+  return file.tests;
+}
+
+// A removed line pairs only with an added line in the same test, and first with its exact copy there: a test that
+// only moved keeps its lines, and a value changed or swapped between two tests is still read (round 24). Without the
+// file read, a copy is looked for in the line's own hunk.
+function pairing(file) {
+  const tests = testsOf(file);
+  const at = (side, line) => (tests ? (tests[side][line - 1] ?? null) : null);
+  const index = (added, key) => {
+    const m = new Map();
+    for (const a of added) {
+      const k = key(a);
+      if (!m.has(k)) m.set(k, { lines: [], next: 0 });
+      m.get(k).lines.push(a.line);
+    }
+    return m;
+  };
+  const whole = tests && index(file.added, (a) => `${at('now', a.line)}\0${normalizeLine(a.text)}`);
+  const perHunk = new Map();
+  const taken = new Set();
+  return {
+    taken,
+    same: (r, a) => {
+      const [x, y] = [at('old', r.line), at('now', a.line)];
+      return x == null || y == null || x === y;
+    },
+    copy: (r, hunk) => {
+      if (!whole && !perHunk.has(hunk)) perHunk.set(hunk, index(hunk.added, (a) => normalizeLine(a.text)));
+      const c = whole ? whole.get(`${at('old', r.line)}\0${normalizeLine(r.text)}`) : perHunk.get(hunk).get(normalizeLine(r.text));
+      const line = c?.lines[c.next++];
+      if (line !== undefined) taken.add(line);
+      return line !== undefined;
+    },
+  };
+}
+
 // Items dropped from a list on one line whose rest is unchanged, and rows moved within their table. Whole rows
 // that disappear from multi-line tables are not reported: tables shrink when features go, so that signal is noise.
 function tableChanges(file) {
   const out = [];
+  const pair = pairing(file);
+  const lists = (r) => {
+    const pa = parseAssertion(r.text);
+    return (pa && pa.args !== null) || dataRow(r.text) ? null : inlineLists(r.text); // a spread assertion's first line still holds lists (round 23)
+  };
+  const moved = new Set();
+  for (const hunk of file.hunks) for (const r of hunk.removed) if (lists(r)?.lists.length && pair.copy(r, hunk)) moved.add(r.line);
   for (const hunk of file.hunks) {
-    const used = new Set();
+    const used = pair.taken;
     for (const r of hunk.removed) {
-      const pa = parseAssertion(r.text);
-      if ((pa && pa.args !== null) || dataRow(r.text)) continue; // a spread assertion's first line still holds lists (round 23)
-      const before = inlineLists(r.text);
-      if (!before.lists.length) continue;
-      const a = hunk.added.find((x) => !used.has(x.line) && inlineLists(x.text).shape === before.shape);
+      if (moved.has(r.line)) continue;
+      const before = lists(r);
+      if (!before?.lists.length) continue;
+      const a = hunk.added.find((x) => !used.has(x.line) && pair.same(r, x) && inlineLists(x.text).shape === before.shape);
       if (!a) continue;
       used.add(a.line);
       const after = inlineLists(a.text);
@@ -586,27 +642,18 @@ export function testChanges(diff, { read, isTestFile }) {
 
   // Assertions changed in place: each removed assertion against the first added one in its hunk that it matches.
   for (const file of files) {
-    // a removed assertion is paired first with its exact twin in the hunk, and two lines that each only moved (the
-    // removed text is added elsewhere in the file, the added text removed elsewhere) are not compared (round 23)
-    const texts = (list) => new Set(list.map((x) => normalizeLine(x.text)));
-    const gone = texts(file.removed);
-    const came = texts(file.added);
+    const pair = pairing(file);
+    const used = pair.taken;
+    const twins = new Set();
+    for (const hunk of file.hunks) for (const r of hunk.removed) if (parseAssertion(r.text) && pair.copy(r, hunk)) twins.add(r.line);
     for (const hunk of file.hunks) {
       if (!hunk.removed.length || !hunk.added.length) continue;
-      const rem = hunk.removed.map((r) => ({ ...r, a: parseAssertion(r.text) })).filter((x) => x.a);
+      const rem = hunk.removed.filter((r) => !twins.has(r.line)).map((r) => ({ ...r, a: parseAssertion(r.text) })).filter((x) => x.a);
       const add = hunk.added.map((x) => ({ ...x, a: parseAssertion(x.text) })).filter((x) => x.a);
       if (rem.length * add.length > 250000) continue; // a rewritten test file, not an edit; the other checks still read it
-      const used = new Set();
-      const twins = new Set();
       for (const r of rem) {
-        const twin = add.find((a) => !used.has(a.line) && normalizeLine(r.text) === normalizeLine(a.text));
-        if (twin) used.add(twin.line), twins.add(r.line);
-      }
-      for (const r of rem) {
-        if (twins.has(r.line)) continue;
         for (const a of add) {
-          if (used.has(a.line)) continue;
-          if (came.has(normalizeLine(r.text)) && gone.has(normalizeLine(a.text))) continue;
+          if (used.has(a.line) || !pair.same(r, a)) continue;
           if (normalizeLine(r.text) === normalizeLine(a.text)) {
             used.add(a.line);
             break;

@@ -1054,7 +1054,13 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       const both = new Map([...minus].filter(([t]) => plus.has(t)).map(([t, n]) => [t, Math.min(n, plus.get(t))]));
       if (both.size) movedLines.set(file, both);
       // an assertion removed that did not move elsewhere: a moved always-true line may have taken its place (round 23)
-      if ([...minus].some(([t, n]) => ASSERT.test(`-${t}`) && n > (both.get(t) || 0))) lostAssert.add(file);
+      // (a comment or a string naming an assertion is not one, as in the reading below: round 24)
+      const isAssert = (t) => {
+        const probe = `-${t}`.slice(0, 10000);
+        let m;
+        return !COMMENT.test(probe) && inCode(ASSERT, probe, () => (m ||= stringMask(probe)));
+      };
+      if ([...minus].some(([t, n]) => n > (both.get(t) || 0) && isAssert(t))) lostAssert.add(file);
     }
     for (const { file, body } of byFile) {
       if (!isTestConfig(file) || !read) continue;
