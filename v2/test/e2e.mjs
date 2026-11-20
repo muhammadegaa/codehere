@@ -5468,6 +5468,76 @@ section(['R27'], () => {
   check('scan: 30,000 same-named tests made async are read in under 2 seconds', Date.now() - s27 < 2000, `${Date.now() - s27} ms`);
 });
 
+section(['R28'], () => {
+  // The cold review's round 28 (docs/reviews/2026-11-20-cold-review-round-28.md): its own inputs.
+  const realDiff28 = (file, before, after) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'r28-'));
+    fs.mkdirSync(path.join(d, 'a', path.dirname(file)), { recursive: true });
+    fs.mkdirSync(path.join(d, 'b', path.dirname(file)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'a', file), before);
+    fs.writeFileSync(path.join(d, 'b', file), after);
+    const out = spawnSync('git', ['diff', '--no-index', '--no-color', '-U0', `a/${file}`, `b/${file}`], { cwd: d, encoding: 'utf8', maxBuffer: 1 << 30 }).stdout;
+    return out.replace(/^--- a\/a\//m, '--- a/').replace(/^\+\+\+ b\/b\//m, '+++ b/');
+  };
+  const cases28 = [
+    {
+      "label": "a value changed beside a same-named copy above, with a new test added right above it",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('hides deleted users', () => {\n    const res = get('/users?deleted=1');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 0);\n  });\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 4);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "a value changed beside a same-named copy above, with an afterEach added right above it",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach, afterEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login, reset } from '../src/app.js';\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach, afterEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login, reset } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n  afterEach(() => reset());\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 4);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "the same with a comment added right above it",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach, afterEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login, reset } from '../src/app.js';\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach, afterEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login, reset } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  // the seed data has four users since #212\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 4);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "a test weakened beside a same-named copy above, with a comment added right above it",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach, afterEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login, reset } from '../src/app.js';\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach, afterEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login, reset } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  // the seed data changes\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.ok(res.body.length);\n  });\n});\n",
+      "want": "found"
+    },
+    {
+      "label": "a same-named block copied above and a new test added, the old test unchanged",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('hides deleted users', () => {\n    const res = get('/users?deleted=1');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 0);\n  });\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "want": "quiet"
+    },
+    {
+      "label": "the same with the copy holding its own value",
+      "file": "test/users.test.js",
+      "before": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "after": "import { describe, it, beforeEach } from 'node:test';\nimport assert from 'node:assert';\nimport { get, login } from '../src/app.js';\n\ndescribe('as owner', () => {\n  beforeEach(() => login('owner'));\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 5);\n  });\n});\n\ndescribe('as admin', () => {\n  beforeEach(() => login('admin'));\n\n  it('hides deleted users', () => {\n    const res = get('/users?deleted=1');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 0);\n  });\n\n  it('lists users', () => {\n    const res = get('/users');\n    assert.strictEqual(res.status, 200);\n    assert.strictEqual(res.body.length, 3);\n  });\n});\n",
+      "want": "quiet"
+    }
+  ];
+  for (const c of cases28) {
+    const got = tamperFindings(`M\t${c.file}`, realDiff28(c.file, c.before, c.after), { read: () => c.after, tests: () => [] }).join(' · ');
+    if (c.want === 'found') check(`scan: ${c.label} is read`, /changed|flipped|weakened|removed/.test(got), got);
+    else check(`scan, honest: ${c.label} is not sent back`, got === '', got);
+  }
+
+  // 2: a rewritten file of 16,000 list lines, every one the same shape
+  const before28 = "import { test } from 'vitest';\n" + Array.from({ length: 16000 }, (_, i) => `  run([${i}, 1]);`).join('\n') + '\n';
+  const after28 = "import { test } from 'vitest';\n" + Array.from({ length: 16000 }, (_, i) => `  run([${i}, 2]);`).join('\n') + '\n';
+  const d28 = realDiff28('test/x.test.js', before28, after28);
+  const s28 = Date.now();
+  tamperFindings('M\ttest/x.test.js', d28, { read: () => after28, tests: () => [] });
+  check('scan: a rewritten file of 16,000 list lines of one shape is read in under 6 seconds', Date.now() - s28 < 6000, `${Date.now() - s28} ms`);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

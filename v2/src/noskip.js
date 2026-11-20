@@ -416,7 +416,7 @@ function dropped(big, small) {
 // name sits a line below its annotation; a Python test starts at its decorators, so a parametrize list is its own), or
 // null above the first test (round 25). Old tests are keyed by name and occurrence; each new test takes the old key it
 // was, by the first rule that places it (rounds 26 and 27):
-// 1. its name line did not change, nor did the line above it;
+// 1. its name line did not change, nor did the line above it, or its old line above and the line after its name;
 // 2. its name line was edited in place: the old one was removed, and the lines around the test did not change;
 // 3. the line above it (its describe or class line) matches that of exactly one old test of its name and one new one;
 // 4. the old keys of its name left over, in order; with more new than old, only when the line after its name matches
@@ -439,19 +439,19 @@ function testsOf(file) {
   const startsOf = (lines) => {
     const matches = [...nameMatches(lines.join('\n'), lang)].sort((x, y) => x[0] - y[0]);
     const out = [];
-    let [m, e, at] = [0, 0, 0];
+    let [m, e, offset] = [0, 0, 0];
     lines.forEach((l, i) => {
-      at += l.length;
-      for (; m < matches.length && matches[m][0] <= at; m++) out.push({ at: i + 1, line: lang === 'py' ? decorated(lines, i) : i + 1, name: matches[m][1], stop: matches[m][2] });
-      for (; e < out.length && out[e].stop <= at + 1; e++) out[e].end = i + 1;
-      at += 1;
+      offset += l.length;
+      for (; m < matches.length && matches[m][0] <= offset; m++) out.push({ at: i + 1, line: lang === 'py' ? decorated(lines, i) : i + 1, name: matches[m][1], stop: matches[m][2] });
+      for (; e < out.length && out[e].stop <= offset + 1; e++) out[e].end = i + 1;
+      offset += 1;
     });
     for (; e < out.length; e++) out[e].end = lines.length;
     return out;
   };
   // the nearest line that is not blank above (step -1) or below (step 1) a 1-based line, 0 or length + 1 if none
-  const near = (lines, at, step) => {
-    let i = at - 1 + step;
+  const near = (lines, line, step) => {
+    let i = line - 1 + step;
     while (i >= 0 && i < lines.length && !lines[i].trim()) i += step;
     return i + 1;
   };
@@ -477,7 +477,16 @@ function testsOf(file) {
   };
   // 1
   const oldAt = new Map(olds.map((t) => [`${t.at}\0${t.name}`, t]));
-  for (const t of news) if (!added.has(near(file.newLines, t.line, -1))) keep(t, oldAt.get(`${toOld.get(t.at)}\0${t.name}`));
+  const addedText = new Set(file.added.map((x) => normalizeLine(x.text)));
+  for (const t of news) {
+    const o = oldAt.get(`${toOld.get(t.at)}\0${t.name}`);
+    if (!o) continue;
+    // a line added above it (a new test, a hook, a comment) does not move it: its old line above was not moved
+    // elsewhere and the line after its name is the same line (round 28)
+    const up = near(file.oldLines, o.line, -1);
+    const stayed = (!removed.has(up) || !addedText.has(normalizeLine(file.oldLines[up - 1]))) && toOld.get(near(file.newLines, t.end, 1)) === near(file.oldLines, o.end, 1);
+    if (!added.has(near(file.newLines, t.line, -1)) || stayed) keep(t, o);
+  }
   // 2
   const around = (name, up, down) => `${name}\0${up}\0${down}`;
   const byAround = new Map();
@@ -571,6 +580,7 @@ function pairing(file) {
   return {
     taken,
     mine: (r, a) => at('old', r.line) != null && at('old', r.line) === at('now', a.line),
+    inTest: (r) => at('old', r.line) != null,
     same: (r, a) => {
       const [x, y] = [at('old', r.line), at('now', a.line)];
       if (x == null || y == null || x === y) return true;
@@ -605,8 +615,16 @@ function tableChanges(file) {
       if (moved.has(r.line)) continue;
       const before = lists(r);
       if (!before?.lists.length) continue;
-      const fits = hunk.added.filter((x) => !used.has(x.line) && shapeOf(x) === before.shape && pair.same(r, x));
-      const a = fits.find((x) => pair.mine(r, x)) ?? fits[0]; // a line of its own test first (round 27)
+      let [a, first] = [null, null]; // a line of its own test first (round 27), in one pass (round 28)
+      for (const x of hunk.added) {
+        if (used.has(x.line) || shapeOf(x) !== before.shape || !pair.same(r, x)) continue;
+        first ??= x;
+        if (!pair.inTest(r) || pair.mine(r, x)) {
+          a = x;
+          break;
+        }
+      }
+      a ??= first;
       if (!a) continue;
       used.add(a.line);
       const after = inlineLists(a.text);
