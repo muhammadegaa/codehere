@@ -176,16 +176,21 @@ function parseExpectStyle(t, opener) {
   if (mm) {
     const argOpen = mm[0].length - 1;
     const argClose = matchParen(rest, argOpen);
-    // a matcher whose call does not close on the line is an assertion a formatter spread over lines: not compared,
-    // as a subject that does not close is not (round 21)
-    if (argClose < 0) return null;
     const chain = mm[1].replace(/\s+/g, '').replace(/^\./, '');
     const matcher = (chain ? chain + '.' : '') + mm[2];
+    // a matcher whose call does not close on the line is an assertion a formatter spread over lines: its subject and
+    // matcher are still compared, its arguments are not (rounds 21 and 22)
+    if (argClose < 0) return { kind: 'expect', subject: norm(subject), matcher, args: null };
     const args = rest.slice(argOpen + 1, argClose);
     return { kind: 'expect', subject: norm(subject), matcher, args: norm(args) };
   }
   mm = /^\s*\.\s*(to|not_to|to_not)\s+(\w+)\s*\(?(.*?)\)?\s*$/.exec(rest);
-  if (mm) return { kind: 'expect', subject: norm(subject), matcher: `${mm[1]} ${mm[2]}`, args: norm(mm[3]) };
+  if (mm) {
+    // RSpec's to eq( spread over lines: the same (round 22)
+    const paren = /^\s*\.\s*(?:to|not_to|to_not)\s+\w+\s*\(/.exec(rest);
+    const open = paren && matchParen(rest, paren[0].length - 1) < 0;
+    return { kind: 'expect', subject: norm(subject), matcher: `${mm[1]} ${mm[2]}`, args: open ? null : norm(mm[3]) };
+  }
   return null;
 }
 
@@ -205,12 +210,13 @@ function parseCallStyle(t) {
   return { kind: 'call', matcher: fn, args };
 }
 
-// whether every bracket a line opens closes on it, outside strings
+// whether every bracket a Python line opens closes on it, outside strings and before a # comment
 function balanced(t) {
   let depth = 0;
   for (let i = 0, q = ''; i < t.length; i++) {
     const c = t[i];
     if (q) q = c === '\\' ? (i++, q) : c === q ? '' : q;
+    else if (c === '#') break;
     else if (c === '"' || c === "'" || c === '`') q = c;
     else if ('([{'.includes(c)) depth++;
     else if (')]}'.includes(c)) depth--;
@@ -220,14 +226,15 @@ function balanced(t) {
 
 function parsePyAssert(t) {
   const m = /^assert\s+(.+)$/.exec(t);
-  if (!m || !balanced(m[1])) return null; // an assert black spread over lines is not compared (round 21)
+  if (!m) return null;
+  const open = !balanced(m[1]); // an assert black spread over lines: its value is not compared (rounds 21 and 22)
   const cond = splitArgs(m[1])[0] ?? '';
   const op = /\s(==|!=|<=|>=|is not|is|not in|in)\s/.exec(cond);
   if (!op) return { kind: 'py', subject: norm(cond), matcher: 'assert', args: '' };
   const left = cond.slice(0, op.index);
   const right = cond.slice(op.index + op[0].length);
   if (op[1] === 'is not' && /^None$/.test(right.trim())) return { kind: 'py', subject: norm(left), matcher: 'is not', args: 'None' };
-  return { kind: 'py', subject: norm(left), matcher: op[1], args: norm(right) };
+  return { kind: 'py', subject: norm(left), matcher: op[1], args: open ? null : norm(right) };
 }
 
 const KV = /^\s*(?:(?:const|let|var|val|final|auto|my)\s+)?["']?((?:want|wanted|expected|expect|exp|golden|answer)\w*)["']?\s*(?::=|=|:)\s*(.+?)\s*[,;]?\s*$/i;
@@ -319,13 +326,13 @@ function compareAssertions(r, a) {
   if (r.kind !== a.kind || r.subject === undefined || r.subject !== a.subject) return null;
   if (r.kind === 'kv') return r.args === a.args || !goalpostMoved(r.args, a.args) ? null : pair('changed', 'expected', `${r.subject} ${r.args}`, `${a.subject} ${a.args}`);
   if (r.matcher === a.matcher) {
-    if (r.args === a.args) return null;
+    if (r.args === a.args || r.args === null || a.args === null) return null;
     if (a.args === '' && r.args !== '') return pair('weakened', 'weakened', `${r.matcher}(${truncate(r.args, 40)})`, `${a.matcher}()`);
     return pair('changed', 'expected', r.args, a.args);
   }
   const strongOld = STRONG.has(r.matcher) || STRONG.has(r.matcher.replace(/^not\./, ''));
   const weakNew = WEAK.has(a.matcher) || (r.kind === 'py' && (a.matcher === 'assert' || a.matcher === 'is not'));
-  const show = (x) => (x.kind === 'py' ? `assert ${x.subject}${x.matcher === 'assert' ? '' : ` ${x.matcher} ${truncate(x.args, 40)}`}` : `${x.matcher}(${truncate(x.args, 40)})`);
+  const show = (x) => (x.kind === 'py' ? `assert ${x.subject}${x.matcher === 'assert' ? '' : ` ${x.matcher} ${truncate(x.args ?? '…', 40)}`}` : `${x.matcher}(${truncate(x.args ?? '…', 40)})`);
   if (strongOld && weakNew) return pair('weakened', 'weakened', show(r), show(a));
   return pair('changed', 'assertion', show(r), show(a));
 }

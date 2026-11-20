@@ -1209,8 +1209,10 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
         const lines = now == null ? fileLines : now.split('\n');
         if (swallowsAssertion(lines, swallowAt, swallowText)) add(WEAKENED, current, `an assertion was wrapped in a try that swallows its failure in ${current}`);
       }
-      for (const t of TAMPER_ADDED_IN_TESTS) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
-      if (moved) continue; // an assertion that only moved
+      // a line that only moved is judged for skips where it lands; an assertion that cannot fail and only moved is let
+      // off, as every assertion that only moved is (round 22)
+      for (const t of TAMPER_ADDED_IN_TESTS) if (!(moved && t.kind === WEAKENED) && inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
+      if (moved) continue; // the assertion bookkeeping below does not count a line that only moved
       if (COMMENT.test(line)) {
         if (removed.has(line.replace(COMMENT, '').trim())) add(WEAKENED, current, `an assertion was commented out in ${current}`);
       } else if (inCode(ASSERT, probe, mask)) {

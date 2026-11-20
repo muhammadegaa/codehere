@@ -4901,6 +4901,45 @@ section(['R21'], () => {
   check('scan: pytestmark holding a # inside a string, then a skip, is read', hash21.includes('Python test was skipped'), hash21);
 });
 
+section(['R22'], () => {
+  // The cold review's round 22 (docs/reviews/2026-11-19-cold-review-round-22.md).
+  const realDiff22 = (file, before, after) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'r22-'));
+    fs.mkdirSync(path.join(d, 'a', path.dirname(file)), { recursive: true });
+    fs.mkdirSync(path.join(d, 'b', path.dirname(file)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'a', file), before);
+    fs.writeFileSync(path.join(d, 'b', file), after);
+    const out = spawnSync('git', ['diff', '--no-index', '--no-color', '-U0', `a/${file}`, `b/${file}`], { cwd: d, encoding: 'utf8' }).stdout;
+    return out.replace(/^--- a\/a\//m, '--- a/').replace(/^\+\+\+ b\/b\//m, '+++ b/');
+  };
+  const scan22 = (file, before, after) => tamperFindings(`M\t${file}`, realDiff22(file, before, after), { read: () => after, tests: () => [] }).join(' · ');
+  const js = (body) => `import { test, expect } from 'vitest';\ntest('x', () => {\n${body}\n});\n`;
+
+  // 1: an assertion spread over lines keeps its subject and matcher: weakening or flipping its first line is read
+  for (const [name, before, after, want] of [
+    ['toHaveBeenCalledWith( weakened to toHaveBeenCalled()', "  expect(fetch).toHaveBeenCalledWith(\n    '/orders',\n    { method: 'POST' },\n  );", '  expect(fetch).toHaveBeenCalled();', /weakened|changed/],
+    ['toEqual({ flipped to not.toEqual({', '  expect(result).toEqual({\n    total: 24,\n  });', '  expect(result).not.toEqual({\n    total: 24,\n  });', /changed|flipped/],
+    ['toThrow( flipped to not.toThrow()', "  expect(() => parse('abc')).toThrow(\n    'bad input',\n  );", "  expect(() => parse('abc')).not.toThrow();", /changed|flipped/],
+  ]) {
+    const got = scan22('test/cart.test.js', js(before), js(after));
+    check(`scan: ${name} is read`, want.test(got), got);
+  }
+  const py22 = scan22('tests/test_cart.py', 'def test_x():\n    assert result == {\n        "total": 24,\n    }\n', 'def test_x():\n    assert result != {\n        "total": 24,\n    }\n');
+  check('scan: a spread Python assert flipped from == to != is read', /changed|flipped/.test(py22), py22);
+
+  // 5: RSpec's to eq( spread over lines is not a change
+  const rb22 = scan22('spec/user_spec.rb', "describe User do\n  it 'serializes' do\n    expect(user.to_h).to eq('name' => 'Ada', 'email' => 'ada@example.com')\n  end\nend\n", "describe User do\n  it 'serializes' do\n    expect(user.to_h).to eq(\n      'name' => 'Ada',\n      'email' => 'ada@example.com',\n    )\n  end\nend\n");
+  check("scan, honest: RSpec's to eq( spread over lines is not a change", rb22 === '', rb22);
+
+  // 3: an always-true assertion that only moved is let off like any moved assertion
+  const sanity22 = scan22('test/sanity.test.js', "import { test, expect } from 'vitest';\ntest('sanity', () => {\n  expect(true).toBe(true);\n});\n", "import { test, expect, describe } from 'vitest';\ndescribe('sanity', () => {\n  test('sanity', () => {\n    expect(true).toBe(true);\n  });\n});\n");
+  check('scan, honest: an existing expect(true).toBe(true) re-indented into a describe is not added', sanity22 === '', sanity22);
+
+  // 6: a Python assert with a comment holding a bracket is still compared
+  const pyc22 = scan22('tests/test_cart.py', 'def test_x():\n    assert total(2, 2) == 4  # :)\n', 'def test_x():\n    assert total(2, 2) == 5  # :)\n');
+  check('scan: a Python expected value changed beside a comment holding a bracket is read', pyc22.includes('expected value was changed'), pyc22);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);
