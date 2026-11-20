@@ -176,9 +176,12 @@ function parseExpectStyle(t, opener) {
   if (mm) {
     const argOpen = mm[0].length - 1;
     const argClose = matchParen(rest, argOpen);
+    // a matcher whose call does not close on the line is an assertion a formatter spread over lines: not compared,
+    // as a subject that does not close is not (round 21)
+    if (argClose < 0) return null;
     const chain = mm[1].replace(/\s+/g, '').replace(/^\./, '');
     const matcher = (chain ? chain + '.' : '') + mm[2];
-    const args = argClose > 0 ? rest.slice(argOpen + 1, argClose) : rest.slice(argOpen + 1);
+    const args = rest.slice(argOpen + 1, argClose);
     return { kind: 'expect', subject: norm(subject), matcher, args: norm(args) };
   }
   mm = /^\s*\.\s*(to|not_to|to_not)\s+(\w+)\s*\(?(.*?)\)?\s*$/.exec(rest);
@@ -202,9 +205,22 @@ function parseCallStyle(t) {
   return { kind: 'call', matcher: fn, args };
 }
 
+// whether every bracket a line opens closes on it, outside strings
+function balanced(t) {
+  let depth = 0;
+  for (let i = 0, q = ''; i < t.length; i++) {
+    const c = t[i];
+    if (q) q = c === '\\' ? (i++, q) : c === q ? '' : q;
+    else if (c === '"' || c === "'" || c === '`') q = c;
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+  }
+  return depth === 0;
+}
+
 function parsePyAssert(t) {
   const m = /^assert\s+(.+)$/.exec(t);
-  if (!m) return null;
+  if (!m || !balanced(m[1])) return null; // an assert black spread over lines is not compared (round 21)
   const cond = splitArgs(m[1])[0] ?? '';
   const op = /\s(==|!=|<=|>=|is not|is|not in|in)\s/.exec(cond);
   if (!op) return { kind: 'py', subject: norm(cond), matcher: 'assert', args: '' };

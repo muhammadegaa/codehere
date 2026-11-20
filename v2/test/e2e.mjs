@@ -4813,7 +4813,8 @@ section(['R20'], () => {
   const wrap20 = lines20('test/cart.test.mjs', ['@@ -3,4 +3,6 @@', "-test('adds', () => {", '-  assert.equal(add(1, 1), 2);', '-  assert.equal(add(2, 3), 5);', '-});', "+describe('add', () => {", "+  test('adds', () => {", '+    assert.equal(add(1, 1), 2);', '+    assert.equal(add(2, 3), 5);', '+  });', '+});'], "import { test, describe } from 'node:test';\nimport assert from 'node:assert';\ndescribe('add', () => {\n  test('adds', () => {\n    assert.equal(add(1, 1), 2);\n    assert.equal(add(2, 3), 5);\n  });\n});\n");
   check('scan, honest: two same-shape assertions re-indented into a describe are not a changed expected value', wrap20 === '', wrap20);
   const skipwrap20 = lines20('test/cart.test.mjs', ['@@ -3 +3,3 @@', "-it.skip('adds floats', () => {});", "+describe('cart', () => {", "+  it.skip('adds floats', () => {});", '+});'], "import { it, describe } from 'node:test';\n\ndescribe('cart', () => {\n  it.skip('adds floats', () => {});\n});\n");
-  check('scan, honest: an existing it.skip re-indented into a describe is not a new skip', skipwrap20 === '', skipwrap20);
+  // round 21: only assertions that moved are let off (a moved skip can land on another suite), so this send-back is named
+  check('scan: an existing it.skip re-indented into a describe is sent back (a known false send-back)', skipwrap20.includes('skipped'), skipwrap20);
   const real20 = lines20('test/cart.test.mjs', ['@@ -4 +4 @@', '-  assert.equal(add(2, 3), 5);', '+  assert.equal(add(2, 3), 6);'], "import { test } from 'node:test';\nimport assert from 'node:assert';\ntest('adds', () => {\n  assert.equal(add(2, 3), 6);\n});\n");
   check('scan: an expected value changed in place is still read', real20.includes('expected value was changed'), real20);
   const deco20 = lines20('tests/test_cart.py', ['@@ -2 +1,0 @@', '-@pytest.mark.skip(reason="flaky")', '@@ -4,0 +4 @@', '+@pytest.mark.skip(reason="flaky")'], 'import pytest\ndef test_a():\n    assert True\n@pytest.mark.skip(reason="flaky")\ndef test_b():\n    assert add(1, 2) == 3\n');
@@ -4844,6 +4845,60 @@ section(['R20'], () => {
   // 10: a reordered -k is one filter in the line-by-line reading too
   const order20 = tamperFindings('M\tpytest.ini', diff27('pytest.ini', ['addopts = -k "not slow and not db"'], ['addopts = -k "not db and not slow"'])).join(' · ');
   check('scan, honest: a reordered -k without the file (the audit) is one filter', order20 === '', order20);
+});
+
+section(['R21'], () => {
+  // The cold review's round 21 (docs/reviews/2026-11-19-cold-review-round-21.md).
+  const lines21 = (file, hunks, now, opts = {}) => tamperFindings(`M\t${file}`, [`--- a/${file}`, `+++ b/${file}`, ...hunks].join('\n'), now == null ? opts : { read: () => now, ...opts }).join(' · ');
+
+  // 1: a line moved to where it switches something off is judged where it lands; only assertions that moved are let off
+  const ci21 = lines21('.github/workflows/ci.yml', ['@@ -4,0 +5 @@', '+    continue-on-error: true', '@@ -9 +9,0 @@', '-        continue-on-error: true'], 'on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n    steps:\n      - run: npm test\n      - name: Coverage\n        run: npm run coverage\n');
+  check("scan: the coverage step's continue-on-error moved up to the test job is read", ci21.includes('always pass'), ci21);
+  const gl21 = lines21('.gitlab-ci.yml', ['@@ -4 +3,0 @@', '-  allow_failure: true', '@@ -7,0 +7 @@', '+  allow_failure: true'], 'lint:\n  script:\n    - npm run lint\ntest:\n  script:\n    - npm test\n  allow_failure: true\n');
+  check("scan: the lint job's allow_failure moved to the test job is read", gl21.includes('always pass'), gl21);
+  const dsk21 = lines21('test/cart.test.mjs', ['@@ -2,0 +3 @@', "+describe.skip('legacy', () => {", '@@ -6 +6,0 @@', "-describe.skip('legacy', () => {"]);
+  check('scan: an existing describe.skip line moved to wrap another suite is read', dsk21.includes('skipped'), dsk21);
+  const pmk21 = lines21('tests/test_cart.py', ['@@ -1,0 +2 @@', '+pytestmark = pytest.mark.skip(reason="slow")', '@@ -5 +5,0 @@', '-    pytestmark = pytest.mark.skip(reason="slow")']);
+  check('scan: pytestmark moved from a class body to the module is read', pmk21.includes('Python test was skipped'), pmk21);
+  const worker21 = lines21('src/cart.js', ['@@ -2 +1,0 @@', '-  if (process.env.JEST_WORKER_ID) return;', '@@ -6,0 +6 @@', '+  if (process.env.JEST_WORKER_ID) return;']);
+  check('scan: a test-runner check moved from a logger into the code under test is read', worker21.includes('running under a test'), worker21);
+
+  // 2: a formatter spreading one assertion over several lines, or joining it back, read from git's own diff of the
+  // file at the start and now, with the file read as the finish check reads it
+  const realDiff21 = (file, before, after) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'r21-'));
+    fs.mkdirSync(path.join(d, 'a', path.dirname(file)), { recursive: true });
+    fs.mkdirSync(path.join(d, 'b', path.dirname(file)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'a', file), before);
+    fs.writeFileSync(path.join(d, 'b', file), after);
+    const out = spawnSync('git', ['diff', '--no-index', '--no-color', '-U0', `a/${file}`, `b/${file}`], { cwd: d, encoding: 'utf8' }).stdout;
+    return out.replace(/^--- a\/a\//m, '--- a/').replace(/^\+\+\+ b\/b\//m, '+++ b/');
+  };
+  const wrapJs = (body) => `import { test, expect } from 'vitest';\n${body}\n`;
+  const one = "test('builds', () => {\n  expect(buildTheThing(firstArgument, secondArgument)).toEqual({ a: 1, b: 2 });\n});";
+  const spread = "describe('cart', () => {\n  test('builds', () => {\n    expect(buildTheThing(firstArgument, secondArgument)).toEqual({\n      a: 1,\n      b: 2,\n    });\n  });\n});";
+  const toBeOne = "test('labels', () => {\n  expect(makeTheLongLabel(firstArgument)).toBe('expected-value');\n});";
+  const toBeSpread = "test('labels', () => {\n  expect(makeTheLongLabel(firstArgument)).toBe(\n    'expected-value',\n  );\n});";
+  const pyOne = 'def test_builds():\n    assert build_the_thing(first, second) == {"a": 1, "b": 2}\n';
+  const pySpread = 'def test_builds():\n    assert build_the_thing(first, second) == {\n        "a": 1,\n        "b": 2,\n    }\n';
+  for (const [name, file, before, after] of [
+    ['a toEqual spread over lines in a new describe', 'test/cart.test.js', wrapJs(one), wrapJs(spread)],
+    ['the same joined back onto one line', 'test/cart.test.js', wrapJs(spread), wrapJs(one)],
+    ['a toBe value moved to its own line', 'test/cart.test.js', wrapJs(toBeOne), wrapJs(toBeSpread)],
+    ['a Python assert spread by black', 'tests/test_cart.py', pyOne, pySpread],
+  ]) {
+    const got = tamperFindings(`M\t${file}`, realDiff21(file, before, after), { read: () => after, tests: () => [] }).join(' · ');
+    check(`scan, honest: ${name} is not a changed assertion`, got === '', got);
+  }
+
+  // 3: the skip and only patterns in linear time on a run of spaces
+  const t21 = Date.now();
+  tamperFindings('M\ttest/cart.test.js', diff27('test/cart.test.js', [], Array.from({ length: 50 }, () => `it.skip${' '.repeat(9990)}x`)));
+  check('scan: fifty 10,000-character lines of it.skip and spaces are read in under 2 seconds', Date.now() - t21 < 2000, `${Date.now() - t21} ms`);
+
+  // 5: a # inside a string in pytestmark
+  const hash21 = tamperFindings('M\ttests/test_cart.py', diff27('tests/test_cart.py', [], ['pytestmark = [pytest.mark.usefixtures("issue#4"), pytest.mark.skip]'])).join(' · ');
+  check('scan: pytestmark holding a # inside a string, then a skip, is read', hash21.includes('Python test was skipped'), hash21);
 });
 
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');

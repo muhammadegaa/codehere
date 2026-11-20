@@ -161,13 +161,13 @@ const REPLACED = 'test-replaced';
 const TAMPER_ADDED = [
   // with modifiers between the name and .skip, and .each after it: test.concurrent.skip, it.skip.each (round 19)
   // modifiers after .skip too, .for as well as .each, and a TypeScript generic before the call (round 20)
-  { re: /\b(it|test|describe)(?:\.(?:describe|concurrent|serial|parallel|sequential))*\.skip(?:\.(?:concurrent|sequential|shuffle|fails|failing|each|for))*\s*(?:<[^<>()\n]*>)?\s*[(`]/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
-  { re: /\b(xit|xdescribe|xtest)(?:\.(?:each|for))?\s*(?:<[^<>()\n]*>)?\s*[(`]/, kind: SKIPPED, why: 'a test was disabled (xit/xdescribe)' },
+  { re: /\b(it|test|describe)(?:\.(?:describe|concurrent|serial|parallel|sequential))*\.skip(?:\.(?:concurrent|sequential|shuffle|fails|failing|each|for))*\s*(?:<[^<>()\n]*>\s*)?[(`]/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
+  { re: /\b(xit|xdescribe|xtest)(?:\.(?:each|for))?\s*(?:<[^<>()\n]*>\s*)?[(`]/, kind: SKIPPED, why: 'a test was disabled (xit/xdescribe)' },
   // skip, and skipif or skipIf only when the condition is a literal: skipUnless(shutil.which("uv")) is a
   // test that cannot run on this machine, as { skip: process.platform === 'win32' } is in JS
   // a whole module (pytestmark) too (round 19); a conftest hook's add_marker is not read, since the honest form gates it
   // on an option (round 20)
-  { re: /@pytest\.mark\.skip\b|\bunittest\.skip\s*\(|\b(skipif|skipIf)\s*\(\s*True\b|\bskipUnless\s*\(\s*False\b|\bpytestmark\s*=[^#\n]{0,500}\bpytest\.mark\.skip\b/, kind: SKIPPED, why: 'a Python test was skipped' },
+  { re: /@pytest\.mark\.skip\b|\bunittest\.skip\s*\(|\b(skipif|skipIf)\s*\(\s*True\b|\bskipUnless\s*\(\s*False\b|\bpytestmark\s*=(?:[^#\n"']|"[^"\n]*"|'[^'\n]*'){0,500}?\bpytest\.mark\.skip\b/, kind: SKIPPED, why: 'a Python test was skipped' },
   { re: /@ts-nocheck/, kind: CHECKS_OFF, why: 'type checking was turned off (@ts-nocheck)' },
   { re: /--no-verify/, kind: CHECKS_OFF, why: 'git hooks were bypassed (--no-verify)' },
   { re: /expect\([^)]*\)\.(toBe|toEqual)\(\s*(true|1)\s*\)\s*;?\s*\/\/\s*(todo|temp|hack)/i, kind: WEAKENED, why: 'an assertion was replaced with a placeholder' },
@@ -177,14 +177,14 @@ const TAMPER_ADDED = [
 const LITERAL = String.raw`(\d+(?:\.\d+)?|true|false|null|'[^']*'|"[^"]*")`;
 const TAMPER_ADDED_IN_TESTS = [
   // mocha's other names, read only in test files: context.skip( is a plausible call in other code (round 19)
-  { re: /\b(context|suite|specify)(?:\.(?:describe|concurrent|serial|parallel|sequential))*\.skip(?:\.(?:concurrent|sequential|shuffle|fails|failing|each|for))*\s*(?:<[^<>()\n]*>)?\s*[(`]|\b(xcontext|xspecify)\s*\(/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
+  { re: /\b(context|suite|specify)(?:\.(?:describe|concurrent|serial|parallel|sequential))*\.skip(?:\.(?:concurrent|sequential|shuffle|fails|failing|each|for))*\s*(?:<[^<>()\n]*>\s*)?[(`]|\b(xcontext|xspecify)\s*\(/, kind: SKIPPED, why: 'a test was skipped (.skip)' },
   // node:test's it.todo(name, fn) runs the test but does not fail on it; jest's test.todo(name) has no function (round 20)
   { re: /(?<![.\w])(it|test|describe|suite)\.todo\s*\(\s*(['"`])(?:(?!\2)[^\\]|\\.)*\2\s*,/, kind: SKIPPED, why: 'a test was skipped (.todo)' },
   // test('name', { skip: true }, ...): the name cannot run past its closing quote, so the options are this test's
   { re: /(?<![.\w])(it|test|describe|suite)\s*\(\s*(['"`])(?:(?!\2)[^\\]|\\.)*\2\s*,\s*\{[^}]*\b(skip|todo)\s*:\s*(true\b|['"`])/, kind: SKIPPED, why: 'a test was skipped ({ skip: true })' },
   // fit/fdescribe only in jest's form, starting a statement with a quoted name then a callback:
   // `fit(` alone is a common function name
-  { re: /(?<![.\w])(it|test|describe|context|suite|specify)(?:\.(?:describe|concurrent|serial|parallel|sequential))*\.only(?:\.(?:concurrent|sequential|shuffle|fails|failing|each|for))*\s*(?:<[^<>()\n]*>)?\s*[(`]|^[+-]\s*(?:fit|fdescribe)\.each\s*[(`]|^[+-]\s*(fit|fdescribe)\s*\(\s*(['"`])(?:(?!\3)[^\\]|\\.)*\3\s*,\s*(async\s+)?(\(|function\b|\w+\s*=>)/, kind: SKIPPED, why: 'other tests were turned off (.only)' },
+  { re: /(?<![.\w])(it|test|describe|context|suite|specify)(?:\.(?:describe|concurrent|serial|parallel|sequential))*\.only(?:\.(?:concurrent|sequential|shuffle|fails|failing|each|for))*\s*(?:<[^<>()\n]*>\s*)?[(`]|^[+-]\s*(?:fit|fdescribe)\.each\s*[(`]|^[+-]\s*(fit|fdescribe)\s*\(\s*(['"`])(?:(?!\3)[^\\]|\\.)*\3\s*,\s*(async\s+)?(\(|function\b|\w+\s*=>)/, kind: SKIPPED, why: 'other tests were turned off (.only)' },
   { re: /\bassert(\.ok)?\(\s*true\s*\)|^\+\s*assert\s+True\s*$/, kind: WEAKENED, why: 'an assertion that cannot fail was added' },
   { re: new RegExp(String.raw`\bassert\.\w+\(\s*${LITERAL}\s*,\s*\1\s*\)`), kind: WEAKENED, why: 'an assertion that cannot fail was added' },
   { re: new RegExp(String.raw`\bexpect\(\s*${LITERAL}\s*\)\.(toBe|toEqual|toStrictEqual)\(\s*\1\s*\)`), kind: WEAKENED, why: 'an assertion that cannot fail was added' },
@@ -1037,15 +1037,16 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
         byFile.push({ file: file === '/dev/null' && isCi(old) ? old : file, body: [] });
       } else if (byFile.length) byFile[byFile.length - 1].body.push(line);
     }
-    // A line whose exact text is both removed and added in a file only moved (tests wrapped in a describe, a block
-    // re-indented): neither side is judged (round 20). A Python decorator does not name its test, so moving one is
-    // judged, and a line with no word in it (a closing brace) is judged as before, for the patterns that span lines.
+    // An assertion whose exact text is both removed and added in a file only moved (tests wrapped in a describe):
+    // neither side counts as an assertion removed, added or changed (round 20). Every other check still reads the
+    // line where it lands, since a moved skip, continue-on-error or runner check switches off something new there
+    // (round 21). A line with no word in it (a closing brace) is never paired.
     for (const { file, body } of byFile) {
       const minus = new Map();
       const plus = new Map();
       for (const l of body) {
         const t = l.slice(1).trim();
-        if (!/\w/.test(t) || t.startsWith('@') || (l[0] !== '-' && l[0] !== '+')) continue;
+        if (!/\w/.test(t) || (l[0] !== '-' && l[0] !== '+')) continue;
         const side = l[0] === '-' ? minus : plus;
         side.set(t, (side.get(t) || 0) + 1);
       }
@@ -1129,7 +1130,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       continue;
     }
     if (line[0] === '\\') continue; // git's "\ No newline at end of file" is not a line of the file (round 15)
-    const left = line[0] === '-' ? movedMinus : line[0] === '+' ? movedPlus : null; // a line that only moved
+    const left = line[0] === '-' ? movedMinus : line[0] === '+' ? movedPlus : null; // an assertion that only moved
     const movedKey = line.slice(1).trim();
     const moved = !!left && left.get(movedKey) > 0;
     if (moved) left.set(movedKey, left.get(movedKey) - 1);
@@ -1141,10 +1142,10 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       const text = line.slice(1, 10001);
       // a test step is a command: not an echo that names one, not another YAML key such as a cache key (round 13)
       const cmd = ciCommand(text);
-      if (!moved && line.startsWith('-') && TEST_CMD.test(cmd)) ciRemoved.push(current);
-      if (!moved && line.startsWith('+') && TEST_CMD.test(cmd)) ciAdded++;
-      if (!moved && line.startsWith('+') && ciAlwaysPasses(text)) add(CHECKS_OFF, current, `the CI test step was changed to always pass in ${current}`);
-      if (!moved && line.startsWith('+') && CI_IGNORE.test(text)) {
+      if (line.startsWith('-') && TEST_CMD.test(cmd)) ciRemoved.push(current);
+      if (line.startsWith('+') && TEST_CMD.test(cmd)) ciAdded++;
+      if (line.startsWith('+') && ciAlwaysPasses(text)) add(CHECKS_OFF, current, `the CI test step was changed to always pass in ${current}`);
+      if (line.startsWith('+') && CI_IGNORE.test(text)) {
         const now = read ? read(current) : null;
         if (blockRunsTests(now == null ? fileLines : now.split('\n'), at, text)) add(CHECKS_OFF, current, `the CI test step was changed to always pass in ${current}`);
       }
@@ -1154,7 +1155,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
     if (inTest && !line.startsWith('-')) {
       const e = expectationOf(line.slice(1, 10001));
       if (e) expectations.push(e);
-    } else if (!inTest && !moved && line.startsWith('+') && !isTestConfig(current)) {
+    } else if (!inTest && line.startsWith('+') && !isTestConfig(current)) {
       const marker = !COMMENT.test(line) && !TEST_SETUP.test(current) && !FIXTURE.test(current) && RUNNER_MARKER.exec(line.slice(1, 10001));
       if (marker) add(UNDER_TEST, current, `${current} checks whether it is running under a test (${(marker[1] || marker[2] || marker[3]).replace(/['"]/g, '')})`);
       const r = RETURN_LITERAL.exec(line.slice(1, 10001));
@@ -1185,10 +1186,10 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       }
     }
     if (line.startsWith('+')) {
-      if (!moved) for (const t of TAMPER_ADDED) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
+      for (const t of TAMPER_ADDED) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
       // the rest of a line longer than the probe, in overlapping pieces, so a skip past its first 10,000 characters
       // is read (cold review, L13 round 7); a single match longer than the 1,000-character overlap can be missed
-      for (let from = 9000; !moved && from < line.length; from += 9000) {
+      for (let from = 9000; from < line.length; from += 9000) {
         const piece = `+${line.slice(from, from + 10000)}`;
         let pieceMask = null;
         const pmask = () => (pieceMask ||= stringMask(piece));
@@ -1208,8 +1209,8 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
         const lines = now == null ? fileLines : now.split('\n');
         if (swallowsAssertion(lines, swallowAt, swallowText)) add(WEAKENED, current, `an assertion was wrapped in a try that swallows its failure in ${current}`);
       }
-      if (moved) continue;
       for (const t of TAMPER_ADDED_IN_TESTS) if (inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
+      if (moved) continue; // an assertion that only moved
       if (COMMENT.test(line)) {
         if (removed.has(line.replace(COMMENT, '').trim())) add(WEAKENED, current, `an assertion was commented out in ${current}`);
       } else if (inCode(ASSERT, probe, mask)) {
