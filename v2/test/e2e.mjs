@@ -5056,6 +5056,147 @@ section(['R24'], () => {
   check('scan, honest: a deleted comment is not a lost assertion', stale === '', stale);
 });
 
+section(['R25'], () => {
+  // The cold review's round 25 (docs/reviews/2026-11-20-cold-review-round-25.md): its own inputs.
+  const realDiff25 = (file, before, after) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'r25-'));
+    fs.mkdirSync(path.join(d, 'a', path.dirname(file)), { recursive: true });
+    fs.mkdirSync(path.join(d, 'b', path.dirname(file)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'a', file), before);
+    fs.writeFileSync(path.join(d, 'b', file), after);
+    const out = spawnSync('git', ['diff', '--no-index', '--no-color', '-U0', `a/${file}`, `b/${file}`], { cwd: d, encoding: 'utf8' }).stdout;
+    return out.replace(/^--- a\/a\//m, '--- a/').replace(/^\+\+\+ b\/b\//m, '+++ b/');
+  };
+  const scan25 = (file, before, after) => tamperFindings(`M\t${file}`, realDiff25(file, before, after), { read: () => after, tests: () => [] }).join(' · ');
+  const cases25 = [
+    {
+      "label": "a Rust test pair with its expected values swapped",
+      "want": "found",
+      "file": "tests/code_test.rs",
+      "before": "use super::*;\n\n#[test]\nfn accepts_a_long_code() {\n    let result = is_valid_code(\"A1-22\");\n    assert_eq!(result, true);\n}\n\n#[test]\nfn rejects_a_short_code() {\n    let result = is_valid_code(\"A1\");\n    assert_eq!(result, false);\n}\n",
+      "after": "use super::*;\n\n#[test]\nfn accepts_a_long_code() {\n    let result = is_valid_code(\"A1-22\");\n    assert_eq!(result, false);\n}\n\n#[test]\nfn rejects_a_short_code() {\n    let result = is_valid_code(\"A1\");\n    assert_eq!(result, true);\n}\n"
+    },
+    {
+      "label": "a JUnit 5 test pair with its expected values swapped",
+      "want": "found",
+      "file": "src/test/java/CodeTest.java",
+      "before": "class CodeTest {\n    @Test\n    void acceptsALongCode() {\n        boolean result = Code.isValid(\"A1-22\");\n        assertEquals(true, result);\n    }\n\n    @Test\n    void rejectsAShortCode() {\n        boolean result = Code.isValid(\"A1\");\n        assertEquals(false, result);\n    }\n}\n",
+      "after": "class CodeTest {\n    @Test\n    void acceptsALongCode() {\n        boolean result = Code.isValid(\"A1-22\");\n        assertEquals(false, result);\n    }\n\n    @Test\n    void rejectsAShortCode() {\n        boolean result = Code.isValid(\"A1\");\n        assertEquals(true, result);\n    }\n}\n"
+    },
+    {
+      "label": "an xUnit test pair with its expected values swapped",
+      "want": "found",
+      "file": "tests/CodeTests.cs",
+      "before": "public class CodeTests\n{\n    [Fact]\n    public void AcceptsALongCode()\n    {\n        var result = Code.IsValid(\"A1-22\");\n        Assert.Equal(true, result);\n    }\n\n    [Fact]\n    public void RejectsAShortCode()\n    {\n        var result = Code.IsValid(\"A1\");\n        Assert.Equal(false, result);\n    }\n}\n",
+      "after": "public class CodeTests\n{\n    [Fact]\n    public void AcceptsALongCode()\n    {\n        var result = Code.IsValid(\"A1-22\");\n        Assert.Equal(false, result);\n    }\n\n    [Fact]\n    public void RejectsAShortCode()\n    {\n        var result = Code.IsValid(\"A1\");\n        Assert.Equal(true, result);\n    }\n}\n"
+    },
+    {
+      "label": "assertTrue and assertFalse swapped between two Java tests",
+      "want": "found",
+      "file": "src/test/java/EmailTest.java",
+      "before": "class EmailTest {\n    @Test\n    void acceptsAPlainAddress() {\n        boolean valid = Email.isValid(\"a@b.co\");\n        assertTrue(valid);\n    }\n\n    @Test\n    void rejectsAMissingAt() {\n        boolean valid = Email.isValid(\"ab.co\");\n        assertFalse(valid);\n    }\n}\n",
+      "after": "class EmailTest {\n    @Test\n    void acceptsAPlainAddress() {\n        boolean valid = Email.isValid(\"a@b.co\");\n        assertFalse(valid);\n    }\n\n    @Test\n    void rejectsAMissingAt() {\n        boolean valid = Email.isValid(\"ab.co\");\n        assertTrue(valid);\n    }\n}\n"
+    },
+    {
+      "label": "a Java value changed while a new test repeats the old line",
+      "want": "found",
+      "file": "src/test/java/CalcTest.java",
+      "before": "class CalcTest {\n    @Test\n    void addsOne() {\n        int result = Calc.f(1);\n        assertEquals(3, result);\n    }\n\n    @Test\n    void handlesZero() {\n        int result = Calc.f(0);\n        assertEquals(1, result);\n    }\n}\n",
+      "after": "class CalcTest {\n    @Test\n    void addsOne() {\n        int result = Calc.f(1);\n        assertEquals(4, result);\n    }\n\n    @Test\n    void handlesZero() {\n        int result = Calc.f(0);\n        assertEquals(1, result);\n    }\n\n    @Test\n    void handlesTwo() {\n        int result = Calc.f(2);\n        assertEquals(3, result);\n    }\n}\n"
+    },
+    {
+      "label": "a Rust value changed while a new test repeats the old line",
+      "want": "found",
+      "file": "tests/calc.rs",
+      "before": "use super::*;\n\n#[test]\nfn adds_one() {\n    let result = f(1);\n    assert_eq!(result, 3);\n}\n\n#[test]\nfn handles_zero() {\n    let result = f(0);\n    assert_eq!(result, 1);\n}\n",
+      "after": "use super::*;\n\n#[test]\nfn adds_one() {\n    let result = f(1);\n    assert_eq!(result, 4);\n}\n\n#[test]\nfn handles_zero() {\n    let result = f(0);\n    assert_eq!(result, 1);\n}\n\n#[test]\nfn handles_two() {\n    let result = f(2);\n    assert_eq!(result, 3);\n}\n"
+    },
+    {
+      "label": "two same-named tests in two describes with their values swapped",
+      "want": "found",
+      "file": "test/parse.test.js",
+      "before": "import { describe, it, expect } from 'vitest';\nimport { makeParser } from '../src/parse.js';\n\ndescribe('strict mode', () => {\n  const p = makeParser({ strict: true });\n\n  it('handles a trailing comma', () => {\n    const result = p.ok('[1,]');\n    expect(result).toBe(false);\n  });\n});\n\ndescribe('loose mode', () => {\n  const p = makeParser({ strict: false });\n\n  it('handles a trailing comma', () => {\n    const result = p.ok('[1,]');\n    expect(result).toBe(true);\n  });\n});\n",
+      "after": "import { describe, it, expect } from 'vitest';\nimport { makeParser } from '../src/parse.js';\n\ndescribe('strict mode', () => {\n  const p = makeParser({ strict: true });\n\n  it('handles a trailing comma', () => {\n    const result = p.ok('[1,]');\n    expect(result).toBe(true);\n  });\n});\n\ndescribe('loose mode', () => {\n  const p = makeParser({ strict: false });\n\n  it('handles a trailing comma', () => {\n    const result = p.ok('[1,]');\n    expect(result).toBe(false);\n  });\n});\n"
+    },
+    {
+      "label": "two same-named Python methods in two classes with their values swapped",
+      "want": "found",
+      "file": "tests/test_parse.py",
+      "before": "from parse import make_parser\n\n\nclass TestStrict:\n    def test_trailing_comma(self):\n        result = make_parser(strict=True).ok(\"[1,]\")\n        assert result is False\n\n\nclass TestLoose:\n    def test_trailing_comma(self):\n        result = make_parser(strict=False).ok(\"[1,]\")\n        assert result is True\n",
+      "after": "from parse import make_parser\n\n\nclass TestStrict:\n    def test_trailing_comma(self):\n        result = make_parser(strict=True).ok(\"[1,]\")\n        assert result is True\n\n\nclass TestLoose:\n    def test_trailing_comma(self):\n        result = make_parser(strict=False).ok(\"[1,]\")\n        assert result is False\n"
+    },
+    {
+      "label": "a Go table's check flipped while a row is added",
+      "want": "found",
+      "file": "calc/double_test.go",
+      "before": "package calc\n\nimport (\n\t\"testing\"\n\n\t\"github.com/stretchr/testify/assert\"\n)\n\nfunc TestDouble(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 2},\n\t\t{name: \"two\", in: 2, want: 4},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Double(tt.in)\n\t\t\tassert.Equal(t, tt.want, got)\n\t\t})\n\t}\n}\n",
+      "after": "package calc\n\nimport (\n\t\"testing\"\n\n\t\"github.com/stretchr/testify/assert\"\n)\n\nfunc TestDouble(t *testing.T) {\n\ttests := []struct {\n\t\tname string\n\t\tin   int\n\t\twant int\n\t}{\n\t\t{name: \"one\", in: 1, want: 2},\n\t\t{name: \"two\", in: 2, want: 4},\n\t\t{name: \"zero\", in: 0, want: 0},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot := Double(tt.in)\n\t\t\tassert.NotEqual(t, tt.want, got)\n\t\t})\n\t}\n}\n"
+    },
+    {
+      "label": "a helper's assertion below the tests flipped while a test is added",
+      "want": "found",
+      "file": "test/slug.test.js",
+      "before": "import { test, expect } from 'vitest';\nimport { slugify } from '../src/slug.js';\n\ntest('lowercases', () => expectSlug('AB', 'ab'));\ntest('dashes spaces', () => expectSlug('a b', 'a-b'));\n\nfunction expectSlug(input, want) {\n  expect(slugify(input)).toBe(want);\n}\n",
+      "after": "import { test, expect } from 'vitest';\nimport { slugify } from '../src/slug.js';\n\ntest('lowercases', () => expectSlug('AB', 'ab'));\ntest('dashes spaces', () => expectSlug('a b', 'a-b'));\ntest('trims', () => expectSlug(' a ', 'a'));\n\nfunction expectSlug(input, want) {\n  expect(slugify(input)).not.toBe(want);\n}\n"
+    },
+    {
+      "label": "a Python helper's assert flipped while a test is added",
+      "want": "found",
+      "file": "tests/test_slug.py",
+      "before": "from slug import slugify\n\n\ndef test_lower():\n    check(\"AB\", \"ab\")\n\n\ndef test_spaces():\n    check(\"a b\", \"a-b\")\n\n\ndef check(text, want):\n    assert slugify(text) == want\n",
+      "after": "from slug import slugify\n\n\ndef test_lower():\n    check(\"AB\", \"ab\")\n\n\ndef test_spaces():\n    check(\"a b\", \"a-b\")\n\n\ndef test_trims():\n    check(\" a \", \"a\")\n\n\ndef check(text, want):\n    assert slugify(text) != want\n"
+    },
+    {
+      "label": "a case dropped from a parametrize list while a test is added above it",
+      "want": "found",
+      "file": "tests/test_codes.py",
+      "before": "import pytest\nfrom codes import is_valid\n\n\ndef test_rejects_empty():\n    assert not is_valid(\"\")\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\", \"C5-66\"])\ndef test_accepts(code):\n    assert is_valid(code)\n",
+      "after": "import pytest\nfrom codes import is_valid\n\n\ndef test_rejects_empty():\n    assert not is_valid(\"\")\n\n\ndef test_rejects_none():\n    assert not is_valid(None)\n\n\n@pytest.mark.parametrize(\"code\", [\"A1-22\", \"B3-44\"])\ndef test_accepts(code):\n    assert is_valid(code)\n"
+    },
+    {
+      "label": "a case dropped from a for-of list while a test is added above it",
+      "want": "found",
+      "file": "test/codes.test.js",
+      "before": "import { test, expect } from 'vitest';\nimport { isValid } from '../src/codes.js';\n\ntest('rejects empty', () => {\n  expect(isValid('')).toBe(false);\n});\n\nfor (const code of ['A1-22', 'B3-44', 'C5-66']) {\n  test(`accepts ${code}`, () => {\n    expect(isValid(code)).toBe(true);\n  });\n}\n",
+      "after": "import { test, expect } from 'vitest';\nimport { isValid } from '../src/codes.js';\n\ntest('rejects empty', () => {\n  expect(isValid('')).toBe(false);\n});\n\ntest('rejects null', () => {\n  expect(isValid(null)).toBe(false);\n});\n\nfor (const code of ['A1-22', 'B3-44']) {\n  test(`accepts ${code}`, () => {\n    expect(isValid(code)).toBe(true);\n  });\n}\n"
+    },
+    {
+      "label": "Java tests reordered with a new test",
+      "want": "quiet",
+      "file": "src/test/java/CalcTest.java",
+      "before": "class CalcTest {\n    @Test\n    void one() {\n        int result = Calc.f(1);\n        assertEquals(3, result);\n    }\n\n    @Test\n    void two() {\n        int result = Calc.f(2);\n        assertEquals(5, result);\n    }\n\n    @Test\n    void zero() {\n        int result = Calc.f(0);\n        assertEquals(1, result);\n    }\n}\n",
+      "after": "class CalcTest {\n    @Test\n    void zero() {\n        int result = Calc.f(0);\n        assertEquals(1, result);\n    }\n\n    @Test\n    void neg() {\n        int result = Calc.f(-1);\n        assertEquals(-1, result);\n    }\n\n    @Test\n    void two() {\n        int result = Calc.f(2);\n        assertEquals(5, result);\n    }\n\n    @Test\n    void one() {\n        int result = Calc.f(1);\n        assertEquals(3, result);\n    }\n}\n"
+    },
+    {
+      "label": "Python tests wrapped in a class with a new parametrized test above",
+      "want": "quiet",
+      "file": "tests/test_mathx.py",
+      "before": "import pytest\nfrom mathx import double, ident\n\n\n@pytest.mark.parametrize(\"n\", [1, 2, 3])\ndef test_double(n):\n    assert double(n) == n * 2\n\n\n@pytest.mark.parametrize(\"n\", [4, 5])\ndef test_ident(n):\n    assert ident(n) == n\n",
+      "after": "import pytest\nfrom mathx import double, ident\n\n\nclass TestMath:\n    @pytest.mark.parametrize(\"n\", [0])\n    def test_double_zero(self, n):\n        assert double(n) == 0\n\n    @pytest.mark.parametrize(\"n\", [1, 2, 3])\n    def test_double(self, n):\n        assert double(n) == n * 2\n\n    @pytest.mark.parametrize(\"n\", [4, 5])\n    def test_ident(self, n):\n        assert ident(n) == n\n"
+    },
+    {
+      "label": "tests wrapped in a describe with a new for-of test above",
+      "want": "quiet",
+      "file": "test/m.test.js",
+      "before": "import { test, expect } from 'vitest';\nimport { double } from '../src/m.js';\n\ntest('imports', () => {\n  expect(double).toBeTypeOf('function');\n});\n\nfor (const n of [1, 2, 3]) {\n  test(`doubles ${n}`, () => {\n    expect(double(n)).toBe(n * 2);\n  });\n}\n",
+      "after": "import { test, expect, describe } from 'vitest';\nimport { double } from '../src/m.js';\n\ndescribe('double', () => {\n  test('imports', () => {\n    expect(double).toBeTypeOf('function');\n  });\n\n  for (const n of [1]) {\n    test(`doubles one ${n}`, () => {\n      expect(double(n)).toBe(2);\n    });\n  }\n\n  for (const n of [1, 2, 3]) {\n    test(`doubles ${n}`, () => {\n      expect(double(n)).toBe(n * 2);\n    });\n  }\n});\n"
+    }
+  ];
+  for (const c of cases25) {
+    const got = scan25(c.file, c.before, c.after);
+    if (c.want === 'found') check(`scan: ${c.label} is read`, /changed|flipped|weakened|removed/.test(got), got);
+    else check(`scan, honest: ${c.label} is not sent back`, got === '', got);
+  }
+
+  // 7: a rewritten file of 4,000 list lines, every one a new shape
+  const before25 = "import { test, expect } from 'vitest';\n" + Array.from({ length: 4000 }, (_, i) => `  run(${i}, [${i}, ${i + 1}, ${i + 2}]);`).join('\n') + '\n';
+  const after25 = "import { test, expect } from 'vitest';\n" + Array.from({ length: 4000 }, (_, i) => `  go(${i}, [${i}, ${i + 1}]);`).join('\n') + '\n';
+  const d25 = realDiff25('test/x.test.js', before25, after25);
+  const t25 = Date.now();
+  tamperFindings('M\ttest/x.test.js', d25, { read: () => after25, tests: () => [] });
+  check('scan: a rewritten file of 4,000 list lines is read in under 3 seconds', Date.now() - t25 < 3000, `${Date.now() - t25} ms`);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

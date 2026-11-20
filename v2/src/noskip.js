@@ -112,18 +112,24 @@ const NAME_PATTERNS = {
   ex: [{ re: /\btest\s+"((?:\\.|[^"\\])*)"/g }],
 };
 
-function extractTestNames(text, lang) {
-  const names = new Map();
-  if (!text) return names;
+// Each test name in the text with where its match starts, pattern by pattern.
+function* nameMatches(text, lang) {
+  if (!text) return;
   for (const { re, pick } of NAME_PATTERNS[lang] ?? []) {
     re.lastIndex = 0;
     for (const m of text.matchAll(re)) {
       const name = (pick ? pick(m) : m[m.length - 1] ?? m[1])?.trim();
-      if (!name) continue;
-      const entry = names.get(name);
-      if (entry) entry.count++;
-      else names.set(name, { count: 1, index: m.index });
+      if (name) yield [m.index, name];
     }
+  }
+}
+
+function extractTestNames(text, lang) {
+  const names = new Map();
+  for (const [index, name] of nameMatches(text, lang)) {
+    const entry = names.get(name);
+    if (entry) entry.count++;
+    else names.set(name, { count: 1, index });
   }
   return names;
 }
@@ -406,15 +412,24 @@ function dropped(big, small) {
   return j === small.length ? gone : null;
 }
 
-// The test each line sits in: the name on the nearest line at or above it that names one, or null. Read once a file.
+// The test each line sits in, read over the whole text (a Java, C# or Rust name sits a line below its annotation):
+// the last test whose name starts at or above the line, keyed by its name and how many tests of that name came before
+// it (two describes can each hold a test of one name), or null above the first test. Read once a file (round 25).
 function testsOf(file) {
   if (file.tests !== undefined) return file.tests;
   const lang = languageOf(file.path);
   const walk = (lines) => {
-    let cur = null;
+    const starts = [...nameMatches(lines.join('\n'), lang)].sort((x, y) => x[0] - y[0]);
+    const seen = new Map();
+    let [s, at, cur] = [0, 0, null];
     return lines.map((l) => {
-      const names = extractTestNames(l, lang);
-      if (names.size) cur = names.keys().next().value;
+      at += l.length;
+      for (; s < starts.length && starts[s][0] <= at; s++) {
+        const n = (seen.get(starts[s][1]) || 0) + 1;
+        seen.set(starts[s][1], n);
+        cur = `${starts[s][1]}\0${n}`;
+      }
+      at += 1;
       return cur;
     });
   };
@@ -422,12 +437,15 @@ function testsOf(file) {
   return file.tests;
 }
 
-// A removed line pairs only with an added line in the same test, and first with its exact copy there: a test that
-// only moved keeps its lines, and a value changed or swapped between two tests is still read (round 24). Without the
-// file read, a copy is looked for in the line's own hunk.
+// A removed line pairs first with its exact copy in the same test, so a test that only moved keeps its lines (round
+// 24). It pairs with a line of another test only when its text is left nowhere in the file: a value changed or
+// swapped between two tests is read, and a list or helper outside any test, which a new test above moves into
+// another one's span, is still compared (round 25). A line in no test, or without the file read, looks for its copy
+// in its own hunk.
 function pairing(file) {
   const tests = testsOf(file);
   const at = (side, line) => (tests ? (tests[side][line - 1] ?? null) : null);
+  const taken = new Set();
   const index = (added, key) => {
     const m = new Map();
     for (const a of added) {
@@ -437,21 +455,29 @@ function pairing(file) {
     }
     return m;
   };
+  const take = (c) => {
+    while (c && c.next < c.lines.length && taken.has(c.lines[c.next])) c.next++;
+    const line = c?.lines[c.next++];
+    if (line !== undefined) taken.add(line);
+    return line !== undefined;
+  };
   const whole = tests && index(file.added, (a) => `${at('now', a.line)}\0${normalizeLine(a.text)}`);
+  const left = tests && new Set(file.newLines.map(normalizeLine));
   const perHunk = new Map();
-  const taken = new Set();
+  const gone = new Map(); // a removed line whose text is left nowhere in the file
   return {
     taken,
     same: (r, a) => {
       const [x, y] = [at('old', r.line), at('now', a.line)];
-      return x == null || y == null || x === y;
+      if (x == null || y == null || x === y) return true;
+      if (!gone.has(r.line)) gone.set(r.line, !left.has(normalizeLine(r.text)));
+      return gone.get(r.line);
     },
     copy: (r, hunk) => {
-      if (!whole && !perHunk.has(hunk)) perHunk.set(hunk, index(hunk.added, (a) => normalizeLine(a.text)));
-      const c = whole ? whole.get(`${at('old', r.line)}\0${normalizeLine(r.text)}`) : perHunk.get(hunk).get(normalizeLine(r.text));
-      const line = c?.lines[c.next++];
-      if (line !== undefined) taken.add(line);
-      return line !== undefined;
+      const t = at('old', r.line);
+      if (t != null) return take(whole.get(`${t}\0${normalizeLine(r.text)}`));
+      if (!perHunk.has(hunk)) perHunk.set(hunk, index(hunk.added, (a) => normalizeLine(a.text)));
+      return take(perHunk.get(hunk).get(normalizeLine(r.text)));
     },
   };
 }
@@ -467,13 +493,15 @@ function tableChanges(file) {
   };
   const moved = new Set();
   for (const hunk of file.hunks) for (const r of hunk.removed) if (lists(r)?.lists.length && pair.copy(r, hunk)) moved.add(r.line);
+  const shapes = new Map(); // an added line's list shape, read once: a rewritten table pairs every line (round 25)
+  const shapeOf = (x) => (shapes.has(x.line) ? shapes.get(x.line) : shapes.set(x.line, inlineLists(x.text).shape).get(x.line));
   for (const hunk of file.hunks) {
     const used = pair.taken;
     for (const r of hunk.removed) {
       if (moved.has(r.line)) continue;
       const before = lists(r);
       if (!before?.lists.length) continue;
-      const a = hunk.added.find((x) => !used.has(x.line) && pair.same(r, x) && inlineLists(x.text).shape === before.shape);
+      const a = hunk.added.find((x) => !used.has(x.line) && shapeOf(x) === before.shape && pair.same(r, x));
       if (!a) continue;
       used.add(a.line);
       const after = inlineLists(a.text);
