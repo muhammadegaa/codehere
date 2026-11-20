@@ -4940,6 +4940,57 @@ section(['R22'], () => {
   check('scan: a Python expected value changed beside a comment holding a bracket is read', pyc22.includes('expected value was changed'), pyc22);
 });
 
+section(['R23'], () => {
+  // The cold review's round 23 (docs/reviews/2026-11-20-cold-review-round-23.md).
+  const realDiff23 = (file, before, after) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'r23-'));
+    fs.mkdirSync(path.join(d, 'a', path.dirname(file)), { recursive: true });
+    fs.mkdirSync(path.join(d, 'b', path.dirname(file)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'a', file), before);
+    fs.writeFileSync(path.join(d, 'b', file), after);
+    const out = spawnSync('git', ['diff', '--no-index', '--no-color', '-U0', `a/${file}`, `b/${file}`], { cwd: d, encoding: 'utf8' }).stdout;
+    return out.replace(/^--- a\/a\//m, '--- a/').replace(/^\+\+\+ b\/b\//m, '+++ b/');
+  };
+  const scan23 = (file, before, after) => tamperFindings(`M\t${file}`, realDiff23(file, before, after), { read: () => after, tests: () => [] }).join(' · ');
+  const head = "import { test, describe, expect } from 'vitest';\n";
+
+  // 1: tests wrapped in a describe with a new test placed above, checking the same variable another way
+  for (const [name, check1] of [['spread', '  expect(result).toEqual({\n    a: 1,\n  });'], ['one line', '  expect(result).toEqual({ a: 1 });']]) {
+    const before = `${head}test('parses', () => {\n  const result = parse('a=1');\n${check1}\n});\n`;
+    const after = `${head}describe('parse', () => {\n  test('empty', () => {\n    const result = parse('');\n    expect(result).toBeNull();\n  });\n  test('parses', () => {\n    const result = parse('a=1');\n${check1.replace(/^/gm, '  ')}\n  });\n});\n`;
+    const got = scan23('test/parse.test.js', before, after);
+    check(`scan, honest: a new test above a wrapped one, checking the same variable (${name}), is not a changed assertion`, got === '', got);
+  }
+  const cheat23 = scan23('test/sum.test.js', `${head}test('sums', () => {\n  expect(sum(1, 2)).toBe(3);\n  expect(sum(2, 2)).toBe(4);\n});\n`, `${head}describe('sum', () => {\n  test('sums', () => {\n    expect(sum(1, 2)).toBe(5);\n  });\n});\n`);
+  check('scan: an expected value changed while another assertion is deleted in a wrap is still read', cheat23.includes('changed') || cheat23.includes('removed'), cheat23);
+
+  // 2: a call given an option, its spread expected value updated
+  const call23 = scan23('test/render.test.js', `${head}test('renders', () => {\n  expect(render(tree)).toEqual({\n    html: '<p>a</p>',\n  });\n});\n`, `${head}test('renders', () => {\n  expect(render(tree, { pretty: true })).toEqual({\n    html: '<p>\\n  a\\n</p>',\n  });\n});\n`);
+  check('scan, honest: a call given an option with its spread expected value updated is not "expected value kept"', call23 === '', call23);
+
+  // 3: a Python condition that closes, with only its message wrapped
+  const msg23 = scan23('tests/test_api.py', 'def test_ok():\n    assert resp.status_code == HTTPStatus.OK, (\n        f"got {resp.status_code}"\n    )\n', 'def test_ok():\n    assert resp.status_code == HTTPStatus.BAD_REQUEST, (\n        f"got {resp.status_code}"\n    )\n');
+  check('scan: a Python expected value changed before a wrapped message is read', msg23.includes('changed'), msg23);
+
+  // 4: a case dropped from a list on the first line of a spread assertion
+  const list23 = scan23('test/parse.test.js', `${head}test('parses all', () => {\n  expect(parseAll(['a=1', 'b=2', 'c=='])).toEqual([\n    { a: 1 },\n    { b: 2 },\n    null,\n  ]);\n});\n`, `${head}test('parses all', () => {\n  expect(parseAll(['a=1', 'b=2'])).toEqual([\n    { a: 1 },\n    { b: 2 },\n  ]);\n});\n`);
+  check('scan: a case dropped from a list on the first line of a spread assertion is read', list23.includes('case was removed'), list23);
+
+  // 5: a comment on an assert line edited
+  for (const [a, b] of [['# was 3', '# checked by hand'], ['# :)', '# :) see issue 12']]) {
+    const got = scan23('tests/test_total.py', `def test_total():\n    assert total(2, 2) == 4  ${a}\n`, `def test_total():\n    assert total(2, 2) == 4  ${b}\n`);
+    check(`scan, honest: only the comment on a Python assert edited (${a}) is not a changed value`, got === '', got);
+  }
+
+  // 6: an always-true placeholder moved into the failing test in place of its assertion
+  const sanity23 = scan23('test/cart.test.js', `${head}test('sanity', () => {\n  expect(true).toBe(true);\n});\ntest('adds', () => {\n  expect(add(2, 2)).toBe(4);\n});\n`, `${head}test('adds', () => {\n  expect(true).toBe(true);\n});\n`);
+  check("scan: an always-true placeholder moved in place of a failing test's assertion is read", sanity23.includes('cannot fail') || sanity23.includes('removed'), sanity23);
+
+  // the note on the out-of-scope list: a wrapped call's arguments dropped entirely
+  const drop23 = scan23('test/user.test.js', `${head}test('rejects', async () => {\n  await expect(fetchUser(1)).rejects.toThrow(\n    'not found',\n  );\n});\n`, `${head}test('rejects', async () => {\n  await expect(fetchUser(1)).rejects.toThrow();\n});\n`);
+  check("scan: a wrapped toThrow( whose message is dropped is read as weakened", drop23.includes('weakened'), drop23);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

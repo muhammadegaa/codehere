@@ -1023,6 +1023,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
   // with an option counts as addopts.
   const wholeFile = new Set();
   const movedLines = new Map();
+  const lostAssert = new Set();
   const removedFilters = new Map();
   const removedItems = new Map();
   {
@@ -1052,6 +1053,8 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       }
       const both = new Map([...minus].filter(([t]) => plus.has(t)).map(([t, n]) => [t, Math.min(n, plus.get(t))]));
       if (both.size) movedLines.set(file, both);
+      // an assertion removed that did not move elsewhere: a moved always-true line may have taken its place (round 23)
+      if ([...minus].some(([t, n]) => ASSERT.test(`-${t}`) && n > (both.get(t) || 0))) lostAssert.add(file);
     }
     for (const { file, body } of byFile) {
       if (!isTestConfig(file) || !read) continue;
@@ -1211,7 +1214,7 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
       }
       // a line that only moved is judged for skips where it lands; an assertion that cannot fail and only moved is let
       // off, as every assertion that only moved is (round 22)
-      for (const t of TAMPER_ADDED_IN_TESTS) if (!(moved && t.kind === WEAKENED) && inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
+      for (const t of TAMPER_ADDED_IN_TESTS) if (!(moved && t.kind === WEAKENED && !lostAssert.has(current)) && inCode(t.re, probe, mask)) add(t.kind, current, `${t.why} in ${current}`);
       if (moved) continue; // the assertion bookkeeping below does not count a line that only moved
       if (COMMENT.test(line)) {
         if (removed.has(line.replace(COMMENT, '').trim())) add(WEAKENED, current, `an assertion was commented out in ${current}`);

@@ -188,8 +188,8 @@ function parseExpectStyle(t, opener) {
   if (mm) {
     // RSpec's to eq( spread over lines: the same (round 22)
     const paren = /^\s*\.\s*(?:to|not_to|to_not)\s+\w+\s*\(/.exec(rest);
-    const open = paren && matchParen(rest, paren[0].length - 1) < 0;
-    return { kind: 'expect', subject: norm(subject), matcher: `${mm[1]} ${mm[2]}`, args: open ? null : norm(mm[3]) };
+    const unclosed = paren && matchParen(rest, paren[0].length - 1) < 0;
+    return { kind: 'expect', subject: norm(subject), matcher: `${mm[1]} ${mm[2]}`, args: unclosed ? null : norm(mm[3]) };
   }
   return null;
 }
@@ -227,8 +227,21 @@ function balanced(t) {
 function parsePyAssert(t) {
   const m = /^assert\s+(.+)$/.exec(t);
   if (!m) return null;
-  const open = !balanced(m[1]); // an assert black spread over lines: its value is not compared (rounds 21 and 22)
-  const cond = splitArgs(m[1])[0] ?? '';
+  // a # comment is not part of the assert (round 23)
+  let body = m[1];
+  for (let i = 0, q = ''; i < body.length; i++) {
+    const c = body[i];
+    if (q) q = c === '\\' ? (i++, q) : c === q ? '' : q;
+    else if (c === '"' || c === "'") q = c;
+    else if (c === '#') {
+      body = body.slice(0, i).trimEnd();
+      break;
+    }
+  }
+  const cond = splitArgs(body)[0] ?? '';
+  // a condition black spread over lines: its value is not compared (rounds 21 and 22); only the condition counts, not
+  // a message wrapped after it (round 23)
+  const open = !balanced(cond);
   const op = /\s(==|!=|<=|>=|is not|is|not in|in)\s/.exec(cond);
   if (!op) return { kind: 'py', subject: norm(cond), matcher: 'assert', args: '' };
   const left = cond.slice(0, op.index);
@@ -322,10 +335,12 @@ function compareAssertions(r, a) {
     return null;
   }
   if (r.kind === 'py' && a.kind === 'py' && r.matcher === 'assert' && a.matcher === 'assert' && negated(r.subject, a.subject)) return pair('changed', 'flipped', `assert ${r.subject}`, `assert ${a.subject}`);
-  if (r.kind === a.kind && r.kind !== 'kv' && r.subject !== a.subject && r.matcher === a.matcher && r.args === a.args && callArgsExtended(r.subject, a.subject)) return pair('changed', 'call', r.subject, a.subject);
+  if (r.kind === a.kind && r.kind !== 'kv' && r.subject !== a.subject && r.matcher === a.matcher && r.args !== null && r.args === a.args && callArgsExtended(r.subject, a.subject)) return pair('changed', 'call', r.subject, a.subject);
   if (r.kind !== a.kind || r.subject === undefined || r.subject !== a.subject) return null;
   if (r.kind === 'kv') return r.args === a.args || !goalpostMoved(r.args, a.args) ? null : pair('changed', 'expected', `${r.subject} ${r.args}`, `${a.subject} ${a.args}`);
   if (r.matcher === a.matcher) {
+    // a call that does not close always had arguments, so one with none now lost them (round 23)
+    if (r.args === null && a.args === '') return pair('weakened', 'weakened', `${r.matcher}(…)`, `${a.matcher}()`);
     if (r.args === a.args || r.args === null || a.args === null) return null;
     if (a.args === '' && r.args !== '') return pair('weakened', 'weakened', `${r.matcher}(${truncate(r.args, 40)})`, `${a.matcher}()`);
     return pair('changed', 'expected', r.args, a.args);
@@ -398,7 +413,8 @@ function tableChanges(file) {
   for (const hunk of file.hunks) {
     const used = new Set();
     for (const r of hunk.removed) {
-      if (parseAssertion(r.text) || dataRow(r.text)) continue;
+      const pa = parseAssertion(r.text);
+      if ((pa && pa.args !== null) || dataRow(r.text)) continue; // a spread assertion's first line still holds lists (round 23)
       const before = inlineLists(r.text);
       if (!before.lists.length) continue;
       const a = hunk.added.find((x) => !used.has(x.line) && inlineLists(x.text).shape === before.shape);
@@ -570,15 +586,27 @@ export function testChanges(diff, { read, isTestFile }) {
 
   // Assertions changed in place: each removed assertion against the first added one in its hunk that it matches.
   for (const file of files) {
+    // a removed assertion is paired first with its exact twin in the hunk, and two lines that each only moved (the
+    // removed text is added elsewhere in the file, the added text removed elsewhere) are not compared (round 23)
+    const texts = (list) => new Set(list.map((x) => normalizeLine(x.text)));
+    const gone = texts(file.removed);
+    const came = texts(file.added);
     for (const hunk of file.hunks) {
       if (!hunk.removed.length || !hunk.added.length) continue;
       const rem = hunk.removed.map((r) => ({ ...r, a: parseAssertion(r.text) })).filter((x) => x.a);
       const add = hunk.added.map((x) => ({ ...x, a: parseAssertion(x.text) })).filter((x) => x.a);
       if (rem.length * add.length > 250000) continue; // a rewritten test file, not an edit; the other checks still read it
       const used = new Set();
+      const twins = new Set();
       for (const r of rem) {
+        const twin = add.find((a) => !used.has(a.line) && normalizeLine(r.text) === normalizeLine(a.text));
+        if (twin) used.add(twin.line), twins.add(r.line);
+      }
+      for (const r of rem) {
+        if (twins.has(r.line)) continue;
         for (const a of add) {
           if (used.has(a.line)) continue;
+          if (came.has(normalizeLine(r.text)) && gone.has(normalizeLine(a.text))) continue;
           if (normalizeLine(r.text) === normalizeLine(a.text)) {
             used.add(a.line);
             break;
