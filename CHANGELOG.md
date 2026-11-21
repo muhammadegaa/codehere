@@ -58,7 +58,13 @@ The agent runs the team chores. After `init`, you ask your agent to add a rule, 
 - jest and vitest runs where every test was skipped, or none was found, read as 0 passed and get no ✓.
 - Sessions in one folder no longer write over each other's state: every write merges under a lock. A session Codehere lost track of keeps its start through its record, and a session it never saw start says there is no record instead of staying silent.
 - Honest work keeps its ✓: tests and configs moved with plain `mv` (with or without edits) are paired as renames; tests or configs a build copies into an ignored folder, or writes next to the sources under an ignored name, a virtual environment, a worktree or a submodule inside the repo, and helper files such as `test-utils.js` are not the agent's tests.
-- Found by twelve rounds of independent review (`v2/docs/reviews/`); each fix started as a check that failed.
+- A test config is read whole: what it tells the runner to leave out at session start is compared with what it tells it now, so how its lines are wrapped, sorted or commented does not count, and each value counts by the places that set it (a path one jest project ignores, added to another project, is new). pytest's config names (`pytest.toml`, `.pytest.toml`, `pytest.ini`, `.pytest.ini`, `pyproject.toml`, `tox.ini`, `setup.cfg`), `package.json`'s `jest` key and its `projects`, and tox `commands` when the approved command runs tox are read. In 2.1.0-rc.4 a CI file moved into a folder of a monorepo got a ✓, and a `npm:test:*` glob and quoted `addopts` were not read.
+- A CI step or job switched off is read: `continue-on-error`, `allow_failure`, `if: false`, GitLab's `when: manual` or `never`, Azure's `continueOnError` or `enabled: false`.
+- Skips and focused tests with modifiers are caught (`.skip.each`, `test.describe.only`, `describe.concurrent.only`, `fit.each`, and mocha's `context`, `suite` and `specify` in test files), as are node's `it.todo` with a test function and `pytestmark = pytest.mark.skip` on a module.
+- Honest edits keep the ✓: tests wrapped in a `describe` or moved into a class, reordered, or given a new test beside them, and an assertion a formatter spreads over several lines or joins back, are not read as changed assertions.
+- A weakened assertion is still read when the tests around it move: two tests' expected values swapped, a value changed beside a copy of the test with the same name, a value changed while the tests are made async, in JavaScript, Python, Java, Kotlin, C# and Rust, and a parametrize case dropped below a new parametrized test.
+- What the scan does not catch, and the honest work it can send back, are listed in [v2/docs/finish-check-promise.md](v2/docs/finish-check-promise.md).
+- Found by twenty-eight rounds of independent review (`v2/docs/reviews/`); each fix started as a check that failed.
 
 ## [2.0.3] - 2026-10-30
 
