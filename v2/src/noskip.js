@@ -555,8 +555,14 @@ function testsOf(file) {
 // which a new test above moves into another one's span, is still compared (round 25). A line in no test, or without
 // the file read, looks for its copy in its own hunk.
 function pairing(file) {
-  const tests = testsOf(file);
-  const at = (side, line) => (tests ? (tests[side][line - 1] ?? null) : null);
+  // each whole-file map is built on first use: a file with nothing to pair, such as a new one, costs nothing
+  const at = (side, line) => {
+    const tests = testsOf(file);
+    return tests ? (tests[side][line - 1] ?? null) : null;
+  };
+  let [whole, left] = [null, null];
+  const wholeOf = () => (whole ??= index(file.added, (a) => `${at('now', a.line)}\0${normalizeLine(a.text)}`));
+  const leftOf = () => (left ??= new Set(file.added.map((a) => normalizeLine(a.text))));
   const taken = new Set();
   const index = (added, key) => {
     const m = new Map();
@@ -573,8 +579,6 @@ function pairing(file) {
     if (line !== undefined) taken.add(line);
     return line !== undefined;
   };
-  const whole = tests && index(file.added, (a) => `${at('now', a.line)}\0${normalizeLine(a.text)}`);
-  const left = tests && new Set(file.added.map((a) => normalizeLine(a.text)));
   const perHunk = new Map();
   const gone = new Map(); // a removed line whose text was added nowhere
   return {
@@ -584,12 +588,12 @@ function pairing(file) {
     same: (r, a) => {
       const [x, y] = [at('old', r.line), at('now', a.line)];
       if (x == null || y == null || x === y) return true;
-      if (!gone.has(r.line)) gone.set(r.line, !left.has(normalizeLine(r.text)));
+      if (!gone.has(r.line)) gone.set(r.line, !leftOf().has(normalizeLine(r.text)));
       return gone.get(r.line);
     },
     copy: (r, hunk) => {
       const t = at('old', r.line);
-      if (t != null) return take(whole.get(`${t}\0${normalizeLine(r.text)}`));
+      if (t != null) return take(wholeOf().get(`${t}\0${normalizeLine(r.text)}`));
       if (!perHunk.has(hunk)) perHunk.set(hunk, index(hunk.added, (a) => normalizeLine(a.text)));
       return take(perHunk.get(hunk).get(normalizeLine(r.text)));
     },

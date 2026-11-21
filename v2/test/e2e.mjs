@@ -5538,6 +5538,17 @@ section(['R28'], () => {
   check('scan: a rewritten file of 16,000 list lines of one shape is read in under 6 seconds', Date.now() - s28 < 6000, `${Date.now() - s28} ms`);
 });
 
+section(['RC5'], () => {
+  // GitHub CI on 2.1.0-rc.5 (dadb757): the round-6 Ruby spec of a million blank lines took over 10 s on ubuntu with node 20.
+  // Rounds 19 and 20 added per-line patterns, and each check built its regex again for every line.
+  const blank = '\n'.repeat(1000000);
+  const rows = blank.split('\n').slice(0, -1);
+  const rc5 = ['--- /dev/null', '+++ b/spec/x_spec.rb', `@@ -0,0 +1,${rows.length} @@`, ...rows.map((l) => `+${l}`)].join('\n');
+  const t = Date.now();
+  tamperFindings('A\tspec/x_spec.rb', rc5, { read: () => blank, tests: () => [] });
+  check('scan: a new spec of a million blank lines is read in under 3 seconds', Date.now() - t < 3000, `${Date.now() - t} ms`);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

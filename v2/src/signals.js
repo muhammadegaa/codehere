@@ -645,8 +645,13 @@ function blockRunsTests(lines, at, text) {
 // code, so a stray quote cannot hide a skip (cold review, L13 round 6). Python's triple quotes and a line
 // continued with \ do open strings that end on a later line.
 const OPEN_ON_PURPOSE = /'''|"""|\\\s*$/;
+// each pattern's forms, built once: a line it does not match at all returns before any mask or global search
+const COMPILED = new Map();
 function inCode(re, line, mask) {
-  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+  let c = COMPILED.get(re);
+  if (!c) COMPILED.set(re, (c = { any: new RegExp(re.source, re.flags.replace(/[gy]/g, '')), g: new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g') }));
+  if (!c.any.test(line)) return false;
+  const g = c.g;
   let m = mask();
   if ((m.open === "'" || m.open === '"') && !OPEN_ON_PURPOSE.test(line)) m = [];
   for (const x of line.matchAll(g)) if (!m[x.index + (x[0].length - x[0].trimStart().length)]) return true;
