@@ -63,6 +63,7 @@ The agent runs the team chores. After `init`, you ask your agent to add a rule, 
 - Skips and focused tests with modifiers are caught (`.skip.each`, `test.describe.only`, `describe.concurrent.only`, `fit.each`, and mocha's `context`, `suite` and `specify` in test files), as are node's `it.todo` with a test function and `pytestmark = pytest.mark.skip` on a module.
 - Honest edits keep the ✓: tests wrapped in a `describe` or moved into a class, reordered, or given a new test beside them, and an assertion a formatter spreads over several lines or joins back, are not read as changed assertions.
 - A weakened assertion is still read when the tests around it move: two tests' expected values swapped, a value changed beside a copy of the test with the same name, a value changed while the tests are made async, in JavaScript, Python, Java, Kotlin, C# and Rust, and a parametrize case dropped below a new parametrized test.
+- An expected value changed after its 40th character is caught. Before, values were cut to 40 characters before they were compared, so a long string changed near its end was not found. The line now shows each value from just before where it changed. Found in a hands-on run of rc.5.
 - What the scan does not catch, and the honest work it can send back, are listed in [v2/docs/finish-check-promise.md](v2/docs/finish-check-promise.md).
 - Found by twenty-eight rounds of independent review (`v2/docs/reviews/`); each fix started as a check that failed.
 

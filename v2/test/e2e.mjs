@@ -5549,6 +5549,27 @@ section(['RC5'], () => {
   check('scan: a new spec of a million blank lines is read in under 3 seconds', Date.now() - t < 3000, `${Date.now() - t} ms`);
 });
 
+section(['HANDS-ON'], () => {
+  // Ega's hands-on run of rc.5 (21 Nov): values were cut to 40 characters before they were compared, so a value
+  // changed only after that was not found, and the line showed the cut ends: ("cd /work/repo && npm test -- x && node  → …
+  const msg = 'Error: could not read the config file at ';
+  const late = scan([`  expect(msg()).toBe("${msg}a.json");`], [`  expect(msg()).toBe("${msg}b.json");`]);
+  check('scan: an expected value changed only after its 40th character is found', late.includes('an expected value was changed'), late);
+  const seen = scan(['  expect(rule("cd /work/repo && npm test -- x && node build.js")).toBe(true);'], ['  expect(rule("cd /work/repo && npm test -- x && make build")).toBe(true);'], 'test/ui.test.ts');
+  check('scan: a long expected value shows the part that changed', seen.includes('&& node build.js"') && seen.includes('&& make build"'), seen);
+});
+
+section(['HANDS-ON'], () => {
+  // the cold review of the fix: a literal <v> in an added line can pair it with a removed line holding one more value;
+  // the missing value threw and the scan lost every finding, the skip beside it too
+  const fits = scan(['  expect(greet()).toBe("Hello, world! Welcome back, Alice");'], ['  expect(greet()).toBe("Hello, world! Welcome back, Bob");']);
+  check('scan: an expected value that fits in 40 characters is shown whole', fits.includes('("Hello, world! Welcome back, Alice" → "Hello, world! Welcome back, Bob")'), fits);
+  const wide = scan([`  expect(f()).toBe("${'𠮷'.repeat(20)}a");`], [`  expect(f()).toBe("${'𠮷'.repeat(20)}b");`]);
+  check('scan: a cut value never splits a character in two', wide.includes('an expected value was changed') && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(wide), JSON.stringify(wide));
+  const odd = scan(['  expect(s).toMatch(/<1>/);', "  it('pays', () => {});"], ['  expect(s).toMatch(/<<v>>/);', "  it.skip('pays', () => {});"]);
+  check('scan: an added line with a literal <v> and one value fewer is read, and the skip beside it is found', odd.includes('an expected value was changed') && odd.includes('a test was skipped'), odd);
+});
+
 console.log('\nNot built yet: IDs on KNOWN_FAILING (2.1.0)');
 for (const id of KNOWN_FAILING) {
   const v = pending.get(id);

@@ -404,8 +404,25 @@ function shape(line) {
     .slice(1)
     .trim()
     .replace(/\bassert(True|False)\b/g, (m, b) => (values.push(b), 'assert<b>'))
-    .replace(VALUES, (v) => (values.push(v.slice(0, 40)), '<v>'));
+    .replace(VALUES, (v) => (values.push(v), '<v>'));
   return { text, values };
+}
+
+// Two values cut to 40 characters, moved along only as far as the place they differ needs (Ega's hands-on run,
+// 21 Nov: both were cut at the start and the change was off the end). A value can be missing when a literal <v>
+// in the line gave it the same shape as a line with one more value (cold review of the fix).
+const LOW = (v, k) => /[\uDC00-\uDFFF]/.test(v[k] ?? '');
+function around(a = '', b = '') {
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  let from = Math.max(0, Math.min(i - 15, Math.max(a.length, b.length) - 40));
+  if (from && LOW(a, from)) from--; // never start inside a character written as two code units
+  const cut = (v) => {
+    let to = from + 40;
+    if (to < v.length && LOW(v, to)) to++;
+    return `${from ? '…' : ''}${v.slice(from, to)}${v.length > to ? '…' : ''}`;
+  };
+  return [cut(a), cut(b)];
 }
 
 // The arguments of the call whose '(' is at open, split at top-level commas; null if it does not close.
@@ -1236,7 +1253,8 @@ export function tamperEvents(nameStatus, diff, { read, tests, testFiles, command
         const i = before ? before.findIndex((v, k) => v !== now.values[k]) : -1;
         if (i >= 0 && !changedIn.has(current)) {
           changedIn.add(current);
-          add(EXPECTED, current, `an expected value was changed in ${current} (${before[i]} → ${now.values[i]})`);
+          const [was, is] = around(before[i], now.values[i]);
+          add(EXPECTED, current, `an expected value was changed in ${current} (${was} → ${is})`);
         }
         const st = strength(probe);
         if (st && !st.value && removedValueChecks.has(st.subject) && !weakenedIn.has(current)) {
