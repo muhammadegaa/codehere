@@ -4,7 +4,7 @@ Every sentence Codehere's public pages state as fact, with the check that shows 
 
 ## Pilot page (codehere-landing, branch `pilot-page`, `app/pilot/page.tsx`)
 
-The page tells readers to run `npx codehere@next init`, so every claim must hold for the build on npm `next`. Since 19 Nov that is 2.1.0-rc.4 (registry shasum 6fece6bf), built from `fix/2.1.0-rc.3` at d5dc9e7, so the claims marked "rc.3 branch" and "rc.4 branch" hold for it. Before that it was 2.1.0-rc.3 (shasum eb391c16, 5d27f18).
+The page tells readers to run `npx codehere@next init`, so every claim must hold for the build on npm `next`. Since 21 Nov that is 2.1.0-rc.5 (registry shasum fe0cab26), built from `fix/2.1.0-rc.3` at d173333, so the claims marked "rc.3 branch" and "rc.4 branch" hold for it. Before that it was 2.1.0-rc.4 (shasum 6fece6bf, d5dc9e7), and before that 2.1.0-rc.3 (shasum eb391c16, 5d27f18).
 
 | Claim | Check | Holds for |
 |---|---|---|
